@@ -141,6 +141,20 @@ module.exports = async function (client, message) {
                 }
             }
 
+            // For application communication channels, relay staff messages as DMs to the applicant
+            try {
+                const mapAppId = await db.get(`AppMap.channelToApp.${message.channel.id}`);
+                if (mapAppId) {
+                    // Only relay plain messages from staff (no commands)
+                    if (message.content && !message.content.startsWith('!')) {
+                        const relay = `Staff: ${message.member?.displayName || message.author.username}\n\n${message.content}`;
+                        try { await user.send(relay); } catch (_) {}
+                        // Optionally echo a small confirmation embed in channel
+                        try { await message.react('📤'); } catch (_) {}
+                    }
+                }
+            } catch (_) {}
+
             // Auto-join access roles to staff thread on first staff message (no pings)
             try {
                 if (ticketType && Array.isArray(ticketType["access-role-id"]) && ticketType["access-role-id"].length > 0) {

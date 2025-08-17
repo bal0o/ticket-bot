@@ -459,6 +459,29 @@ module.exports = async function (client, interaction) {
             return;
         }
 
+        // Close communication ticket button
+        if (interaction.customId === 'app_comm_close') {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                const channel = interaction.channel;
+                const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
+                if (!appId) { await interaction.editReply({ content: 'Not linked to an application.' }); return; }
+                const member = interaction.member;
+                const isAdmin = member.roles.cache.has(config.role_ids.application_admin_role_id) || member.roles.cache.has(config.role_ids.default_admin_role_id);
+                if (!isAdmin) { await interaction.editReply({ content: 'You do not have permission to close this.' }); return; }
+                // Close via shared close logic to generate transcript
+                await func.closeTicket(interaction.client, channel, interaction.member, 'Communication session closed');
+                // Attempt to log to application history with transcript URL if available from DB
+                try {
+                    await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Transcript saved.');
+                } catch (_) {}
+                await interaction.editReply({ content: 'Communication channel closed.' });
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'Error closing communication ticket');
+            }
+            return;
+        }
+
         if (interaction.customId === 'convertTicket') {
             await interaction.deferReply({ ephemeral: true });
 

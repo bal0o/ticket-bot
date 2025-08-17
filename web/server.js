@@ -351,6 +351,19 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         const channelName = `app-comm-${appRec.userId.slice(-4)}-${Date.now().toString().slice(-4)}`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
         await applications.linkTicket(appId, chan.id, chan.id);
+        // Map channel -> application for interaction handlers
+        try { await db.set(`AppMap.channelToApp.${chan.id}`, appId); } catch (_) {}
+        // Log to application history
+        try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
+        // Post intro + close button
+        try {
+            await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
+                content: 'This is an application communication channel. Messages you post here will be relayed to the applicant via DM.',
+                components: [
+                    { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
+                ]
+            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+        } catch (_) {}
     } catch (e) {
         console.error('open_ticket error', e?.response?.data || e);
     }
