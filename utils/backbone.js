@@ -158,6 +158,20 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				if (err.message === `Cannot send messages to this user`) return;
 			});
 
+		// Auto-deny staff applications under 18 without creating a ticket
+		try {
+			if (ticketType && ticketType.toLowerCase().includes('application')) {
+				const ageMatch = responses.match(/\*\*How old are you\?\*\*[\s\S]*?(\d{1,2})/i);
+				const age = ageMatch && ageMatch[1] ? parseInt(ageMatch[1], 10) : null;
+				if (age !== null && age < 18) {
+					await user.send('You must be at least 18 to apply. Your application has been automatically denied.');
+					client.blocked_users.delete(user.id);
+					setTimeout(() => { client.cooldown.delete(user.id); }, client.config.timeouts.timeout_cooldown_in_seconds * 1000);
+					return;
+				}
+			}
+		} catch(_){}
+
 		await user.send(questionFilesystem["post-message"] == "" ? "Thanks for your responses! Our team will review your ticket and get back to you as soon as possible." : questionFilesystem["post-message"]).catch(async (err) => {
 				if (err.message === `Cannot send messages to this user`) return;
 			func.handle_errors(err, client, `backbone.js`, null)

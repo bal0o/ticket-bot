@@ -21,7 +21,8 @@
 		"role_ids_blacklist_cmd": ["1368692575674044447"],
         "role_ids_anonymous_cmd": ["1368696296365621331","1368692575674044447","1368696874177134745","1386138627553366226","1386138627553366226","1379502309763055657","1368697297453715496","1399121105863835760"],
 		"default_admin_role_id": "1368692575674044447",
-		"ticket_blacklisted_role_id": ""
+		"ticket_blacklisted_role_id": "",
+		"application_admin_role_id": ""
 	},
 
 	"channel_ids": {
@@ -74,12 +75,6 @@
 		"bm_org_id": "106838"
 	},
 
-	"claims": {
-		"enabled": true,
-		"restrict_to_claimer": true,
-		"role_bypass_ids": ["1368692575674044447"]
-	},
-
 	"web": {
 		"enabled": true,
 		"host": "0.0.0.0",
@@ -96,6 +91,19 @@
 			"staff_role_ids": ["1370818626495582250"],
 			"admin_role_ids": ["1368692575674044447"]
 		}
-	}
+	},
 
+	"applications": {
+		"stages": ["Submitted","Initial Review","Background Check","Interview","Final Decision","Archived"],
+		"messages": {
+			"advance_dm": "Your application has moved to the next stage: {{STAGE}}.",
+			"deny_dm": "Thank you for applying. Unfortunately your application was not successful at this time.",
+			"advance_channel": "Application advanced to {{STAGE}} by {{STAFF}}.",
+			"deny_channel": "Application denied by {{STAFF}}."
+		},
+		"interview": {
+			"category_id": "",
+			"duration_minutes": 30
+		}
+	}
 }

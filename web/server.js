@@ -12,6 +12,7 @@ const metrics = require('../utils/metrics');
 
 const config = require('../config/config.json');
 const handlerOptions = require('../content/handler/options.json');
+const applications = require('../utils/applications');
 
 // --- Config ---
 const WEB_ENABLED = config.web?.enabled !== false;
@@ -87,6 +88,17 @@ async function getRoleFlags(userId) {
     // Admin/staff solely via Discord roles; admins imply staff
     if (isAdmin) isStaff = true;
     return { isStaff, isAdmin, roleIds: Array.from(roles) };
+}
+
+async function createGuildChannel({ name, type = 0, topic = '', parentId = '', permissionOverwrites = [] }) {
+    if (!BOT_TOKEN || !STAFF_GUILD_ID) throw new Error('Missing bot token or staff guild');
+    const body = { name, type, topic };
+    if (parentId) body.parent_id = parentId;
+    if (permissionOverwrites && permissionOverwrites.length > 0) body.permission_overwrites = permissionOverwrites;
+    const res = await axios.post(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/channels`, body, {
+        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+    });
+    return res.data;
 }
 
 function ensureAuth(req, res, next) {
@@ -235,6 +247,96 @@ app.get('/my', ensureAuth, async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => res.send('ok'));
+
+// Applications - list
+app.get('/applications', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const stage = (req.query.stage || '').trim();
+    const items = await applications.listApplications({ stage: stage || undefined });
+    items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+    res.render('applications_index', { items, stage });
+});
+
+// Applications - detail
+app.get('/applications/:id', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    res.render('applications_detail', { app: appRec, canAdmin: (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id)) });
+});
+
+// Applications - stage advance
+app.post('/applications/:id/advance', ensureAuth, async (req, res) => {
+    const roles = await fetchGuildMemberRoles(req.user.id);
+    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
+    if (!isAdmin) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const nextStage = (req.body.next_stage || '').trim() || 'Next';
+    await applications.advanceStage(appId, nextStage, req.user.id, req.body.note || '');
+    return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - deny
+app.post('/applications/:id/deny', ensureAuth, async (req, res) => {
+    const roles = await fetchGuildMemberRoles(req.user.id);
+    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
+    if (!isAdmin) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    await applications.deny(appId, req.user.id, req.body.note || '');
+    return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - comment
+app.post('/applications/:id/comment', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    await applications.addComment(appId, req.user.id, req.body.comment || '');
+    return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - open communication ticket (new ticket linked to application)
+app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    try {
+        const questionFile = require('../content/questions/application.json');
+        const parentCategory = questionFile["ticket-category"] || '';
+        const adminRoleId = config.role_ids.application_admin_role_id || config.role_ids.default_admin_role_id;
+        const overwrites = [
+            { id: STAFF_GUILD_ID, type: 0, deny: (1<<10).toString() }, // VIEW_CHANNEL deny to @everyone
+            { id: config.role_ids.default_admin_role_id, type: 0, allow: (1<<10).toString() }, // VIEW_CHANNEL for default admin
+            { id: adminRoleId, type: 0, allow: (1<<10).toString() } // VIEW_CHANNEL for app admins
+        ];
+        const channelName = `app-comm-${appRec.userId.slice(-4)}-${Date.now().toString().slice(-4)}`;
+        const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
+        await applications.linkTicket(appId, chan.id, chan.id);
+    } catch (e) {
+        console.error('open_ticket error', e?.response?.data || e);
+    }
+    return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - schedule interview
+app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
+    const roles = await fetchGuildMemberRoles(req.user.id);
+    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
+    if (!isAdmin) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const when = new Date(req.body.when);
+    const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
+    if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
+    const atTs = when.getTime() - 5*60*1000; // 5 minutes before interview
+    await applications.scheduleInterview({ appId, atTs, staffId, mode: 'voice' });
+    return res.redirect(`/applications/${appId}`);
+});
+
 
 // Basic error handler
 // eslint-disable-next-line no-unused-vars

@@ -9,6 +9,7 @@ const lang = require("../content/handler/lang.json");
 const {QuickDB} = require("quick.db")
 const db = new QuickDB();
 const metrics = require('../utils/metrics');
+const applications = require('../utils/applications');
 
 // Initialize commands collection if it doesn't exist
 if (!Discord.Collection.prototype.commands) {
@@ -403,6 +404,57 @@ module.exports = async function (client, interaction) {
                 await interaction.followUp({ content: `You claimed this ticket.`, ephemeral: true }).catch(()=>{});
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error in claimticket');
+            }
+            return;
+        }
+
+        // Application stage buttons
+        if (interaction.customId === 'app_next_stage' || interaction.customId === 'app_deny') {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                const channelId = interaction.channel.id;
+                const appId = await db.get(`AppMap.channelToApp.${channelId}`);
+                if (!appId) {
+                    await interaction.editReply({ content: 'No application linked to this ticket.' });
+                    return;
+                }
+                const roles = await (async () => await require('../web/server')) || null; // not used, keep role checks simple in guild
+                const member = interaction.member;
+                const isAdmin = member.roles.cache.has(config.role_ids.application_admin_role_id) || member.roles.cache.has(config.role_ids.default_admin_role_id);
+                if (!isAdmin) {
+                    await interaction.editReply({ content: 'You do not have permission to manage applications.' });
+                    return;
+                }
+                const cfg = require('../config/config.json');
+                const appCfg = cfg.applications || {};
+                const msgs = appCfg.messages || {};
+                if (interaction.customId === 'app_next_stage') {
+                    const stages = appCfg.stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
+                    const appRec = await applications.getApplication(appId);
+                    const idx = Math.max(0, stages.indexOf(appRec?.stage || 'Submitted')) + 1;
+                    const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
+                    await applications.advanceStage(appId, nextStage, interaction.user.id, 'Advanced via ticket');
+                    const dm = (msgs.advance_dm || 'Your application has moved to the next stage: {{STAGE}}.').replace('{{STAGE}}', nextStage);
+                    const user = await interaction.client.users.fetch(appRec.userId).catch(()=>null);
+                    try { if (user) await user.send(dm); } catch(_){}
+                    const chMsg = (msgs.advance_channel || 'Application advanced to {{STAGE}} by {{STAFF}}.').replace('{{STAGE}}', nextStage).replace('{{STAFF}}', interaction.user.username);
+                    await interaction.channel.send(chMsg).catch(()=>{});
+                    // Close ticket after stage advance
+                    await func.closeTicket(interaction.client, interaction.channel, interaction.member, `Application advanced to ${nextStage}`);
+                    await interaction.editReply({ content: `Advanced to ${nextStage} and ticket closed.` });
+                } else {
+                    await applications.deny(appId, interaction.user.id, 'Denied via ticket');
+                    const appRec = await applications.getApplication(appId);
+                    const user = await interaction.client.users.fetch(appRec.userId).catch(()=>null);
+                    const dm = (msgs.deny_dm || 'Thank you for applying. Unfortunately your application was not successful at this time.');
+                    try { if (user) await user.send(dm); } catch(_){}
+                    const chMsg = (msgs.deny_channel || 'Application denied by {{STAFF}}.').replace('{{STAFF}}', interaction.user.username);
+                    await interaction.channel.send(chMsg).catch(()=>{});
+                    await func.closeTicket(interaction.client, interaction.channel, interaction.member, `Application denied`);
+                    await interaction.editReply({ content: `Application denied and ticket closed.` });
+                }
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'Error processing application stage action');
             }
             return;
         }

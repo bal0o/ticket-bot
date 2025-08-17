@@ -7,6 +7,7 @@ const lang = require("../content/handler/lang.json");
 const messageid = require("../config/messageid.json");
 const unirest = require("unirest");
 const fs = require("fs");
+const applications = require('./applications');
 
 module.exports.handle_errors = async (err, client, file, message) => {
 
@@ -285,6 +286,16 @@ try {
         }
     } catch (_) {}
 
+    // If this is an application ticket, add stage buttons
+    try {
+        if (ticketType && ticketType.toLowerCase().includes('application')) {
+            closeRow.addComponents(
+                new Discord.MessageButton().setCustomId('app_next_stage').setLabel('Move to Next Stage').setStyle('PRIMARY'),
+                new Discord.MessageButton().setCustomId('app_deny').setLabel('Deny').setStyle('DANGER')
+            );
+        }
+    } catch(_){}
+
     // Always define pingTags
     let pingSet = new Set();
     if (pingRoleIDs && pingRoleIDs.length > 0) {
@@ -360,6 +371,18 @@ try {
     if (administratorMember) {
         await func.staffStats(ticketType, `openticket`, administratorMember.id);
     }
+
+    // If application, create application record and link mapping
+    try {
+        if (ticketType && ticketType.toLowerCase().includes('application')) {
+            let server = null;
+            const m = typeof responses === 'string' && responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+            if (m && m[1]) server = m[1];
+            const appRec = await applications.createApplication({ userId: recepientMember.id, username: recepientMember.username, type: ticketType, server, ticketId: formattedTicketNumber, channelId: ticketChannel.id, stage: 'Submitted', responses });
+            await db.set(`AppMap.channelToApp.${ticketChannel.id}`, appRec.id);
+            await db.set(`AppMap.ticketToApp.${formattedTicketNumber}`, appRec.id);
+        }
+    } catch(_){}
 
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
@@ -647,7 +670,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     }
                 });
             } catch (_) {}
-            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages);
+            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID);
         } catch (_) {}
         // removed debug
         // DM user
