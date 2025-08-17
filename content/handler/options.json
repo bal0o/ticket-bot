@@ -1,0 +1,53 @@
+{
+	"options": {
+		"RP Refund": {
+			"abbreviation": "RPR",
+			"question_file": "rprefund.json",
+			"unique_button_identifier": "buttonrpr",
+			"button_type": "PRIMARY",
+			"button_emoji": "💰"
+		},
+		"Lost Items": {
+			"abbreviation": "LOST",
+			"question_file": "lostitems.json",
+			"unique_button_identifier": "buttonlost",
+			"button_type": "PRIMARY",
+			"button_emoji": "📦"
+		},
+		"General Support": {
+			"abbreviation": "general",
+			"question_file": "generalsupport.json",
+			"unique_button_identifier": "buttongeneral",
+			"button_type": "PRIMARY",
+			"button_emoji": "📋"
+		},
+		"Player Report": {
+			"abbreviation": "PRPT",
+			"question_file": "playerreport.json",
+			"unique_button_identifier": "button1",
+			"button_type": "SECONDARY",
+			"button_emoji": "🛑"
+		},
+		"VIP Related": {
+			"abbreviation": "VIP",
+			"question_file": "VIP.json",
+			"unique_button_identifier": "button2",
+			"button_type": "PRIMARY",
+			"button_emoji": "👑"
+		},
+		"Ban or Mute Appeal": {
+			"abbreviation": "BMAPL",
+			"question_file": "appeal.json",
+			"unique_button_identifier": "button3",
+			"button_type": "DANGER",
+			"button_emoji": "ℹ️"
+		},
+		"Staff Application": {
+			"abbreviation": "STFAPP",
+			"question_file": "application.json",
+			"unique_button_identifier": "button4",
+			"button_type": "SUCCESS",
+			"button_emoji": "🗝️"
+		}
+	}
+}

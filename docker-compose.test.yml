@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  ticket-bot-test:
+    build: .
+    container_name: ticket-bot-test
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - BOT_TOKEN
+      - DISCORD_CLIENT_ID
+      - DISCORD_CLIENT_SECRET
+    volumes:
+      - ./config-test:/app/config:ro
+      - ./transcripts-test:/app/transcripts
+      - ./data-test:/app/json.sqlite
+    ports:
+      - "3051:3050"
+    command: ["node", "index.js"]

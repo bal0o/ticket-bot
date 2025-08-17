@@ -1,0 +1,15 @@
+tickets.britspve.com {
+    encode gzip zstd
+
+    @transcripts path /transcripts/* /transcripts/raw/*
+
+    reverse_proxy @transcripts 127.0.0.1:3050
+    reverse_proxy / 127.0.0.1:3050
+
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+}
+

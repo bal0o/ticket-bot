@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# OS
+.DS_Store
+
+# Env/Secrets
+.env
+config/.env
+
+# Local data
+json.sqlite
+*.sqlite
+*.sqlite-journal
+transcripts/
+transcripts-test/
+data-test/
+
+temp/
+
+# Build outputs
+coverage/
+dist/
+build/

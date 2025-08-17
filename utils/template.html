@@ -1,0 +1,419 @@
+<style>
+  @font-face {
+    font-family: Whitney;
+    src: url("https://discordapp.com/assets/6c6374bad0b0b6d204d8d6dc4a18d820.woff");
+    font-weight: 300;
+  }
+
+  @font-face {
+    font-family: Whitney;
+    src: url("https://discordapp.com/assets/e8acd7d9bf6207f99350ca9f9e23b168.woff");
+    font-weight: 400;
+  }
+
+  @font-face {
+    font-family: Whitney;
+    src: url("https://discordapp.com/assets/3bdef1251a424500c1b3a78dea9b7e57.woff");
+    font-weight: 500;
+  }
+
+  @font-face {
+    font-family: Whitney;
+    src: url("https://discordapp.com/assets/be0060dafb7a0e31d2a1ca17c0708636.woff");
+    font-weight: 600;
+  }
+
+  @font-face {
+    font-family: Whitney;
+    src: url("https://discordapp.com/assets/8e12fb4f14d9c4592eb8ec9f22337b04.woff");
+    font-weight: 700;
+  }
+
+  body {
+    background-color: #36393e;
+    color: #dcddde;
+    font-family: "Whitney", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    margin: 0;
+    padding: 20px;
+  }
+
+  .message-container {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    padding-left: 15px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: bold;
+    white-space: break-spaces;
+    line-height: 1.375rem;
+    margin-left: 50px;
+  }
+
+  .avatar-container {
+    position: absolute;
+  }
+
+  .parent-container {
+    padding: 20px;
+    border-top: 1px solid #4a494a;
+  }
+
+  .parent-container:hover {
+    padding: 20px;
+    background-color: #26282c;
+  }
+
+  .avatar {
+    border-radius: 50%;
+    height: 50px;
+    width: 50px;
+  }
+
+  .avatarPinned {
+    margin: 19px;
+  }
+
+  .titleDiv {
+    display: inline-block;
+  }
+
+  .EmbedBody {
+
+    background: #2f3136;
+    padding-top: 12px;
+    padding-left: 11px;
+    padding-right: 11px;
+    padding-bottom: 12px;
+    margin-top: 6px;
+    max-width: 520px;
+    min-width: 100px;
+    border-left: 4px solid;
+    border-radius: 5px;
+    display: inline-block;
+    word-break: break-word;
+  }
+
+  .EmbedBody img {
+    height: 20px;
+    width: 20px;
+    margin-right: 5px;
+    border-radius: 10px;
+    margin-top: 3px;
+  }
+
+  .EmbedTitle {
+    white-space: normal;
+    font-size: 15px;
+    margin-bottom: 9px;
+    display: inline-block;
+  }
+
+  .EmbedDesc {
+    display: block;
+    font-weight: normal;
+    font-size: 14px;
+  }
+
+  .EmbedFieldBody {
+    margin-top: 13px;
+    margin-right: 20px;
+    display: inline-flex;
+    flex-wrap: wrap;
+    flex-direction: column;
+  }
+
+  .EmbedFieldTitle {
+    display: inline-block;
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .EmbedFieldContent {
+    font-weight: normal;
+    font-size: 14px;
+  }
+
+  .EmbedFooter {
+    margin-top: 3px;
+    font-size: 10px;
+  }
+
+  .EmbedAuthorImg {
+    height: 21px;
+    width: 21px;
+    border-radius: 50%;
+    margin-right: 9px;
+    vertical-align: middle;
+    margin-left: 35px;
+  }
+
+  .EmbedAuthorName {
+    white-space: normal;
+    font-size: 15px;
+  }
+
+  .AttachmentFile {
+    color: #0095ff;
+    font-size: 16px;
+  }
+
+  .PinnedMsg {
+    color: #949397;
+    font-size: 14px;
+    margin-top: 5px;
+    font-weight: bold;
+  }
+
+  .nameElement {
+    display: inline-block;
+    font-size: 16px;
+  }
+
+  .nameElementReply {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: bold;
+
+  }
+
+  .HighestRoleBlock {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    border-radius: 6px;
+    font-size: 10px;
+    padding-left: 5px;
+    padding-right: 5px;
+    margin-left: 5px;
+    vertical-align: 12%;
+  }
+
+  .messageElementReply {
+    display: inline-block;
+    font-size: 12px;
+    opacity: 0.8;
+    margin-left: 7px;
+  }
+
+  .IDtimeElement {
+    margin-left: 5px;
+    font-size: 12px;
+    color: #64626B;
+    vertical-align: 8%;
+    font-weight: bold;
+  }
+
+  .textCode {
+    margin-top: 5px;
+    padding: 5px;
+    background-color: #2F3136;
+    border: 2px solid #292B2F;
+    border-radius: 3px;
+    font-size: 14px;
+    color: #B9BBBE;
+    white-space: pre;
+  }
+
+  pre {
+    background-color: #2F3136;
+    border: 2px solid #292B2F;
+    border-radius: 3px;
+    padding: 5px;
+    margin: 0px;
+  }
+
+  .block {
+    margin-top: 5px;
+    padding: 5px;
+    border-radius: 3px;
+    font-size: 14px;
+    color: #B9BBBE;
+    white-space: pre;
+
+  }
+
+  .inline {
+    background-color: #2F3136;
+    color: #B9BBBE;
+    padding: 2px;
+    line-height: 1.575rem;
+  }
+
+  .replyToNode {
+    position: relative;
+    margin-left: 30px;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .replyToLine {
+    position: relative;
+  }
+
+  .avatarReply {
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+    margin-left: 35px;
+  }
+
+  .replyToLine:before {
+    position: absolute;
+    top: 50%;
+    content: "";
+    display: block;
+    height: 8px;
+    margin-top: 5px;
+    width: 26px;
+    border-left: 1px solid #ffffff;
+    border-top: 1px solid #ffffff;
+    border-right: 0px;
+    border-bottom: 0px;
+    border-top-left-radius: 5px;
+    z-index: 1;
+    border-color: #949397;
+
+  }
+
+  .replyToMissing {
+    margin-left: 4px;
+    font-size: 12px;
+    font-weight: lighter;
+    color: #949397;
+  }
+
+  .replyToIconBody {
+    background: #2F3136;
+    border-radius: 22px;
+    margin-left: 33px;
+    margin-top: -2px;
+    width: 18px;
+    display: inline-flex;
+    justify-content: center;
+    height: 18px;
+    align-items: center;
+  }
+
+  .replyToIcon {
+    width: 10.8px;
+    height: 7.2px;
+  }
+
+  .info {
+    display: flex;
+    max-width: 100%;
+    margin: 0 5px 10px;
+  }
+
+  .info__guild-icon {
+    border-radius: 50%;
+    height: 50px;
+    width: 50px;
+  }
+
+  .maincontent {
+    margin-top: 5px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: normal;
+    font-size: 16px;
+    display: inline-block;
+  }
+
+  .reaction {
+    padding-left: 3px;
+    padding-right: 3px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    margin-left: 4px;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background: #2F3136;
+    display: inline-block;
+  }
+
+  .reaction:hover {
+    background: #383C56;
+    border: 2px solid #5764EF;
+  }
+
+  .reactions {
+    margin-top: 5px;
+  }
+
+  .emoji-small {
+    border: 0px;
+    border-radius: 5px;
+    width: 17px;
+    height: 17px;
+  }
+
+  .emoji-text-small {
+    border: 0px;
+    border-radius: 5px;
+  }
+
+  .reactiontext {
+    margin-left: 5px;
+  }
+
+  #emoji-small img {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .info__metadata {
+    flex: 1;
+    margin-left: 10px;
+  }
+
+  .infoHeader {
+    margin-left: 15px;
+  }
+
+  .infoChannel {
+    margin-left: 15px;
+  }
+
+  .infoGuild {
+    margin-left: 15px;
+  }
+
+  .HeaderTitle {
+    font-size: 20px;
+    color: #ffffff;
+    font-weight: bold;
+  }
+
+  .infoMessages {
+    margin-left: 15px;
+    width: 100%;
+    display: block;
+  }
+
+  .info__guild-icon-container {
+    flex: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 15px;
+  }
+
+  /* Track */
+  ::-webkit-scrollbar-track {
+    background: #b4b4b4b4;
+    border-radius: 4px;
+  }
+
+  /* Handle */
+  ::-webkit-scrollbar-thumb {
+    background: rgb(94, 94, 94);
+    border-radius: 4px;
+  }
+
+  /* Handle on hover */
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(54, 54, 54);
+  }
+</style>
