@@ -7,30 +7,30 @@
 		"max_tickets_per_user": 3
 	},
 
-	"activityInfo": { 
+	"activityInfo": {
 		"cycleTimeinSeconds": 10,
 		"messages": ["{count} tickets"],
 		"type": "WATCHING"
 	},
 
 	"role_ids": {
-		"role_ids_ban_cmd": ["1368692575674044447"],
-		"role_ids_info_cmd": ["1368692575674044447"],
-		"role_ids_stats_cmd": ["1368692575674044447"],
-		"role_ids_wipestats_cmd": ["1368692575674044447"],
-		"role_ids_blacklist_cmd": ["1368692575674044447"],
-        "role_ids_anonymous_cmd": ["1368696296365621331","1368692575674044447","1368696874177134745","1386138627553366226","1386138627553366226","1379502309763055657","1368697297453715496","1399121105863835760"],
-		"default_admin_role_id": "1368692575674044447",
+		"role_ids_ban_cmd": ["1264858598345801740"],
+		"role_ids_info_cmd": ["1264858598345801740"],
+		"role_ids_stats_cmd": ["1264858598345801740"],
+		"role_ids_wipestats_cmd": ["1264858598345801740"],
+		"role_ids_blacklist_cmd": ["1264858598345801740"],
+		"role_ids_anonymous_cmd": ["1264858598345801740"],
+		"default_admin_role_id": "1264858598345801740",
 		"ticket_blacklisted_role_id": "",
-		"application_admin_role_id": ""
+		"application_admin_role_id": "1264858598345801740"
 	},
 
 	"channel_ids": {
-		"public_guild_id": "1222282816918786150",
-		"staff_guild_id": "1368692515066220644",
-		"error_channel": "1372748960833208360",
-		"feedback_channel": "1379550235025473596",
-		"post_embed_channel_id": "1405469330392481853"
+		"public_guild_id": "1054341688962854942",
+		"staff_guild_id": "1054341688962854942",
+		"error_channel": "1406642355418828810",
+		"feedback_channel": "1406642355418828810",
+		"post_embed_channel_id": "1406642473069056080"
 	},
 
 	"linking_settings": {
@@ -39,7 +39,7 @@
 	},
 
 	"active_ticket_settings": {
-		"replyName": "Brit Support",
+		"replyName": "Test Support",
 		"ticket_user_embed_color": "#208cdd",
 		"ticket_staff_embed_color": "#89CFF0",
 		"staff_ticket_replies_in_embed": true,
@@ -58,11 +58,11 @@
 		"allowed_file_extensions": ["png", "jpeg", "txt", "jpg", "gif", "mp4", "mp3"]
 	},
 
-    "transcript_settings": {
-        "enabled": true,
-        "save_path": "./transcripts/",
-        "base_url": "https://tickets.britspve.com/transcripts/"
-    },
+	"transcript_settings": {
+		"enabled": true,
+		"save_path": "./transcripts/",
+		"base_url": "https://tickettest.home.lyon-marrian.com/transcripts/"
+	},
 
 	"tokens": {
 		"Linking_System_API_Key_Or_Secret": "skufbnsf8dskfbu74dsfs2",
@@ -75,21 +75,27 @@
 		"bm_org_id": "106838"
 	},
 
+	"claims": {
+		"enabled": true,
+		"restrict_to_claimer": true,
+		"role_bypass_ids": ["1264858598345801740"]
+	},
+
 	"web": {
 		"enabled": true,
 		"host": "0.0.0.0",
 		"port": 3050,
 		"session_secret": "adkfb9ZNwnc0%sFDDF!@FSDF",
 		"discord_oauth": {
-			"client_id": "1375140750689308762",
-			"client_secret": "rgYJP_evsEEIHSqrnY1IzFO2hVKIaSqc",
-			"callback_url": "https://tickets.britspve.com/auth/callback",
+			"client_id": "1406627670325727332",
+			"client_secret": "SLeK5HdP1fUsyu_6rq0dp03QY2J_BEEN",
+			"callback_url": "https://tickettest.home.lyon-marrian.com/auth/callback",
 			"scopes": ["identify"]
 		},
-		"staff_guild_id": "1368692515066220644",
+		"staff_guild_id": "1054341688962854942",
 		"roles": {
-			"staff_role_ids": ["1370818626495582250"],
-			"admin_role_ids": ["1368692575674044447"]
+			"staff_role_ids": ["1264858598345801740"],
+			"admin_role_ids": ["1264858598345801740"]
 		}
 	},
 
