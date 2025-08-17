@@ -224,21 +224,25 @@ app.get('/logout', (req, res) => {
 
 app.get('/my', ensureAuth, async (req, res) => {
     const ticketLogs = await db.get(`PlayerStats.${req.user.id}.ticketLogs`) || {};
-    const list = Object.keys(ticketLogs).map(tid => {
-        const t = ticketLogs[tid] || {};
-        const url = t.transcriptURL || '';
-        let filename = url ? url.split('/').pop() : null;
-        if (filename && filename.endsWith('.full.html')) {
-            filename = filename.replace(/\.full\.html$/, '.html');
-        }
-        return {
-            ticketId: tid,
-            ticketType: t.ticketType || 'Unknown',
-            createdAt: t.createdAt ? new Date(t.createdAt * 1000) : null,
-            transcriptFilename: filename,
-            transcriptAvailable: !!filename
-        };
-    }).sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
+    const list = Object.keys(ticketLogs)
+        .map(tid => {
+            const t = ticketLogs[tid] || {};
+            const url = t.transcriptURL || '';
+            let filename = url ? url.split('/').pop() : null;
+            if (filename && filename.endsWith('.full.html')) {
+                filename = filename.replace(/\.full\.html$/, '.html');
+            }
+            return {
+                ticketId: tid,
+                ticketType: t.ticketType || 'Unknown',
+                createdAt: t.createdAt ? new Date(t.createdAt * 1000) : null,
+                transcriptFilename: filename,
+                transcriptAvailable: !!filename,
+                isClosed: !!(t.closeTime || t.closeType || filename)
+            };
+        })
+        .filter(x => x.isClosed)
+        .sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
     res.render('my_tickets', { tickets: list });
 });
 
@@ -284,6 +288,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
     const qType = (req.query.type || '').toLowerCase();
     const qFrom = req.query.from ? new Date(req.query.from) : null;
     const qTo = req.query.to ? new Date(req.query.to) : null;
+    const qServer = (req.query.server || '').toLowerCase();
+    const qClosedBy = (req.query.closed_by || '').toLowerCase();
 
     const tickets = [];
     const userNameCache = new Map();
@@ -301,6 +307,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
             }
             for (const ticketId of Object.keys(logs)) {
                 const t = logs[ticketId] || {};
+                // Only closed tickets
+                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
                 const url = t.transcriptURL || '';
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
@@ -308,6 +316,15 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
+                if (qServer) {
+                    const serverLower = (t.server || '').toLowerCase();
+                    if (!serverLower.includes(qServer)) continue;
+                }
+                if (qClosedBy) {
+                    const closedByName = (t.closeUser || '').toLowerCase();
+                    const closedById = (t.closeUserID || '').toString();
+                    if (!(closedByName.includes(qClosedBy) || closedById === qClosedBy)) continue;
+                }
                 tickets.push({
                     userId,
                     username: t.username || userNameCache.get(userId) || userId,
@@ -349,6 +366,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 userNameCache.set(userId, name || userId);
             }
             for (const [ticketId, t] of ticketMap.entries()) {
+                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
                 const url = t.transcriptURL || '';
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
@@ -356,6 +374,15 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
+                if (qServer) {
+                    const serverLower = (t.server || '').toLowerCase();
+                    if (!serverLower.includes(qServer)) continue;
+                }
+                if (qClosedBy) {
+                    const closedByName = (t.closeUser || '').toLowerCase();
+                    const closedById = (t.closeUserID || '').toString();
+                    if (!(closedByName.includes(qClosedBy) || closedById === qClosedBy)) continue;
+                }
                 tickets.push({
                     userId,
                     username: t.username || userNameCache.get(userId) || userId,
@@ -372,7 +399,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }
     }
     tickets.sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '' }, types: getKnownTicketTypes() });
+    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '' }, types: getKnownTicketTypes() });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {

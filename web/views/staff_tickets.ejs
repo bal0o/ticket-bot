@@ -26,6 +26,12 @@
         <% }) %>
       </select>
     </label>
+    <label>Server:
+      <input type="text" name="server" value="<%= (query && query.server) || '' %>">
+    </label>
+    <label>Closed By (name or ID):
+      <input type="text" name="closed_by" value="<%= (query && query.closed_by) || '' %>">
+    </label>
     <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
     <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
     <button type="submit" class="btn primary">Filter</button>
