@@ -18,8 +18,12 @@
       <section>
         <h3>Stages</h3>
         <div class="stages">
-          <% (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']).forEach(function(s){ const active = s === app.stage; %>
-            <span class="stage <%= active ? 'active' : '' %>"><%= s %></span>
+          <% const all = (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']);
+             const curIdx = Math.max(0, all.indexOf(app.stage));
+             all.forEach(function(s, i){
+               const cls = i < curIdx ? 'completed' : (i === curIdx ? 'active' : 'upcoming');
+          %>
+            <span class="stage <%= cls %>"><%= s %></span>
           <% }); %>
         </div>
       </section>
@@ -77,28 +81,7 @@
         <% } %>
       </section>
     </div>
-    <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Archived') { %>
-      <h3>Actions</h3>
-      <form method="post" action="/applications/<%= app.id %>/advance" style="display:flex; gap:8px; align-items:center;">
-        <span class="muted">Next Stage:</span>
-        <strong><%= nextStage %></strong>
-        <input type="text" name="note" placeholder="Note" style="flex:1;">
-        <button class="btn primary" type="submit">Advance</button>
-      </form>
-      <form method="post" action="/applications/<%= app.id %>/deny" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <input type="text" name="note" placeholder="Reason">
-        <button class="btn" type="submit">Deny</button>
-      </form>
-      <h3>Contact / Interview</h3>
-      <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
-        <button class="btn" type="submit">Open Communication Ticket</button>
-      </form>
-      <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <label>Interview time: <input type="datetime-local" name="when"></label>
-        <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID"></label>
-        <button class="btn" type="submit">Schedule Interview</button>
-      </form>
-    <% } %>
+    
   </main>
 </body>
 </html>
