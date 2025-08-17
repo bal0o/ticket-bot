@@ -259,42 +259,40 @@ try {
     await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
 } catch (e) {}
 
-    const closeRow = new Discord.MessageActionRow()
-    closeRow.addComponents(
-        new Discord.MessageButton()
-            .setCustomId(`ticketclose`)
-            .setLabel(lang.close_ticket["close-ticket-button-title"] != "" ? lang.close_ticket["close-ticket-button-title"] : `Close Ticket`)
-            .setStyle("DANGER")
-            .setEmoji("📝"),
-        new Discord.MessageButton()
-            .setCustomId(`moveticket`)
-            .setLabel("Move Ticket")
-            .setStyle("PRIMARY")
-            .setEmoji("↗️")
-    );
-
-    // Optional claim button
-    try {
-        if (client.config?.claims?.enabled) {
-            closeRow.addComponents(
-                new Discord.MessageButton()
-                    .setCustomId(`claimticket`)
-                    .setLabel('Claim Ticket')
-                    .setStyle('SUCCESS')
-                    .setEmoji('🧾')
-            );
-        }
-    } catch (_) {}
-
-    // If this is an application ticket, add stage buttons
-    try {
-        if (ticketType && ticketType.toLowerCase().includes('application')) {
-            closeRow.addComponents(
-                new Discord.MessageButton().setCustomId('app_next_stage').setLabel('Move to Next Stage').setStyle('PRIMARY'),
-                new Discord.MessageButton().setCustomId('app_deny').setLabel('Deny').setStyle('DANGER')
-            );
-        }
-    } catch(_){}
+    // Build action buttons. For application tickets, only show application actions.
+    let actionRow = new Discord.MessageActionRow();
+    const isApplication = ticketType && ticketType.toLowerCase().includes('application');
+    if (isApplication) {
+        actionRow.addComponents(
+            new Discord.MessageButton().setCustomId('app_next_stage').setLabel('Move to Next Stage').setStyle('PRIMARY'),
+            new Discord.MessageButton().setCustomId('app_deny').setLabel('Deny').setStyle('DANGER')
+        );
+    } else {
+        actionRow.addComponents(
+            new Discord.MessageButton()
+                .setCustomId(`ticketclose`)
+                .setLabel(lang.close_ticket["close-ticket-button-title"] != "" ? lang.close_ticket["close-ticket-button-title"] : `Close Ticket`)
+                .setStyle("DANGER")
+                .setEmoji("📝"),
+            new Discord.MessageButton()
+                .setCustomId(`moveticket`)
+                .setLabel("Move Ticket")
+                .setStyle("PRIMARY")
+                .setEmoji("↗️")
+        );
+        // Optional claim button for non-application tickets
+        try {
+            if (client.config?.claims?.enabled) {
+                actionRow.addComponents(
+                    new Discord.MessageButton()
+                        .setCustomId(`claimticket`)
+                        .setLabel('Claim Ticket')
+                        .setStyle('SUCCESS')
+                        .setEmoji('🧾')
+                );
+            }
+        } catch (_) {}
+    }
 
     // Always define pingTags
     let pingSet = new Set();
@@ -310,7 +308,7 @@ try {
     const initialMessage = await ticketChannel.send({
         content: (pingTags ? pingTags + "\n" : "") + (lang.ticket_creation["initial-message-content"] != "" ? lang.ticket_creation["initial-message-content"].replace(`{{USERNAME}}`, safeUsername).replace(`{{TICKETTYPE}}`, ticketType).replace(`{{ADMIN}}`, administratorMember).replace(/{{PREFIX}}/g, client.config.bot_settings.prefix) : `${safeUsername}'s ${ticketType} ticket`),
         embeds: [embed],
-        components: [closeRow]
+        components: [actionRow]
     });
     
     await initialMessage.pin()?.catch(e => { });
