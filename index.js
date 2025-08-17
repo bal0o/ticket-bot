@@ -44,6 +44,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 		const cfg = require('./config/config.json');
 		const guildId = cfg.channel_ids.staff_guild_id;
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;
+		const interviewCategory = cfg.applications && cfg.applications.interview ? cfg.applications.interview.category_id : null;
 		async function runScheduler() {
 			try {
 				const jobs = await db.get('ApplicationSchedules') || {};
@@ -66,7 +67,9 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								{ id: appRec.userId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] }
 							];
 							const name = `interview-${appRec.userId.slice(-4)}-${Math.floor(now/1000)}`;
-							const vc = await guild.channels.create(name, { type: 'GUILD_VOICE', permissionOverwrites: perms });
+							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
+							if (interviewCategory) createOpts.parent = interviewCategory;
+							const vc = await guild.channels.create(name, createOpts);
 							job.status = 'done'; job.completedAt = Date.now(); job.info = { channelId: vc.id };
 							await db.set(`ApplicationSchedules.${jobId}`, job);
 						} catch (e) {

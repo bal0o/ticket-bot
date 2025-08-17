@@ -289,7 +289,7 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
-    res.render('applications_detail', { app: appRec, canAdmin, nextStage, userNames });
+    res.render('applications_detail', { app: appRec, canAdmin, nextStage, userNames, stages });
 });
 
 // Applications - stage advance
@@ -328,7 +328,6 @@ app.post('/applications/:id/comment', ensureAuth, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
-    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.addComment(appId, req.user.id, req.body.comment || '');
     return res.redirect(`/applications/${appId}`);
 });
@@ -340,7 +339,6 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
-    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     try {
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
@@ -365,6 +363,9 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
     if (!isAdmin) return res.status(403).send('Forbidden');
     const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage !== 'Interview') return res.redirect(`/applications/${appId}`);
     const when = new Date(req.body.when);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);

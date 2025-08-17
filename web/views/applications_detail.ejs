@@ -18,10 +18,9 @@
       <section>
         <h3>Stages</h3>
         <div class="stages">
-          <% const allStages = (require('../config/config.json').applications?.stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']); %>
-          <% allStages.forEach(s => { const active = s === app.stage; %>
+          <% (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']).forEach(function(s){ const active = s === app.stage; %>
             <span class="stage <%= active ? 'active' : '' %>"><%= s %></span>
-          <% }) %>
+          <% }); %>
         </div>
       </section>
       <section>
