@@ -8,7 +8,6 @@ const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
 const { QuickDB } = require('quick.db');
-const Database = require('better-sqlite3');
 const metrics = require('../utils/metrics');
 
 const config = require('../config/config.json');
@@ -42,18 +41,7 @@ if (!BOT_TOKEN) {
 
 // --- Databases ---
 const db = new QuickDB(); // shares ./json.sqlite by default
-const permissionsDbPath = path.resolve(__dirname, 'permissions.sqlite');
-const overridesDb = new Database(permissionsDbPath);
-
-overridesDb.exec(`
-CREATE TABLE IF NOT EXISTS overrides (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    can_view INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(filename, user_id)
-);
-`);
+// Admin overrides removed per requirements; no external permissions DB
 
 // --- Auth setup ---
 passport.serializeUser((user, done) => done(null, user));
@@ -145,9 +133,8 @@ async function findOwnerByFilename(filename) {
     return null;
 }
 
-function userHasOverride(userId, filename) {
-    const rec = overridesDb.prepare('SELECT can_view FROM overrides WHERE user_id = ? AND filename = ?').get(userId, filename);
-    return !!(rec && rec.can_view);
+function userHasOverride(_userId, _filename) {
+    return false;
 }
 
 async function canViewTranscript(userId, filename) {
@@ -456,36 +443,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     fs.createReadStream(abs).pipe(res);
 });
 
-// Admin: permission overrides
-app.get('/admin/overrides', ensureAuth, async (req, res) => {
-    const { isAdmin } = await getRoleFlags(req.user.id);
-    if (!isAdmin) return res.status(403).send('Forbidden');
-    const rows = overridesDb.prepare('SELECT filename, user_id, can_view FROM overrides ORDER BY filename, user_id').all();
-    res.render('admin_overrides', { rows });
-});
-
-app.post('/admin/overrides/add', ensureAuth, async (req, res) => {
-    const { isAdmin } = await getRoleFlags(req.user.id);
-    if (!isAdmin) return res.status(403).send('Forbidden');
-    const filename = sanitizeFilename(req.body.filename || '');
-    const userId = (req.body.user_id || '').replace(/[^0-9]/g, '');
-    const canView = req.body.can_view === '1' ? 1 : 0;
-    if (!filename || !userId) return res.redirect('/admin/overrides');
-    try {
-        overridesDb.prepare('INSERT OR REPLACE INTO overrides (filename, user_id, can_view) VALUES (?, ?, ?)')
-            .run(filename, userId, canView);
-    } catch {}
-    res.redirect('/admin/overrides');
-});
-
-app.post('/admin/overrides/delete', ensureAuth, async (req, res) => {
-    const { isAdmin } = await getRoleFlags(req.user.id);
-    if (!isAdmin) return res.status(403).send('Forbidden');
-    const filename = sanitizeFilename(req.body.filename || '');
-    const userId = (req.body.user_id || '').replace(/[^0-9]/g, '');
-    overridesDb.prepare('DELETE FROM overrides WHERE filename = ? AND user_id = ?').run(filename, userId);
-    res.redirect('/admin/overrides');
-});
+// Admin overrides routes removed
 
 app.listen(PORT, HOST, () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);

@@ -8,13 +8,16 @@
   </head>
 <body>
   <header class="navbar">
-    <div class="nav-left">Tickets</div>
+    <div class="nav-left"><a href="/">Tickets</a></div>
     <div class="nav-right">
       <% if (user) { %>
         <span class="userpill">
           <span class="avatar" style="background-image:url('https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png?size=64')"></span>
-          <strong><%= user.username %></strong>#<%= user.discriminator %>
+          <strong><%= user.username %></strong>
         </span>
+        <% if (roleFlags && roleFlags.isStaff) { %>
+          <a class="btn" href="/staff">Staff View</a>
+        <% } %>
         <a class="btn" href="/logout">Logout</a>
       <% } else { %>
         <a class="discord-login" href="/login">

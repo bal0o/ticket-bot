@@ -239,7 +239,7 @@ module.exports = async function (client, interaction) {
         if (interaction.customId == "ticketclose") {
             if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
             if (interaction.message.channel?.type === "GUILD_PUBLIC_THREAD" || interaction.message.channel?.type === "DM" || interaction.message.channel?.type === "GUILD_PRIVATE_THREAD") return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
-            if (interaction.message.channel?.name?.split("-").length <= 1) return func.handle_errors(null, client, `interactionCreate.js`, `The name for the channel has been changed and I can not recognise it as a ticket channel anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
+            // Allow arbitrary channel renames; rely on pinned embed and topic instead of name structure
             if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
 
             const handlerRaw = require("../content/handler/options.json");
@@ -317,8 +317,9 @@ module.exports = async function (client, interaction) {
                     return;
                 }
 
-                // Toggle: unclaim if same user
-                if (existing && existing.userId === interaction.user.id) {
+                // Toggle: unclaim if same user or admin
+                const isAdmin = interaction.member.roles.cache.has(client.config.role_ids.default_admin_role_id);
+                if (existing && (existing.userId === interaction.user.id || isAdmin)) {
                     client.claims.delete(claimKey);
                     try { await db.delete(`Claims.${interaction.channel.id}`); } catch (_) {}
                     // Enable send permissions for access roles again if restricted flow is used
@@ -334,6 +335,25 @@ module.exports = async function (client, interaction) {
                             }
                         } catch (_) {}
                     }
+                    // Update channel name to remove -claimed
+                    try {
+                        if (interaction.channel.name.endsWith('-claimed')) {
+                            await interaction.channel.setName(interaction.channel.name.replace(/-claimed$/, ''));
+                        }
+                    } catch (_) {}
+                    // Update button label to Claim Ticket
+                    try {
+                        const msg = await interaction.fetchReply().catch(()=>null);
+                        const rows = interaction.message.components.map(row => {
+                            const newRow = new Discord.MessageActionRow();
+                            newRow.addComponents(row.components.map(comp => {
+                                if (comp.customId === 'claimticket') return comp.setLabel('Claim Ticket');
+                                return comp;
+                            }));
+                            return newRow;
+                        });
+                        await interaction.message.edit({ components: rows }).catch(()=>{});
+                    } catch (_) {}
                     await interaction.reply({ content: 'Unclaimed ticket.', ephemeral: true });
                     return;
                 }
@@ -360,6 +380,24 @@ module.exports = async function (client, interaction) {
                     } catch (_) {}
                 }
 
+                // Rename channel to append -claimed
+                try {
+                    if (!interaction.channel.name.endsWith('-claimed')) {
+                        await interaction.channel.setName(`${interaction.channel.name}-claimed`);
+                    }
+                } catch (_) {}
+                // Update button label to Unclaim
+                try {
+                    const rows = interaction.message.components.map(row => {
+                        const newRow = new Discord.MessageActionRow();
+                        newRow.addComponents(row.components.map(comp => {
+                            if (comp.customId === 'claimticket') return comp.setLabel('Unclaim');
+                            return comp;
+                        }));
+                        return newRow;
+                    });
+                    await interaction.message.edit({ components: rows }).catch(()=>{});
+                } catch (_) {}
                 await interaction.reply({ content: `You claimed this ticket.`, ephemeral: true });
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error in claimticket');
