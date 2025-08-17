@@ -73,7 +73,7 @@ module.exports = {
 	// Hydrate counters from persisted totals on startup to avoid resets breaking graphs
 	initPersisted: async () => {
 		try {
-			const opened = await kv.get('Metrics.total.ticketsOpened') || {};
+			let opened = await kv.get('Metrics.total.ticketsOpened') || {};
 			for (const t of Object.keys(opened)) {
 				const byServer = opened[t] || {};
 				for (const s of Object.keys(byServer)) {
@@ -81,7 +81,7 @@ module.exports = {
 					if (v > 0) ticketsOpenedCounter.inc({ type: t, server: s }, v);
 				}
 			}
-			const closed = await kv.get('Metrics.total.ticketsClosed') || {};
+			let closed = await kv.get('Metrics.total.ticketsClosed') || {};
 			for (const t of Object.keys(closed)) {
 				const byClose = closed[t] || {};
 				for (const c of Object.keys(byClose)) {
@@ -89,7 +89,7 @@ module.exports = {
 					if (v > 0) ticketsClosedCounter.inc({ type: t, close_type: c }, v);
 				}
 			}
-			const actions = await kv.get('Metrics.total.staffActions') || {};
+			let actions = await kv.get('Metrics.total.staffActions') || {};
 			for (const a of Object.keys(actions)) {
 				const byType = actions[a] || {};
 				for (const t of Object.keys(byType)) {
@@ -100,10 +100,50 @@ module.exports = {
 					}
 				}
 			}
-			const claimed = await kv.get('Metrics.total.ticketsClaimed') || {};
+			let claimed = await kv.get('Metrics.total.ticketsClaimed') || {};
 			for (const t of Object.keys(claimed)) {
 				const v = claimed[t] || 0;
 				if (v > 0) ticketsClaimedCounter.inc({ type: t }, v);
+			}
+			// If totals are empty (first run), rebuild from existing DB so counters are not zeroed on restart
+			const needRebuild = (Object.keys(opened).length === 0) && (Object.keys(closed).length === 0) && (Object.keys(actions).length === 0) && (Object.keys(claimed).length === 0);
+			if (needRebuild) {
+				const ps = await kv.get('PlayerStats');
+				const openedAgg = {};
+				const closedAgg = {};
+				if (ps && typeof ps === 'object') {
+					for (const userId of Object.keys(ps)) {
+						const logs = ps[userId]?.ticketLogs || {};
+						for (const ticketId of Object.keys(logs)) {
+							const t = logs[ticketId] || {};
+							const type = (t.ticketType || 'unknown');
+							const server = (t.server || 'unknown');
+							openedAgg[type] = openedAgg[type] || {};
+							openedAgg[type][server] = (openedAgg[type][server] || 0) + 1;
+							if (t.closeType) {
+								const ct = t.closeType || 'closed';
+								closedAgg[type] = closedAgg[type] || {};
+								closedAgg[type][ct] = (closedAgg[type][ct] || 0) + 1;
+							}
+						}
+					}
+				}
+				await kv.set('Metrics.total.ticketsOpened', openedAgg).catch(()=>{});
+				await kv.set('Metrics.total.ticketsClosed', closedAgg).catch(()=>{});
+				// hydrate the counters
+				for (const t of Object.keys(openedAgg)) {
+					for (const s of Object.keys(openedAgg[t])) {
+						const v = openedAgg[t][s];
+						if (v > 0) ticketsOpenedCounter.inc({ type: t, server: s }, v);
+					}
+				}
+				for (const t of Object.keys(closedAgg)) {
+					for (const c of Object.keys(closedAgg[t])) {
+						const v = closedAgg[t][c];
+						if (v > 0) ticketsClosedCounter.inc({ type: t, close_type: c }, v);
+					}
+				}
+				// Staff actions/claims are optional to rebuild; skip to avoid heavy scans
 			}
 		} catch (_) {}
 	},
