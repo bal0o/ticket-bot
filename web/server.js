@@ -90,6 +90,20 @@ async function getRoleFlags(userId) {
     return { isStaff, isAdmin, roleIds: Array.from(roles) };
 }
 
+async function getUsernamesMap(ids = []) {
+    const map = {};
+    if (!BOT_TOKEN || !Array.isArray(ids) || ids.length === 0) return map;
+    for (const id of ids) {
+        if (!id || map[id]) continue;
+        try {
+            const r = await axios.get(`https://discord.com/api/v10/users/${id}`, {
+                headers: { Authorization: `Bot ${BOT_TOKEN}` }
+            });
+            if (r && r.data && r.data.username) map[id] = r.data.username;
+        } catch (_) {}
+    }
+    return map;
+}
 async function createGuildChannel({ name, type = 0, topic = '', parentId = '', permissionOverwrites = [] }) {
     if (!BOT_TOKEN || !STAFF_GUILD_ID) throw new Error('Missing bot token or staff guild');
     const body = { name, type, topic };
@@ -265,7 +279,17 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
-    res.render('applications_detail', { app: appRec, canAdmin: (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id)) });
+    // Resolve display names for history/comments
+    const ids = new Set();
+    (appRec.history || []).forEach(h => { if (h.by) ids.add(String(h.by)); });
+    (appRec.comments || []).forEach(c => { if (c.by) ids.add(String(c.by)); });
+    const userNames = await getUsernamesMap(Array.from(ids));
+    // Compute nextStage from config
+    const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
+    const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
+    const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
+    const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+    res.render('applications_detail', { app: appRec, canAdmin, nextStage, userNames });
 });
 
 // Applications - stage advance
@@ -274,7 +298,12 @@ app.post('/applications/:id/advance', ensureAuth, async (req, res) => {
     const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
     if (!isAdmin) return res.status(403).send('Forbidden');
     const appId = req.params.id;
-    const nextStage = (req.body.next_stage || '').trim() || 'Next';
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.status(400).send('Application is closed');
+    const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
+    const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
+    const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     await applications.advanceStage(appId, nextStage, req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
 });
@@ -285,6 +314,9 @@ app.post('/applications/:id/deny', ensureAuth, async (req, res) => {
     const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
     if (!isAdmin) return res.status(403).send('Forbidden');
     const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.deny(appId, req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
 });
@@ -294,6 +326,9 @@ app.post('/applications/:id/comment', ensureAuth, async (req, res) => {
     const { isStaff } = await getRoleFlags(req.user.id);
     if (!isStaff) return res.status(403).send('Forbidden');
     const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.addComment(appId, req.user.id, req.body.comment || '');
     return res.redirect(`/applications/${appId}`);
 });
@@ -305,6 +340,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     try {
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';

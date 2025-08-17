@@ -1,67 +1,26 @@
 {
 	"questions": [
 		"How old are you?",
+		"How many hours do you have in Rust?",
+		"What is your Country & Timezone",
+		"What languages do you speak?",
 		"What role are you interested in?",
-		"Do you have any previous admin experience?",
-		"Why do you want to join?"
-	],
-	
+		"Do you have any previous staff experience?",
+		"Why do you want to become a staff member?"
+	],	
 	"pre-message": "Welcome to the Staff Application System! Please answer the following questions honestly and thoroughly. We appreciate your interest in joining our team.",
 	"post-message": "Thank you for applying to join our staff team! We will review your application and be in contact if you are successful",
-	"accept-message": "This message is sent if the users ticket has been auto accepted",
-	"deny-message": "This message is sent if the users ticket has been auto denied",
-	"post-channel": "",
-	"transcript-channel": "1379458808195317852",
-	"ticket-category": "1379551351033434153",
-	"access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745"],
-	"ping-role-id": ["1368692575674044447", "1368696874177134745"],
+	"transcript-channel": "1406643035411841205",
+	"ticket-category": "1406732564663898122",
+	"access-role-id": ["1264858598345801740"],
+	"ping-role-id": ["1264858598345801740"],
     "anonymous-only-replies": false,
 	"check-cheetos": false,
 	"check-steamid": true,
 	"display-user-discord-info": true,
 	"needVerified": true,
-	"allow_feedback": true,
+	"allow_feedback": false,
 	"open-as-ticket": true,
 	"max-active-tickets": 1,
-	"send_close_dm": false,
-
-	"check-server-activity": {
-		"enabled": true,
-		"show-only-online-server": true,
-		"show-online-status": true,
-		"show-hours": true,
-		"show-last-seen": true
-	},
-
-	"active_ticket_button_content": {
-		"accept": {
-			"title": "Approve",
-			"emoji": "",
-			"enabled": true
-		},
-		"deny": {
-			"title": "Reject",
-			"emoji": "",
-			"enabled": true
-		},
-		"custom_response_message": {
-			"title": "Custom Close Reply",
-			"emoji": "",
-			"enabled": true
-		},
-		"make_a_ticket": {
-			"title": "Open a Ticket",
-			"emoji": "",
-			"enabled": true
-		}
-	},
-
-	"feedback_questions": [
-		"How was your experience in your ticket?",
-		"What would you recommend for improvements?",
-		"What you rate your experience out of 5?",
-		"Would you be happy to use our system again?",
-		"You can only have 5 questions in your forms."
-	],
-	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone."
+	"send_close_dm": false
 }
