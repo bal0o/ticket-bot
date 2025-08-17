@@ -321,7 +321,8 @@ try {
         const thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
-            reason: `Private staff discussion for ticket #${formattedTicketNumber}`
+            reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
+            type: 'GUILD_PUBLIC_THREAD'
         });
 
         if (bmInfo) {
@@ -346,7 +347,7 @@ try {
                 staffEmbed.addField('BM Bans', bmInfo.banInfo.join('\n').substring(0, 1024));
             }
             
-            await thread.send({ embeds: [staffEmbed] });
+            try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
         }
 
     } catch (e) {

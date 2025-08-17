@@ -244,7 +244,8 @@ module.exports = async function (client, interaction) {
 
             const handlerRaw = require("../content/handler/options.json");
             const myPins = await interaction.channel.messages.fetchPinned();
-            const LastPin = myPins.last();
+            // Find the correct pinned ticket info embed (robust to additional pins)
+            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin) return func.handle_errors(null, client, `interactionCreate.js`, `Can not find the pinned embed. Please make sure the initial embed is pinned for me to grab data. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
             if (!LastPin.embeds[0]) return func.handle_errors(null, client, `interactionCreate.js`, `Can not find the pinned embed. Please make sure the initial embed is pinned for me to grab data. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
@@ -299,6 +300,8 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'claimticket') {
             try {
+                // Acknowledge early to prevent interaction token expiry
+                await interaction.deferUpdate().catch(()=>{});
                 if (!interaction.channel || interaction.channel.isThread()) return;
                 const myPins = await interaction.channel.messages.fetchPinned();
                 const LastPin = myPins.last();
@@ -313,7 +316,7 @@ module.exports = async function (client, interaction) {
                 // If already claimed by someone else, block
                 const existing = client.claims.get(claimKey);
                 if (existing && existing.userId !== interaction.user.id) {
-                    await interaction.reply({ content: `This ticket is already claimed by <@${existing.userId}>.`, ephemeral: true });
+                    await interaction.followUp({ content: `This ticket is already claimed by <@${existing.userId}>.`, ephemeral: true }).catch(()=>{});
                     return;
                 }
 
@@ -343,7 +346,6 @@ module.exports = async function (client, interaction) {
                     } catch (_) {}
                     // Update button label to Claim Ticket
                     try {
-                        const msg = await interaction.fetchReply().catch(()=>null);
                         const rows = interaction.message.components.map(row => {
                             const newRow = new Discord.MessageActionRow();
                             newRow.addComponents(row.components.map(comp => {
@@ -354,7 +356,7 @@ module.exports = async function (client, interaction) {
                         });
                         await interaction.message.edit({ components: rows }).catch(()=>{});
                     } catch (_) {}
-                    await interaction.reply({ content: 'Unclaimed ticket.', ephemeral: true });
+                    await interaction.followUp({ content: 'Unclaimed ticket.', ephemeral: true }).catch(()=>{});
                     return;
                 }
 
@@ -398,7 +400,7 @@ module.exports = async function (client, interaction) {
                     });
                     await interaction.message.edit({ components: rows }).catch(()=>{});
                 } catch (_) {}
-                await interaction.reply({ content: `You claimed this ticket.`, ephemeral: true });
+                await interaction.followUp({ content: `You claimed this ticket.`, ephemeral: true }).catch(()=>{});
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error in claimticket');
             }
@@ -410,7 +412,7 @@ module.exports = async function (client, interaction) {
 
             const handlerRaw = require("../content/handler/options.json");
             const myPins = await interaction.message.channel.messages.fetchPinned();
-            const LastPin = myPins.last();
+            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
                 await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', ephemeral: true });
@@ -455,7 +457,7 @@ module.exports = async function (client, interaction) {
             const newTicketType = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
             const myPins = await interaction.message.channel.messages.fetchPinned();
-            const LastPin = myPins.last();
+            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
                 await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', ephemeral: true });
@@ -595,7 +597,7 @@ module.exports = async function (client, interaction) {
                     }
                     // Update the pinned embed's footer to include the ticket type
                     const myPins = await interaction.channel.messages.fetchPinned();
-                    const LastPin = myPins.last();
+                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
                     if (LastPin && LastPin.embeds[0]) {
                         const embed = LastPin.embeds[0];
                         const footerParts = embed.footer.text.split("|");
