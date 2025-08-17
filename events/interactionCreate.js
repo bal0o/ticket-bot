@@ -914,7 +914,7 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminName`, user.username)
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Accept Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
-                        try { metrics.ticketClosed(ticketType, 'accepted'); metrics.staffAction('accept', ticketType, user.id); } catch (_) {}
+                        try { metrics.ticketClosed(ticketType, user.id); metrics.staffAction('accept', ticketType, user.id); } catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
 						let reply = `Your active ${ticketType} ticket was read and accepted. Thank you.`;
@@ -969,7 +969,7 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminName`, user.username)
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Deny Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
-                        try { metrics.ticketClosed(ticketType, 'denied'); metrics.staffAction('deny', ticketType, user.id); } catch (_) {}
+                        try { metrics.ticketClosed(ticketType, user.id); metrics.staffAction('deny', ticketType, user.id); } catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
 						let reply = `Your active ${ticketType} ticket was denied.`;

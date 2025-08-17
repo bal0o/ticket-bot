@@ -331,7 +331,7 @@ try {
 	const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
 	const serverVal = m && m[1] ? m[1] : 'unknown';
 	const metrics = require('./metrics');
-	metrics.ticketOpened(ticketType, serverVal);
+	metrics.ticketOpened(ticketType, serverVal, user.id);
 } catch (_) {}
 
 		} else {

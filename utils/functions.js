@@ -532,7 +532,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             });
         } catch (_) {}
 
-        await transcript.fetch(channel, {
+        const transcriptResult = await transcript.fetch(channel, {
             channel: channel,
             numberOfMessages: 99,
             dateFormat: "MMM Do YYYY, h:mm:ss a",
@@ -541,7 +541,8 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             closeReason: reason,
             closedBy: staffMember.username || staffMember.user?.username,
             responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp)
-        }).then(async (data) => {
+        });
+        await (async (data) => {
             if (!data) return;
 
             const { enabled, save_path, base_url } = client.config.transcript_settings;
@@ -605,7 +606,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
                 savedTranscriptURL = transcriptURL;
                 await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, transcriptURL);
-                try { metrics.ticketClosed(ticketType, 'closed'); } catch (_) {}
+                try { metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username); } catch (_) {}
                 if (logs_channel) {
                     const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
                     logs_channel.send({ content: `Transcript saved: <${transcriptURL}>`, files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
@@ -614,7 +615,40 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
                 if (logs_channel) logs_channel.send({ files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
             }
-        });
+        })(transcriptResult);
+        // After transcript generation, compute metrics
+        try {
+            const metrics = require('./metrics');
+            const footerParts = embed.footer.text.split("|");
+            let ticketType = footerParts[1]?.trim() || 'Unknown';
+            if (ticketType.includes('#')) ticketType = ticketType.split('#')[0].trim();
+            const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
+            let server = 'unknown';
+            const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+            if (m && m[1]) server = m[1];
+            const openedAt = embed.timestamp ? new Date(embed.timestamp).getTime() : null;
+            const durationSec = openedAt ? Math.floor((Date.now() - openedAt) / 1000) : 0;
+            let messageCount = 0;
+            let userMessages = 0;
+            let staffMessages = 0;
+            try {
+                const fetched = await channel.messages.fetch({ limit: 100 });
+                messageCount = fetched ? fetched.size : 0;
+                fetched?.forEach(msg => {
+                    if (!msg.author) return;
+                    if (msg.author.bot) {
+                        // Bot messages are often staff relays or system; count as staff
+                        staffMessages++;
+                    } else if (msg.author.id === DiscordID) {
+                        userMessages++;
+                    } else {
+                        // Messages from guild members (not the user) are staff
+                        staffMessages++;
+                    }
+                });
+            } catch (_) {}
+            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages);
+        } catch (_) {}
         // removed debug
         // DM user
         if (typeFile.send_close_dm !== false) {
