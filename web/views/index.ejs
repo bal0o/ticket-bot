@@ -8,7 +8,7 @@
   </head>
 <body>
   <header class="navbar">
-    <div class="nav-left"><a href="/">Tickets</a></div>
+    <div class="nav-left"><a href="<%= user ? '/my' : '/' %>">Tickets</a></div>
     <div class="nav-right">
       <% if (user) { %>
         <span class="userpill">
@@ -36,9 +36,6 @@
           <a class="btn primary" href="/my">My Tickets</a>
           <% if (roleFlags && roleFlags.isStaff) { %>
             <a class="btn" href="/staff">Staff View</a>
-          <% } %>
-          <% if (roleFlags && roleFlags.isAdmin) { %>
-            <a class="btn" href="/admin/overrides">Admin</a>
           <% } %>
         </div>
       <% } else { %>
