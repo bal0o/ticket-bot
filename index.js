@@ -35,6 +35,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 
 	let difference = Math.round(endTime - startTime);
 	console.log(`Successfully logged in as ${client.user.username}! Took ${difference}ms`);
+	try { require('./utils/metrics').initPersisted?.(); } catch (_) {}
 });
 
 client

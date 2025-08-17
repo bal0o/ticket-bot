@@ -1,8 +1,9 @@
 const client = require('prom-client');
+const { QuickDB } = require('quick.db');
+const kv = new QuickDB();
 
 // Create a singleton registry
 const registry = new client.Registry();
-client.collectDefaultMetrics({ register: registry });
 
 // Gauges
 const openTicketsGauge = new client.Gauge({
@@ -44,10 +45,68 @@ registry.registerMetric(ticketsClaimedCounter);
 module.exports = {
 	registry,
 	setOpenTickets: (count) => openTicketsGauge.set(count || 0),
-	ticketOpened: (type, server) => ticketsOpenedCounter.inc({ type: type || 'unknown', server: server || 'unknown' }),
-	ticketClosed: (type, closeType) => ticketsClosedCounter.inc({ type: type || 'unknown', close_type: closeType || 'unknown' }),
-	staffAction: (action, type, staffId) => staffActionsCounter.inc({ action: action || 'unknown', type: type || 'unknown', staff_id: String(staffId || 'unknown') }),
-	ticketClaimed: (type) => ticketsClaimedCounter.inc({ type: type || 'unknown' }),
+	// Increment and persist totals
+	ticketOpened: (type, server) => {
+		const t = type || 'unknown';
+		const s = server || 'unknown';
+		ticketsOpenedCounter.inc({ type: t, server: s });
+		kv.add(`Metrics.total.ticketsOpened.${t}.${s}`, 1).catch(()=>{});
+	},
+	ticketClosed: (type, closeType) => {
+		const t = type || 'unknown';
+		const c = closeType || 'unknown';
+		ticketsClosedCounter.inc({ type: t, close_type: c });
+		kv.add(`Metrics.total.ticketsClosed.${t}.${c}`, 1).catch(()=>{});
+	},
+	staffAction: (action, type, staffId) => {
+		const a = action || 'unknown';
+		const t = type || 'unknown';
+		const s = String(staffId || 'unknown');
+		staffActionsCounter.inc({ action: a, type: t, staff_id: s });
+		kv.add(`Metrics.total.staffActions.${a}.${t}.${s}`, 1).catch(()=>{});
+	},
+	ticketClaimed: (type) => {
+		const t = type || 'unknown';
+		ticketsClaimedCounter.inc({ type: t });
+		kv.add(`Metrics.total.ticketsClaimed.${t}`, 1).catch(()=>{});
+	},
+	// Hydrate counters from persisted totals on startup to avoid resets breaking graphs
+	initPersisted: async () => {
+		try {
+			const opened = await kv.get('Metrics.total.ticketsOpened') || {};
+			for (const t of Object.keys(opened)) {
+				const byServer = opened[t] || {};
+				for (const s of Object.keys(byServer)) {
+					const v = byServer[s] || 0;
+					if (v > 0) ticketsOpenedCounter.inc({ type: t, server: s }, v);
+				}
+			}
+			const closed = await kv.get('Metrics.total.ticketsClosed') || {};
+			for (const t of Object.keys(closed)) {
+				const byClose = closed[t] || {};
+				for (const c of Object.keys(byClose)) {
+					const v = byClose[c] || 0;
+					if (v > 0) ticketsClosedCounter.inc({ type: t, close_type: c }, v);
+				}
+			}
+			const actions = await kv.get('Metrics.total.staffActions') || {};
+			for (const a of Object.keys(actions)) {
+				const byType = actions[a] || {};
+				for (const t of Object.keys(byType)) {
+					const byStaff = byType[t] || {};
+					for (const s of Object.keys(byStaff)) {
+						const v = byStaff[s] || 0;
+						if (v > 0) staffActionsCounter.inc({ action: a, type: t, staff_id: s }, v);
+					}
+				}
+			}
+			const claimed = await kv.get('Metrics.total.ticketsClaimed') || {};
+			for (const t of Object.keys(claimed)) {
+				const v = claimed[t] || 0;
+				if (v > 0) ticketsClaimedCounter.inc({ type: t }, v);
+			}
+		} catch (_) {}
+	},
 };
 
 
