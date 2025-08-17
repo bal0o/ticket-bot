@@ -100,15 +100,14 @@
 	},
 
 	"applications": {
-		"stages": ["Submitted","Initial Review","Background Check","Interview","Final Decision","Archived"],
+		"stages": ["Submitted","Background Check","Interview","Final Decision","Archived"],
 		"messages": {
-			"advance_dm": "Your application has moved to the next stage: {{STAGE}}.",
+			"advance_dm": "Thank you for your interest in becoming staff. We will review your application further and next time we are looking to expand staff you will be notified.",
 			"deny_dm": "Thank you for applying. Unfortunately your application was not successful at this time.",
-			"advance_channel": "Application advanced to {{STAGE}} by {{STAFF}}.",
-			"deny_channel": "Application denied by {{STAFF}}."
+			"deny_channel": "Thank you for applying. Unfortunately your application was not successful at this time."
 		},
 		"interview": {
-			"category_id": "",
+			"category_id": "1406730207800459344",
 			"duration_minutes": 30
 		}
 	}
