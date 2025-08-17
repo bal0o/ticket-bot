@@ -16,6 +16,15 @@
     <p class="muted">Stage: <strong><%= app.stage %></strong> • Type: <%= app.type %> • Server: <%= app.server || '' %></p>
     <div class="grid two">
       <section>
+        <h3>Stages</h3>
+        <div class="stages">
+          <% const allStages = (require('../config/config.json').applications?.stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']); %>
+          <% allStages.forEach(s => { const active = s === app.stage; %>
+            <span class="stage <%= active ? 'active' : '' %>"><%= s %></span>
+          <% }) %>
+        </div>
+      </section>
+      <section>
         <h3>Responses</h3>
         <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
         <h3>Tickets</h3>
@@ -59,11 +68,13 @@
           <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
             <button class="btn" type="submit">Open Communication Ticket</button>
           </form>
-          <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-            <label>Interview time: <input type="datetime-local" name="when"></label>
-            <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID"></label>
-            <button class="btn" type="submit">Schedule Interview</button>
-          </form>
+          <% if (app.stage === 'Interview') { %>
+            <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+              <label>Interview time: <input type="datetime-local" name="when"></label>
+              <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID"></label>
+              <button class="btn" type="submit">Schedule Interview</button>
+            </form>
+          <% } %>
         <% } %>
       </section>
     </div>

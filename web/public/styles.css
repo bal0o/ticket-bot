@@ -36,6 +36,9 @@ tr:hover td { background: #141923; }
 .pre { white-space: pre-wrap; }
 .grid.two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
 section h3 { margin-top: 0; }
+.stages { display:flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.stage { padding: 6px 10px; border:1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
+.stage.active { border-color: var(--accent); color: var(--text); }
 
 form label { margin-right: 12px; display:inline-flex; gap: 6px; align-items:center; color: var(--muted); }
 input, select { background: #0e131a; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; }
