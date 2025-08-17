@@ -140,6 +140,51 @@ module.exports = async function (client, message) {
                     break;
                 }
             }
+
+            // Auto-join access roles to staff thread on first staff message (no pings)
+            try {
+                if (ticketType && Array.isArray(ticketType["access-role-id"]) && ticketType["access-role-id"].length > 0) {
+                    const flagKey = `ThreadAutoJoin.${message.channel.id}`;
+                    const already = await db.get(flagKey);
+                    if (!already) {
+                        // Find ticket number from pinned embed
+                        const pinned = await message.channel.messages.fetchPinned().catch(() => null);
+                        let ticketNumber = null;
+                        if (pinned) {
+                            const pinMsg = pinned.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || pinned.last();
+                            if (pinMsg && pinMsg.embeds[0] && pinMsg.embeds[0].footer && pinMsg.embeds[0].footer.text) {
+                                const parts = pinMsg.embeds[0].footer.text.split("|");
+                                const idParts = parts[0].trim().split('-');
+                                ticketNumber = idParts[1];
+                            }
+                        }
+                        if (ticketNumber) {
+                            let thread = message.channel.threads.cache.find(t => t.name === `staff-chat-${ticketNumber}`);
+                            if (!thread && message.channel.threads && message.channel.threads.fetchActive) {
+                                const fetched = await message.channel.threads.fetchActive().catch(() => null);
+                                if (fetched && fetched.threads) thread = fetched.threads.find(t => t.name === `staff-chat-${ticketNumber}`);
+                            }
+                            if (thread) {
+                                let added = 0;
+                                for (const roleId of ticketType["access-role-id"]) {
+                                    if (!roleId) continue;
+                                    const role = message.guild.roles.cache.get(roleId);
+                                    if (!role || !role.members) continue;
+                                    for (const [_, member] of role.members) {
+                                        try {
+                                            await thread.members.add(member.id);
+                                            added++;
+                                            if (added >= 25) break; // safety cap
+                                        } catch (_) {}
+                                    }
+                                    if (added >= 25) break;
+                                }
+                                await db.set(flagKey, true).catch(() => {});
+                            }
+                        }
+                    }
+                }
+            } catch (_) {}
             
             // Claim enforcement: if enabled and ticket claimed by someone else, block
             try {

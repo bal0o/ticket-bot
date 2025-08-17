@@ -185,7 +185,7 @@ app.get('/metrics', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.render('index');
+    return res.redirect('/my');
 });
 
 app.get('/login', (req, res, next) => {
