@@ -85,6 +85,7 @@
            <label>Interview time: <input type="datetime-local" name="when" required></label>
            <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
          </div>
+         <input type="hidden" name="when_utc" value="">
          <button class="btn primary" type="submit">Schedule Interview</button>
        </form>
      </section>
@@ -105,6 +106,7 @@
           <div style="margin-bottom: 16px;">
             <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
           </div>
+          <input type="hidden" name="when_utc" value="">
           <div style="text-align: right;">
             <button type="button" class="btn" onclick="closeRescheduleModal()">Cancel</button>
             <button type="submit" class="btn primary">Reschedule</button>
@@ -167,8 +169,27 @@
           alert('Interview must be scheduled at least 10 minutes in advance.');
           return false;
         }
+
+        // Provide UTC explicitly to the server
+        const whenUtcInput = this.querySelector('input[name="when_utc"]');
+        if (whenUtcInput) {
+          whenUtcInput.value = new Date(when).toISOString();
+        }
       });
     }
+
+    // Reschedule form: provide UTC explicitly
+    (function(){
+      const resForm = document.getElementById('rescheduleForm');
+      if (!resForm) return;
+      resForm.addEventListener('submit', function() {
+        const when = this.querySelector('input[name="when"]').value;
+        const whenUtcInput = this.querySelector('input[name="when_utc"]');
+        if (when && whenUtcInput) {
+          whenUtcInput.value = new Date(when).toISOString();
+        }
+      });
+    })();
     
          // Reschedule modal functions
      function showRescheduleForm(jobId, currentTime, currentStaffId) {
