@@ -588,8 +588,10 @@ app.get('/applications/:id/interviews', ensureAuth, async (req, res) => {
                 ...job,
                 interviewTime,
                 localTime,
-                // Store the original UTC time for form pre-filling
-                utcTime: interviewTime.toISOString().slice(0, 16)
+                // Full ISO for precise client-side conversion to the viewer's local tz
+                isoTime: interviewTime.toISOString(),
+                // Store the original UTC time for form pre-filling (full ISO; client will convert to local)
+                utcTime: interviewTime.toISOString()
             };
         })
         .sort((a, b) => a.at - b.at);

@@ -32,10 +32,10 @@
        <% } else { %>
         <div class="interviews-list">
                      <% schedules.forEach(schedule => { %>
-             <div class="interview-card" data-job-id="<%= schedule.jobId %>" data-utc-time="<%= schedule.utcTime %>">
+             <div class="interview-card" data-job-id="<%= schedule.jobId %>" data-utc-time="<%= schedule.utcTime %>" data-iso-time="<%= schedule.isoTime %>">
               <div class="interview-info">
                 <h4>Interview #<%= schedule.jobId %></h4>
-                                 <p><strong>Date & Time:</strong> <%= schedule.localTime %> (Your Local Time)</p>
+                                 <p><strong>Date & Time:</strong> <span class="dt" data-iso-time="<%= schedule.isoTime %>"><%= schedule.localTime %></span> (Your Local Time)</p>
                 <p><strong>Staff Member:</strong> <code><%= schedule.staffId %></code></p>
                 <p><strong>Status:</strong> 
                   <span class="status-badge <%= schedule.status %>">
@@ -115,6 +115,22 @@
   </div>
   
   <script>
+    // Render local times from ISO timestamps
+    (function() {
+      const nodes = document.querySelectorAll('.dt[data-iso-time]');
+      nodes.forEach(n => {
+        try {
+          const iso = n.getAttribute('data-iso-time');
+          if (!iso) return;
+          const d = new Date(iso);
+          n.textContent = d.toLocaleString(undefined, {
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+          });
+        } catch (_) {}
+      });
+    })();
+
     // Form validation for interview scheduling
     const interviewForm = document.querySelector('form[action*="/schedule"]');
     if (interviewForm) {
