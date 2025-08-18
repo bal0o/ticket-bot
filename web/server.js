@@ -289,7 +289,15 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
-    res.render('applications_detail', { app: appRec, canAdmin, nextStage, userNames, stages });
+    res.render('applications_detail', { 
+        app: appRec, 
+        canAdmin, 
+        nextStage, 
+        userNames, 
+        stages,
+        notification: req.query.notification,
+        notificationType: req.query.type || 'info'
+    });
 });
 
 // Applications - stage advance

@@ -12,9 +12,9 @@
     <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
   </header>
   <main class="container">
-    <% if (req.query.notification) { %>
-      <div class="notification <%= req.query.type || 'info' %>">
-        <%= req.query.notification %>
+    <% if (notification) { %>
+      <div class="notification <%= notificationType %>">
+        <%= notification %>
       </div>
     <% } %>
     
