@@ -87,16 +87,7 @@
                <li>
                  <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
                  <div>
-                   <% if (c.comment && c.comment.includes('Transcript available:')) { %>
-                     <% const m = c.comment.match(/Transcript available: (https?:\/\/[^\s]+)/); const transcriptUrl = m ? m[1] : null; %>
-                     <% if (transcriptUrl) { %>
-                       <a href="#" onclick="openTranscriptModal('<%= transcriptUrl %>', 'Communication Transcript')" class="transcript-link">📄 View Communication Transcript</a>
-                     <% } else { %>
-                       <%= c.comment %>
-                     <% } %>
-                   <% } else { %>
-                     <%= c.comment %>
-                   <% } %>
+                   <%= c.comment %>
                  </div>
                </li>
              <% }) %>
