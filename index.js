@@ -88,6 +88,8 @@ client.login(process.env.BOT_TOKEN).then(() => {
 						// Create voice channel
 						try {
 							console.log(`[Interview Scheduler] Processing job ${jobId} for app ${job.appId}`);
+							console.log(`[Interview Scheduler] Job scheduled for: ${new Date(job.at).toISOString()} (${new Date(job.at).toLocaleString()})`);
+							console.log(`[Interview Scheduler] Current time: ${new Date().toISOString()} (${new Date().toLocaleString()})`);
 							const appRec = await db.get(`Applications.${job.appId}`);
 							if (!appRec) { 
 								console.log(`[Interview Scheduler] Application ${job.appId} not found, skipping job ${jobId}`);
