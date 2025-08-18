@@ -88,13 +88,39 @@ client.login(process.env.BOT_TOKEN).then(() => {
 							}
 							
 							console.log(`[Interview Scheduler] Found guild: ${guild.name} (${guild.id})`);
+							// Build permission overwrites with proper user/role resolution
 							const perms = [
 								{ id: guild.id, deny: ['VIEW_CHANNEL'] },
-								{ id: client.user.id, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] },
-								{ id: adminRoleId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] },
-								{ id: job.staffId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] },
-								{ id: appRec.userId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] }
+								{ id: client.user.id, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] }
 							];
+							
+							// Add admin role if it exists
+							if (adminRoleId) {
+								const adminRole = guild.roles.cache.get(adminRoleId);
+								if (adminRole) {
+									perms.push({ id: adminRole, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+								} else {
+									console.log(`[Interview Scheduler] Admin role ${adminRoleId} not found in guild`);
+								}
+							}
+							
+							// Add staff member
+							try {
+								const staffMember = await guild.members.fetch(job.staffId);
+								perms.push({ id: staffMember, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+							} catch (staffError) {
+								console.log(`[Interview Scheduler] Staff member ${job.staffId} not found in guild, using ID directly`);
+								perms.push({ id: job.staffId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+							}
+							
+							// Add applicant
+							try {
+								const applicantMember = await guild.members.fetch(appRec.userId);
+								perms.push({ id: applicantMember, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+							} catch (applicantError) {
+								console.log(`[Interview Scheduler] Applicant ${appRec.userId} not found in guild, using ID directly`);
+								perms.push({ id: appRec.userId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+							}
 							const name = `interview-${appRec.userId.slice(-4)}-${Math.floor(now/1000)}`;
 							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
 							if (interviewCategory) {
