@@ -563,7 +563,7 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
             
             if (staffDmChannel.data && staffDmChannel.data.id) {
                 await axios.post(`https://discord.com/api/v10/channels/${staffDmChannel.data.id}/messages`, {
-                    content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username}\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
+                    content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username} (<@${appRec.userId}>)\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
                 }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             }
         } catch (staffDmError) {
