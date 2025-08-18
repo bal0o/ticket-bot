@@ -224,34 +224,6 @@ module.exports = async function (client, message) {
                 }
             }
 
-            // For application communication channels, relay staff messages as DMs to the applicant
-            try {
-                const mapAppId = await db.get(`AppMap.channelToApp.${message.channel.id}`);
-                if (mapAppId) {
-                    // Only relay plain messages from staff (no commands)
-                    if (message.content && !message.content.startsWith('!')) {
-                        // Create a simple embed with just the message
-                        const staffEmbed = new Discord.MessageEmbed()
-                            .setAuthor({ 
-                                name: `${message.member?.displayName || message.author.username} (Staff)`, 
-                                iconURL: message.author.displayAvatarURL() 
-                            })
-                            .setDescription(message.content)
-                            .setColor('#5865F2')
-                            .setTimestamp();
-                        
-                        try { 
-                            await user.send({ embeds: [staffEmbed] }); 
-                        } catch (dmError) {
-                            console.error('Failed to send DM to user:', dmError);
-                            try { await message.reply('Failed to send message to user. They may have DMs disabled.'); } catch (_) {}
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error handling application communication:', error);
-            }
-
             // Auto-join access roles to staff thread on first staff message (no pings)
             try {
                 if (ticketType && Array.isArray(ticketType["access-role-id"]) && ticketType["access-role-id"].length > 0) {
