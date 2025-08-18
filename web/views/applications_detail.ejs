@@ -66,7 +66,7 @@
              <% (app.comments || []).forEach(c => { %>
                <li>
                  <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
-                 <div class="pre">
+                 <div>
                    <% if (c.comment && c.comment.includes('Transcript available:')) { %>
                      <% const transcriptUrl = c.comment.match(/Transcript available: (https?:\/\/[^\s]+)/)?.[1]; %>
                      <% if (transcriptUrl) { %>
