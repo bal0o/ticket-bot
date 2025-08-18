@@ -516,7 +516,7 @@ module.exports = async function (client, interaction) {
                                 const filePathUser = `${save_path}/${channel.name}.html`;
                                 fs.writeFileSync(filePathUser, userData);
                             }
-                        } catch (e) {
+            } catch (e) {
                             console.error('Error saving transcript:', e);
                         }
                     }

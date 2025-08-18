@@ -60,26 +60,28 @@
             <li><strong><%= h.stage %></strong> <span class="muted"><%= new Date(h.at).toLocaleString() %></span> <%= h.by ? `by ${userNames[String(h.by)] || h.by}` : '' %><br><span class="muted"><%= h.note || '' %></span></li>
           <% }) %>
         </ul>
-         <h3>Comments</h3>
-         <ul>
-           <% (app.comments || []).forEach(c => { %>
-             <li>
-               <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
-               <div class="pre">
-                 <% if (c.comment && c.comment.includes('Transcript available:')) { %>
-                   <% const transcriptUrl = c.comment.match(/Transcript available: (https?:\/\/[^\s]+)/)?.[1]; %>
-                   <% if (transcriptUrl) { %>
-                     <a href="#" onclick="openTranscriptModal('<%= transcriptUrl %>', 'Communication Transcript')" class="transcript-link">📄 View Communication Transcript</a>
+         <div class="comments-section">
+           <h3>Comments</h3>
+           <ul>
+             <% (app.comments || []).forEach(c => { %>
+               <li>
+                 <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
+                 <div class="pre">
+                   <% if (c.comment && c.comment.includes('Transcript available:')) { %>
+                     <% const transcriptUrl = c.comment.match(/Transcript available: (https?:\/\/[^\s]+)/)?.[1]; %>
+                     <% if (transcriptUrl) { %>
+                       <a href="#" onclick="openTranscriptModal('<%= transcriptUrl %>', 'Communication Transcript')" class="transcript-link">📄 View Communication Transcript</a>
+                     <% } else { %>
+                       <%= c.comment %>
+                     <% } %>
                    <% } else { %>
                      <%= c.comment %>
                    <% } %>
-                 <% } else { %>
-                   <%= c.comment %>
-                 <% } %>
-               </div>
-             </li>
-           <% }) %>
-         </ul>
+                 </div>
+               </li>
+             <% }) %>
+           </ul>
+         </div>
         <form method="post" action="/applications/<%= app.id %>/comment" style="margin:12px 0;">
           <textarea name="comment" rows="3" style="width:100%" placeholder="Add comment..."></textarea>
           <button class="btn primary" type="submit" <%= (app.stage === 'Denied' || app.stage === 'Archived') ? 'disabled' : '' %>>Add Comment</button>
