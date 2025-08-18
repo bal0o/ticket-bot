@@ -512,11 +512,10 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
     
     try {
-        // Validate minimum lead time (10 minutes)
+        // Ensure the interview time is not in the past
         const now = new Date();
-        const minLeadTime = 10 * 60 * 1000; // 10 minutes in milliseconds
-        if (when.getTime() - now.getTime() < minLeadTime) {
-            return res.redirect(`/applications/${appId}?notification=Interview must be scheduled at least 10 minutes in advance&type=error`);
+        if (when.getTime() <= now.getTime()) {
+            return res.redirect(`/applications/${appId}?notification=Interview time must be in the future&type=error`);
         }
         
         // Schedule the interview first
@@ -684,11 +683,10 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (re
     }
     
     try {
-        // Validate minimum lead time (10 minutes)
+        // Ensure the interview time is not in the past
         const now = new Date();
-        const minLeadTime = 10 * 60 * 1000; // 10 minutes in milliseconds
-        if (when.getTime() - now.getTime() < minLeadTime) {
-            return res.redirect(`/applications/${appId}?notification=Interview must be scheduled at least 10 minutes in advance&type=error`);
+        if (when.getTime() <= now.getTime()) {
+            return res.redirect(`/applications/${appId}?notification=Interview time must be in the future&type=error`);
         }
         
         // Delete old schedule

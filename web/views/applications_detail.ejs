@@ -189,10 +189,10 @@
           return false;
         }
         
-                // Validate interview time is in the future and at least 10 minutes ahead
+                // Validate interview time is in the future
         const interviewTime = new Date(when);
         const now = new Date();
-        const minLeadTime = 10 * 60 * 1000; // 10 minutes in milliseconds
+        
         
         if (interviewTime <= now) {
           e.preventDefault();
@@ -200,11 +200,7 @@
           return false;
         }
         
-        if (interviewTime.getTime() - now.getTime() < minLeadTime) {
-          e.preventDefault();
-          alert('Interview must be scheduled at least 10 minutes in advance.');
-          return false;
-        }
+        
        });
      }
      
