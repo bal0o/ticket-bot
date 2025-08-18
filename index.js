@@ -47,6 +47,8 @@ client.login(process.env.BOT_TOKEN).then(() => {
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;
 		const interviewCategory = cfg.applications && cfg.applications.interview ? cfg.applications.interview.category_id : null;
 		const interviewDuration = cfg.applications && cfg.applications.interview ? cfg.applications.interview.duration_minutes : 30;
+		
+		console.log(`[Interview Scheduler] Initialized with guildId: ${guildId}, adminRoleId: ${adminRoleId}, interviewCategory: ${interviewCategory}, duration: ${interviewDuration} minutes`);
 		async function runScheduler() {
 			try {
 				const jobs = await db.get('ApplicationSchedules') || {};
@@ -57,10 +59,21 @@ client.login(process.env.BOT_TOKEN).then(() => {
 					if (now >= job.at) {
 						// Create voice channel
 						try {
+							console.log(`[Interview Scheduler] Processing job ${jobId} for app ${job.appId}`);
 							const appRec = await db.get(`Applications.${job.appId}`);
-							if (!appRec) { job.status = 'skipped'; await db.set(`ApplicationSchedules.${jobId}`, job); continue; }
+							if (!appRec) { 
+								console.log(`[Interview Scheduler] Application ${job.appId} not found, skipping job ${jobId}`);
+								job.status = 'skipped'; 
+								await db.set(`ApplicationSchedules.${jobId}`, job); 
+								continue; 
+							}
 							const guild = client.guilds.cache.get(guildId);
-							if (!guild) { job.status = 'error'; await db.set(`ApplicationSchedules.${jobId}`, job); continue; }
+							if (!guild) { 
+								console.log(`[Interview Scheduler] Guild ${guildId} not found, erroring job ${jobId}`);
+								job.status = 'error'; 
+								await db.set(`ApplicationSchedules.${jobId}`, job); 
+								continue; 
+							}
 							const perms = [
 								{ id: guild.id, deny: ['VIEW_CHANNEL'] },
 								{ id: client.user.id, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] },
@@ -71,7 +84,9 @@ client.login(process.env.BOT_TOKEN).then(() => {
 							const name = `interview-${appRec.userId.slice(-4)}-${Math.floor(now/1000)}`;
 							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
 							if (interviewCategory) createOpts.parent = interviewCategory;
+							console.log(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId}`);
 							const vc = await guild.channels.create(name, createOpts);
+							console.log(`[Interview Scheduler] Successfully created voice channel ${vc.id} for job ${jobId}`);
 							job.status = 'done'; job.completedAt = Date.now(); job.info = { channelId: vc.id };
 							await db.set(`ApplicationSchedules.${jobId}`, job);
 							
