@@ -60,12 +60,26 @@
             <li><strong><%= h.stage %></strong> <span class="muted"><%= new Date(h.at).toLocaleString() %></span> <%= h.by ? `by ${userNames[String(h.by)] || h.by}` : '' %><br><span class="muted"><%= h.note || '' %></span></li>
           <% }) %>
         </ul>
-        <h3>Comments</h3>
-        <ul>
-          <% (app.comments || []).forEach(c => { %>
-            <li><strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br><div class="pre"><%= c.comment %></div></li>
-          <% }) %>
-        </ul>
+         <h3>Comments</h3>
+         <ul>
+           <% (app.comments || []).forEach(c => { %>
+             <li>
+               <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
+               <div class="pre">
+                 <% if (c.comment && c.comment.includes('Transcript available:')) { %>
+                   <% const transcriptUrl = c.comment.match(/Transcript available: (https?:\/\/[^\s]+)/)?.[1]; %>
+                   <% if (transcriptUrl) { %>
+                     <a href="#" onclick="openTranscriptModal('<%= transcriptUrl %>', 'Communication Transcript')" class="transcript-link">📄 View Communication Transcript</a>
+                   <% } else { %>
+                     <%= c.comment %>
+                   <% } %>
+                 <% } else { %>
+                   <%= c.comment %>
+                 <% } %>
+               </div>
+             </li>
+           <% }) %>
+         </ul>
         <form method="post" action="/applications/<%= app.id %>/comment" style="margin:12px 0;">
           <textarea name="comment" rows="3" style="width:100%" placeholder="Add comment..."></textarea>
           <button class="btn primary" type="submit" <%= (app.stage === 'Denied' || app.stage === 'Archived') ? 'disabled' : '' %>>Add Comment</button>
@@ -89,18 +103,13 @@
               <p class="muted">Channel: <code>#<%= lastTicket.channelId %></code></p>
               <p class="muted">Channel Name: <code>app-<%= app.username %>-comms</code></p>
             </div>
-          <% } else if ((app.tickets||[]).length > 0 && !channelExists) { %>
-            <div class="communication-status error">
-              <p class="status-error">⚠️ Communication channel was deleted or inaccessible</p>
-              <p class="muted">Channel ID: <%= lastTicket ? lastTicket.channelId : 'Unknown' %></p>
+          <% } else { %>
+            <div class="communication-status">
+              <p class="muted">No communication channel is currently open</p>
               <form method="post" action="/applications/<%= app.id %>/open_ticket" style="margin-top:8px;">
-                <button class="btn" type="submit">Reopen Communication Ticket</button>
+                <button class="btn" type="submit">Open Communication Channel</button>
               </form>
             </div>
-          <% } else { %>
-            <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
-              <button class="btn" type="submit">Open Communication Ticket</button>
-            </form>
           <% } %>
           
           <% if (app.stage === 'Interview') { %>
@@ -116,9 +125,22 @@
       </section>
     </div>
     
-  </main>
-  
-  <script>
+     </main>
+   
+   <!-- Transcript Modal -->
+   <div id="transcriptModal" class="modal">
+     <div class="modal-content">
+       <div class="modal-header">
+         <h2 id="transcriptModalTitle">Transcript</h2>
+         <span class="close" onclick="closeTranscriptModal()">&times;</span>
+       </div>
+       <div class="modal-body">
+         <iframe id="transcriptFrame" src="" width="100%" height="600px" frameborder="0"></iframe>
+       </div>
+     </div>
+   </div>
+   
+   <script>
     // Auto-hide notifications after 5 seconds
     document.addEventListener('DOMContentLoaded', function() {
       const notifications = document.querySelectorAll('.notification');
@@ -162,11 +184,33 @@
           e.preventDefault();
           alert('Interview time must be in the future.');
           return false;
-        }
-      });
-    }
-  </script>
-</body>
-</html>
+                 }
+       });
+     }
+     
+     // Transcript modal functions
+     function openTranscriptModal(url, title) {
+       document.getElementById('transcriptModalTitle').textContent = title;
+       document.getElementById('transcriptFrame').src = url;
+       document.getElementById('transcriptModal').style.display = 'block';
+       document.body.style.overflow = 'hidden'; // Prevent background scrolling
+     }
+     
+     function closeTranscriptModal() {
+       document.getElementById('transcriptModal').style.display = 'none';
+       document.getElementById('transcriptFrame').src = '';
+       document.body.style.overflow = 'auto'; // Restore scrolling
+     }
+     
+     // Close modal when clicking outside of it
+     window.onclick = function(event) {
+       const modal = document.getElementById('transcriptModal');
+       if (event.target === modal) {
+         closeTranscriptModal();
+       }
+     }
+   </script>
+ </body>
+ </html>
 
 
