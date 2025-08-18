@@ -120,6 +120,21 @@ section h3 { margin-top: 0; }
   font-size: 12px;
 }
 
+/* Communication Status Error State */
+.communication-status.error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+}
+.status-error {
+  color: #ef4444;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+.communication-status.error .muted {
+  margin: 0;
+  font-size: 12px;
+}
+
 /* Notification Styles */
 .notification {
   padding: 16px;

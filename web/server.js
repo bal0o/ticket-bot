@@ -289,6 +289,26 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+    
+    // Check if the communication channel actually exists
+    let channelExists = false;
+    let lastTicket = null;
+    if (appRec.tickets && appRec.tickets.length > 0) {
+        lastTicket = appRec.tickets[appRec.tickets.length - 1];
+        if (lastTicket && lastTicket.channelId) {
+            try {
+                // Try to fetch the channel to see if it exists
+                const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
+                    headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                });
+                channelExists = channelResponse.status === 200;
+            } catch (error) {
+                // Channel doesn't exist or we can't access it
+                channelExists = false;
+            }
+        }
+    }
+    
     res.render('applications_detail', { 
         app: appRec, 
         canAdmin, 
@@ -296,7 +316,9 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
         userNames, 
         stages,
         notification: req.query.notification,
-        notificationType: req.query.type || 'info'
+        notificationType: req.query.type || 'info',
+        channelExists,
+        lastTicket
     });
 });
 

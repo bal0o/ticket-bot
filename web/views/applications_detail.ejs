@@ -83,10 +83,18 @@
             <button class="btn" type="submit">Deny</button>
           </form>
           <h3>Contact / Interview</h3>
-          <% if ((app.tickets||[]).length > 0) { %>
+          <% if (channelExists && lastTicket) { %>
             <div class="communication-status">
               <p class="status-active">✅ Communication channel is open</p>
-              <p class="muted">Channel ID: <%= app.tickets[app.tickets.length - 1].channelId %></p>
+              <p class="muted">Channel ID: <%= lastTicket.channelId %></p>
+            </div>
+          <% } else if ((app.tickets||[]).length > 0 && !channelExists) { %>
+            <div class="communication-status error">
+              <p class="status-error">⚠️ Communication channel was deleted or inaccessible</p>
+              <p class="muted">Channel ID: <%= lastTicket ? lastTicket.channelId : 'Unknown' %></p>
+              <form method="post" action="/applications/<%= app.id %>/open_ticket" style="margin-top:8px;">
+                <button class="btn" type="submit">Reopen Communication Ticket</button>
+              </form>
             </div>
           <% } else { %>
             <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
