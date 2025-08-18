@@ -470,36 +470,106 @@ module.exports = async function (client, interaction) {
                 const isAdmin = member.roles.cache.has(config.role_ids.application_admin_role_id) || member.roles.cache.has(config.role_ids.default_admin_role_id);
                 if (!isAdmin) { await interaction.editReply({ content: 'You do not have permission to close this.' }); return; }
                 
-                // Close via shared close logic to generate transcript
-                await func.closeTicket(interaction.client, channel, interaction.member, 'Communication session closed');
+                // Get application details
+                const appRec = await applications.getApplication(appId);
+                if (!appRec) { await interaction.editReply({ content: 'Application not found.' }); return; }
                 
-                // Wait a moment for transcript generation to complete
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Generate transcript for communication channel
+                const transcript = require("../utils/fetchTranscript.js");
+                const transcriptResult = await transcript.fetch(channel, {
+                    channel: channel,
+                    numberOfMessages: 99,
+                    dateFormat: "MMM Do YYYY, h:mm:ss a",
+                    dateLocale: "en",
+                    DiscordID: appRec.userId,
+                    closeReason: 'Communication session closed',
+                    closedBy: member.user.username,
+                    responseTime: 'N/A'
+                });
                 
-                // Get the transcript URL from the closed ticket data
-                try {
-                    const appRec = await applications.getApplication(appId);
-                    if (appRec && appRec.tickets) {
-                        const lastTicket = appRec.tickets[appRec.tickets.length - 1];
-                        if (lastTicket && lastTicket.ticketId) {
-                            // Look up the transcript URL in PlayerStats
-                            const transcriptData = await db.get(`PlayerStats.${appRec.userId}.ticketLogs.${lastTicket.ticketId}`);
-                            if (transcriptData && transcriptData.transcriptURL) {
-                                // Add transcript URL to application
-                                await applications.addComment(appId, interaction.user.id, `Communication ticket closed. Transcript available: ${transcriptData.transcriptURL}`);
-                            } else {
-                                await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Transcript generation in progress...');
+                let savedTranscriptURL = null;
+                if (transcriptResult) {
+                    const fs = require('fs');
+                    const { enabled, save_path, base_url } = client.config.transcript_settings;
+                    if (enabled) {
+                        if (!fs.existsSync(save_path)) {
+                            fs.mkdirSync(save_path, { recursive: true });
+                        }
+                        try {
+                            const filePathFull = `${save_path}/${channel.name}.full.html`;
+                            fs.writeFileSync(filePathFull, transcriptResult);
+                            savedTranscriptURL = `${base_url}${channel.name}.full.html`;
+                            
+                            // Also generate a user-facing transcript
+                            const userData = await transcript.fetch(channel, {
+                                channel: channel,
+                                numberOfMessages: 99,
+                                dateFormat: "MMM Do YYYY, h:mm:ss a",
+                                dateLocale: "en",
+                                DiscordID: appRec.userId,
+                                filterMode: 'user',
+                                closeReason: 'Communication session closed',
+                                closedBy: member.user.username,
+                                responseTime: 'N/A'
+                            });
+                            if (userData) {
+                                const filePathUser = `${save_path}/${channel.name}.html`;
+                                fs.writeFileSync(filePathUser, userData);
                             }
+                        } catch (e) {
+                            console.error('Error saving transcript:', e);
                         }
                     }
-                } catch (transcriptError) {
-                    console.error('Error saving transcript to application:', transcriptError);
-                    await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Error retrieving transcript.');
                 }
+                
+                // Send transcript to logs channel if configured
+                const questionFile = require("../content/questions/application.json");
+                const transcriptChannel = questionFile["transcript-channel"];
+                const logs_channel = await channel.guild.channels.cache.find(x => x.id === transcriptChannel);
+                if (logs_channel && transcriptResult) {
+                    const file = new Discord.MessageAttachment(transcriptResult, `${channel.name}.full.html`);
+                    await logs_channel.send({ 
+                        content: `Communication channel transcript: ${savedTranscriptURL ? `<${savedTranscriptURL}>` : 'No URL available'}`,
+                        files: [file] 
+                    }).catch(e => console.error('Error sending transcript to logs:', e));
+                }
+                
+                // Add comment to application with transcript URL
+                if (savedTranscriptURL) {
+                    await applications.addComment(appId, interaction.user.id, `Communication channel closed. Transcript available: ${savedTranscriptURL}`);
+                } else {
+                    await applications.addComment(appId, interaction.user.id, 'Communication channel closed. Transcript generation failed.');
+                }
+                
+                // Send DM to user about closure
+                try {
+                    const user = await client.users.fetch(appRec.userId);
+                    let reply = `Your application communication channel has been closed.\nReason: Communication session completed`;
+                    if (savedTranscriptURL) {
+                        const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
+                        reply += `\n\nView your transcript: <${userUrl}>`;
+                    }
+                    await user.send(reply);
+                } catch (e) {
+                    console.error('Error sending DM to user:', e);
+                }
+                
+                // Remove the channel mapping
+                await db.delete(`AppMap.channelToApp.${channel.id}`);
+                
+                // Delete the channel after a short delay
+                setTimeout(async () => {
+                    try {
+                        await channel.delete();
+                    } catch (err) {
+                        console.error('Failed to delete communication channel:', err);
+                    }
+                }, 1000);
                 
                 await interaction.editReply({ content: 'Communication channel closed and transcript saved to application.' });
             } catch (e) {
-                func.handle_errors(e, client, 'interactionCreate.js', 'Error closing communication ticket');
+                console.error('Error closing communication ticket:', e);
+                await interaction.editReply({ content: 'Error closing communication channel. Please try again.' });
             }
             return;
         }
