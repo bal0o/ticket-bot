@@ -1,6 +1,7 @@
 require("dotenv").config({ path: "./config/.env" });
 const { Client,Collection,Intents } = require("discord.js");
 const config = require("./config/config.json");
+const axios = require("axios");
 
 const client = new Client({ intents: [
 	Intents.FLAGS.GUILDS,
@@ -45,6 +46,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 		const guildId = cfg.channel_ids.public_guild_id; // Use public guild for interview channels
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;
 		const interviewCategory = cfg.applications && cfg.applications.interview ? cfg.applications.interview.category_id : null;
+		const interviewDuration = cfg.applications && cfg.applications.interview ? cfg.applications.interview.duration_minutes : 30;
 		async function runScheduler() {
 			try {
 				const jobs = await db.get('ApplicationSchedules') || {};
@@ -72,6 +74,43 @@ client.login(process.env.BOT_TOKEN).then(() => {
 							const vc = await guild.channels.create(name, createOpts);
 							job.status = 'done'; job.completedAt = Date.now(); job.info = { channelId: vc.id };
 							await db.set(`ApplicationSchedules.${jobId}`, job);
+							
+							// Schedule auto-cleanup for the voice channel
+							const cleanupTime = Date.now() + (interviewDuration * 60 * 1000); // Convert minutes to milliseconds
+							await db.set(`InterviewCleanup.${vc.id}`, {
+								channelId: vc.id,
+								cleanupAt: cleanupTime,
+								jobId: jobId,
+								appId: job.appId,
+								attempts: 0
+							});
+							
+							// Send notifications to both users about the voice channel
+							try {
+								// Notify applicant
+								const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
+									recipient_id: appRec.userId
+								}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								
+								if (applicantDm.data && applicantDm.data.id) {
+									await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, {
+										content: `**Interview Voice Channel Ready** 🎤\n\nYour interview voice channel is now available!\n\n**Channel:** <#${vc.id}>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when you're ready to begin your interview.`
+									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								}
+								
+								// Notify staff member
+								const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
+									recipient_id: job.staffId
+								}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								
+								if (staffDm.data && staffDm.data.id) {
+									await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, {
+										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username}\n**Channel:** <#${vc.id}>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
+									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								}
+							} catch (notifyError) {
+								console.error('Failed to send voice channel notifications:', notifyError?.response?.data || notifyError);
+							}
 						} catch (e) {
 							job.status = 'error'; job.error = e?.message || String(e);
 							await db.set(`ApplicationSchedules.${jobId}`, job);
@@ -82,6 +121,67 @@ client.login(process.env.BOT_TOKEN).then(() => {
 			setTimeout(runScheduler, 15000);
 		}
 		runScheduler();
+		
+		// Start interview cleanup scheduler
+		async function runCleanupScheduler() {
+			try {
+				const cleanups = await db.get('InterviewCleanup') || {};
+				const now = Date.now();
+				for (const channelId of Object.keys(cleanups)) {
+					const cleanup = cleanups[channelId];
+					if (!cleanup || now < cleanup.cleanupAt) continue;
+					
+					try {
+						const guild = client.guilds.cache.get(guildId);
+						if (!guild) continue;
+						
+						const channel = guild.channels.cache.get(channelId);
+						if (!channel) {
+							// Channel doesn't exist, remove from cleanup list
+							delete cleanups[channelId];
+							await db.set('InterviewCleanup', cleanups);
+							continue;
+						}
+						
+						// Check if anyone is in the channel
+						const memberCount = channel.members.size;
+						
+						if (memberCount === 0) {
+							// No one in channel, delete it
+							await channel.delete();
+							delete cleanups[channelId];
+							await db.set('InterviewCleanup', cleanups);
+							console.log(`Deleted empty interview channel: ${channelId}`);
+						} else {
+							// People still in channel, reschedule cleanup in 5 minutes
+							cleanup.cleanupAt = now + (5 * 60 * 1000); // 5 minutes
+							cleanup.attempts = (cleanup.attempts || 0) + 1;
+							
+							// Don't reschedule more than 12 times (1 hour total)
+							if (cleanup.attempts < 12) {
+								cleanups[channelId] = cleanup;
+								await db.set('InterviewCleanup', cleanups);
+							} else {
+								// Force delete after 1 hour
+								await channel.delete();
+								delete cleanups[channelId];
+								await db.set('InterviewCleanup', cleanups);
+								console.log(`Force deleted interview channel after 1 hour: ${channelId}`);
+							}
+						}
+					} catch (cleanupError) {
+						console.error('Error during interview cleanup:', cleanupError);
+						// Remove from cleanup list if there's an error
+						delete cleanups[channelId];
+						await db.set('InterviewCleanup', cleanups);
+					}
+				}
+			} catch (cleanupError) {
+				console.error('Interview cleanup scheduler error:', cleanupError);
+			}
+			setTimeout(runCleanupScheduler, 30000); // Check every 30 seconds
+		}
+		runCleanupScheduler();
 	} catch (e) { console.log('scheduler init error', e?.message || e); }
 });
 

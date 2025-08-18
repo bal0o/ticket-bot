@@ -510,7 +510,7 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
                 });
                 
                 await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
-                    content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nPlease be available 5 minutes before the scheduled time. Staff will contact you shortly before the interview begins.\n\nIf you need to reschedule, please contact staff as soon as possible.`
+                    content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nA voice channel will be created 5 minutes before your interview time. You will be able to join the channel when it becomes available.\n\nIf you need to reschedule, please contact staff as soon as possible.`
                 }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             }
         } catch (dmError) {
@@ -520,19 +520,29 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
         // Add comment to application history
         await applications.addComment(appId, req.user.id, `Interview scheduled for ${when.toLocaleString()} with staff member ${staffId}`);
         
-        // Send confirmation to staff channel if communication ticket exists
-        const appTickets = await applications.getApplication(appId);
-        if (appTickets.tickets && appTickets.tickets.length > 0) {
-            const lastTicket = appTickets.tickets[appTickets.tickets.length - 1];
-            if (lastTicket.channelId) {
-                try {
-                    await axios.post(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages`, {
-                        content: `**Interview Scheduled** 📅\n\nInterview scheduled for **${appRec.username}** on ${when.toLocaleString()} with staff member <@${staffId}>.`
-                    }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
-                } catch (channelError) {
-                    console.error('Failed to send channel notification:', channelError?.response?.data || channelError);
-                }
+        // Send DM notification to staff member
+        try {
+            const staffDmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
+                recipient_id: staffId
+            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            
+            if (staffDmChannel.data && staffDmChannel.data.id) {
+                const interviewTime = when.toLocaleString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+                
+                await axios.post(`https://discord.com/api/v10/channels/${staffDmChannel.data.id}/messages`, {
+                    content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username}\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
+                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             }
+        } catch (staffDmError) {
+            console.error('Failed to send staff DM notification:', staffDmError?.response?.data || staffDmError);
         }
         
     } catch (error) {
