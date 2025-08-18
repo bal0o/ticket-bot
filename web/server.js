@@ -273,7 +273,8 @@ app.get('/applications', ensureAuth, async (req, res) => {
         items = items.filter(x => !['Approved','Denied','Archived'].includes(x.stage));
     }
     items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
-    res.render('applications_index', { items, stage });
+    // Pass request query context to template for toggle link
+    res.render('applications_index', { items, stage, request: { query: req.query } });
 });
 
 // Applications - detail
