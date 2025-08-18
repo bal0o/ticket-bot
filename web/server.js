@@ -568,12 +568,28 @@ app.get('/applications/:id/interviews', ensureAuth, async (req, res) => {
     const schedules = await applications.listSchedules();
     const appSchedules = Object.entries(schedules)
         .filter(([jobId, job]) => job.appId === appId)
-        .map(([jobId, job]) => ({
-            jobId,
-            ...job,
-            interviewTime: new Date(job.at + 5*60*1000), // Convert back to interview time
-            localTime: new Date(job.at + 5*60*1000).toLocaleString()
-        }))
+        .map(([jobId, job]) => {
+            // Convert UTC time back to local time for display
+            const interviewTime = new Date(job.at + 5*60*1000); // Convert back to interview time
+            const localTime = interviewTime.toLocaleString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
+            
+            return {
+                jobId,
+                ...job,
+                interviewTime,
+                localTime,
+                // Store the original UTC time for form pre-filling
+                utcTime: interviewTime.toISOString().slice(0, 16)
+            };
+        })
         .sort((a, b) => a.at - b.at);
     
     res.render('interviews_list', { app: appRec, schedules: appSchedules });

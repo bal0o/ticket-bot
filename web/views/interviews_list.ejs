@@ -24,11 +24,11 @@
         <p class="muted">No interviews scheduled for this application.</p>
       <% } else { %>
         <div class="interviews-list">
-          <% schedules.forEach(schedule => { %>
-            <div class="interview-card">
+                     <% schedules.forEach(schedule => { %>
+             <div class="interview-card" data-job-id="<%= schedule.jobId %>" data-utc-time="<%= schedule.utcTime %>">
               <div class="interview-info">
                 <h4>Interview #<%= schedule.jobId %></h4>
-                <p><strong>Date & Time:</strong> <%= schedule.localTime %></p>
+                                 <p><strong>Date & Time:</strong> <%= schedule.localTime %> (Your Local Time)</p>
                 <p><strong>Staff Member:</strong> <code><%= schedule.staffId %></code></p>
                 <p><strong>Status:</strong> 
                   <span class="status-badge <%= schedule.status %>">
@@ -70,16 +70,17 @@
       <% } %>
     </section>
     
-    <section style="margin-top: 24px;">
-      <h3>Schedule New Interview</h3>
-      <form method="post" action="/applications/<%= app.id %>/schedule" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
-        <div style="display:flex; gap:8px; align-items:center;">
-          <label>Interview time: <input type="datetime-local" name="when" required></label>
-          <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
-        </div>
-        <button class="btn primary" type="submit">Schedule Interview</button>
-      </form>
-    </section>
+         <section style="margin-top: 24px;">
+       <h3>Schedule New Interview</h3>
+       <p class="muted" style="margin-bottom: 12px;">All times are in your local timezone and will be automatically converted to UTC for scheduling.</p>
+       <form method="post" action="/applications/<%= app.id %>/schedule" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
+         <div style="display:flex; gap:8px; align-items:center;">
+           <label>Interview time: <input type="datetime-local" name="when" required></label>
+           <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
+         </div>
+         <button class="btn primary" type="submit">Schedule Interview</button>
+       </form>
+     </section>
   </main>
   
   <!-- Reschedule Modal -->
@@ -146,26 +147,39 @@
       });
     }
     
-    // Reschedule modal functions
-    function showRescheduleForm(jobId, currentTime, currentStaffId) {
-      const modal = document.getElementById('rescheduleModal');
-      const form = document.getElementById('rescheduleForm');
-      
-      // Set the form action
-      form.action = `/applications/<%= app.id %>/interviews/${jobId}/reschedule`;
-      
-      // Convert current time to datetime-local format
-      const currentDateTime = new Date(currentTime);
-      const localDateTime = new Date(currentDateTime.getTime() - (currentDateTime.getTimezoneOffset() * 60000));
-      const localDateTimeString = localDateTime.toISOString().slice(0, 16);
-      
-      // Set current values
-      form.querySelector('input[name="when"]').value = localDateTimeString;
-      form.querySelector('input[name="staff_id"]').value = currentStaffId;
-      
-      modal.style.display = 'block';
-      document.body.style.overflow = 'hidden';
-    }
+         // Reschedule modal functions
+     function showRescheduleForm(jobId, currentTime, currentStaffId) {
+       const modal = document.getElementById('rescheduleModal');
+       const form = document.getElementById('rescheduleForm');
+       
+       // Set the form action
+       form.action = `/applications/<%= app.id %>/interviews/${jobId}/reschedule`;
+       
+       // Find the schedule data to get the proper UTC time
+       const scheduleCard = document.querySelector(`[data-job-id="${jobId}"]`);
+       const utcTime = scheduleCard ? scheduleCard.dataset.utcTime : null;
+       
+       if (utcTime) {
+         // Convert UTC time to local datetime-local format
+         const utcDateTime = new Date(utcTime);
+         const localDateTime = new Date(utcDateTime.getTime() - (utcDateTime.getTimezoneOffset() * 60000));
+         const localDateTimeString = localDateTime.toISOString().slice(0, 16);
+         
+         // Set current values
+         form.querySelector('input[name="when"]').value = localDateTimeString;
+       } else {
+         // Fallback to the old method if data attribute is not available
+         const currentDateTime = new Date(currentTime);
+         const localDateTime = new Date(currentDateTime.getTime() - (currentDateTime.getTimezoneOffset() * 60000));
+         const localDateTimeString = localDateTime.toISOString().slice(0, 16);
+         form.querySelector('input[name="when"]').value = localDateTimeString;
+       }
+       
+       form.querySelector('input[name="staff_id"]').value = currentStaffId;
+       
+       modal.style.display = 'block';
+       document.body.style.overflow = 'hidden';
+     }
     
     function closeRescheduleModal() {
       const modal = document.getElementById('rescheduleModal');
