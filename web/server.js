@@ -526,8 +526,11 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
             }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             
             if (dmChannel.data && dmChannel.data.id) {
+                // Convert interview time to Discord timestamp
+                const interviewTimestamp = Math.floor(when.getTime() / 1000);
+                
                 await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
-                    content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nA voice channel will be created 5 minutes before your interview time. You will be able to join the channel when it becomes available.\n\nIf you need to reschedule, please contact staff as soon as possible.`
+                    content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nA voice channel will be created 5 minutes before your interview time. You will be able to join the channel when it becomes available.\n\nIf you need to reschedule, please contact staff as soon as possible.`
                 }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             }
         } catch (dmError) {
@@ -542,7 +545,7 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
             
             if (staffDmChannel.data && staffDmChannel.data.id) {
                 await axios.post(`https://discord.com/api/v10/channels/${staffDmChannel.data.id}/messages`, {
-                    content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username}\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
+                    content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username}\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
                 }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             }
         } catch (staffDmError) {
@@ -710,6 +713,37 @@ app.post('/applications/:id/approve', ensureAuth, async (req, res) => {
     
     await applications.advanceStage(appId, 'Approved', req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - cleanup old interview jobs
+app.post('/applications/:id/interviews/cleanup', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    
+    try {
+        const schedules = await applications.listSchedules();
+        const appSchedules = Object.entries(schedules)
+            .filter(([jobId, job]) => job.appId === appId && job.status !== 'scheduled');
+        
+        let cleanedCount = 0;
+        for (const [jobId, job] of appSchedules) {
+            await applications.deleteSchedule(jobId);
+            cleanedCount++;
+        }
+        
+        if (cleanedCount > 0) {
+            await applications.addComment(appId, req.user.id, `Cleaned up ${cleanedCount} old interview records`);
+        }
+        
+        return res.redirect(`/applications/${appId}/interviews?notification=Cleaned up ${cleanedCount} old interview records&type=success`);
+    } catch (error) {
+        console.error('Interview cleanup error:', error);
+        return res.redirect(`/applications/${appId}/interviews?notification=Failed to cleanup interviews: ${error.message}&type=error`);
+    }
 });
 
 

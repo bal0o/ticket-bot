@@ -55,6 +55,26 @@ client.login(process.env.BOT_TOKEN).then(() => {
 				const now = Date.now();
 				console.log(`[Interview Scheduler] Checking ${Object.keys(jobs).length} jobs at ${new Date(now).toISOString()}`);
 				
+				// Clean up old completed/error/skipped jobs (older than 24 hours)
+				const jobsToCleanup = [];
+				for (const jobId of Object.keys(jobs)) {
+					const job = jobs[jobId];
+					if (job && job.status !== 'scheduled') {
+						const jobAge = now - (job.completedAt || job.createdAt);
+						if (jobAge > 24 * 60 * 60 * 1000) { // 24 hours
+							jobsToCleanup.push(jobId);
+						}
+					}
+				}
+				
+				if (jobsToCleanup.length > 0) {
+					console.log(`[Interview Scheduler] Cleaning up ${jobsToCleanup.length} old jobs`);
+					for (const jobId of jobsToCleanup) {
+						delete jobs[jobId];
+					}
+					await db.set('ApplicationSchedules', jobs);
+				}
+				
 				for (const jobId of Object.keys(jobs)) {
 					const job = jobs[jobId];
 					if (!job || job.status !== 'scheduled') {
@@ -148,6 +168,9 @@ client.login(process.env.BOT_TOKEN).then(() => {
 							
 							// Send notifications to both users about the voice channel
 							try {
+								// Calculate interview start time (5 minutes after channel creation)
+								const interviewStartTime = Math.floor((Date.now() + 5 * 60 * 1000) / 1000);
+								
 								// Notify applicant
 								const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
 									recipient_id: appRec.userId
@@ -155,7 +178,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								
 								if (applicantDm.data && applicantDm.data.id) {
 									await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, {
-										content: `**Interview Voice Channel Ready** 🎤\n\nYour interview voice channel is now available!\n\n**Channel:** <#${vc.id}>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when you're ready to begin your interview.`
+										content: `**Interview Voice Channel Ready** 🎤\n\nYour interview voice channel is now available!\n\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when you're ready to begin your interview.`
 									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
 								}
 								
@@ -166,7 +189,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								
 								if (staffDm.data && staffDm.data.id) {
 									await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, {
-										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username}\n**Channel:** <#${vc.id}>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
+										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username}\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
 									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
 								}
 							} catch (notifyError) {

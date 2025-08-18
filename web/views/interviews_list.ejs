@@ -18,11 +18,18 @@
     <h1>Interview Management: <%= app.username %></h1>
     <p class="muted">Application Type: <%= app.type %> • Current Stage: <%= app.stage %></p>
     
-    <section>
-      <h3>Scheduled Interviews</h3>
-      <% if (schedules.length === 0) { %>
-        <p class="muted">No interviews scheduled for this application.</p>
-      <% } else { %>
+         <section>
+       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+         <h3>Scheduled Interviews</h3>
+         <form method="post" action="/applications/<%= app.id %>/interviews/cleanup" style="display: inline;">
+           <button class="btn" type="submit" onclick="return confirm('Clean up all old interview records? This will remove completed, error, and skipped interviews.')">
+             🧹 Cleanup Old Records
+           </button>
+         </form>
+       </div>
+       <% if (schedules.length === 0) { %>
+         <p class="muted">No interviews scheduled for this application.</p>
+       <% } else { %>
         <div class="interviews-list">
                      <% schedules.forEach(schedule => { %>
              <div class="interview-card" data-job-id="<%= schedule.jobId %>" data-utc-time="<%= schedule.utcTime %>">
