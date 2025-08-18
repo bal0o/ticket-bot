@@ -487,7 +487,9 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     if (!appRec) return res.status(404).send('Not found');
     if (appRec.stage !== 'Interview') return res.redirect(`/applications/${appId}`);
     
-    const when = new Date(req.body.when);
+    // Convert local datetime to UTC for storage
+    const localDateTime = new Date(req.body.when);
+    const when = new Date(localDateTime.getTime() - (localDateTime.getTimezoneOffset() * 60000));
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
     
@@ -553,6 +555,101 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     }
     
     return res.redirect(`/applications/${appId}?notification=Interview scheduled successfully!&type=success`);
+});
+
+// Applications - list scheduled interviews
+app.get('/applications/:id/interviews', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    
+    const schedules = await applications.listSchedules();
+    const appSchedules = Object.entries(schedules)
+        .filter(([jobId, job]) => job.appId === appId)
+        .map(([jobId, job]) => ({
+            jobId,
+            ...job,
+            interviewTime: new Date(job.at + 5*60*1000), // Convert back to interview time
+            localTime: new Date(job.at + 5*60*1000).toLocaleString()
+        }))
+        .sort((a, b) => a.at - b.at);
+    
+    res.render('interviews_list', { app: appRec, schedules: appSchedules });
+});
+
+// Applications - delete scheduled interview
+app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const jobId = req.params.jobId;
+    
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    
+    try {
+        const schedules = await applications.listSchedules();
+        const job = schedules[jobId];
+        if (!job || job.appId !== appId) {
+            return res.redirect(`/applications/${appId}?notification=Interview not found&type=error`);
+        }
+        
+        // Delete the schedule
+        await applications.deleteSchedule(jobId);
+        
+        // Add comment to application history
+        await applications.addComment(appId, req.user.id, `Interview scheduled for ${new Date(job.at + 5*60*1000).toLocaleString()} was cancelled`);
+        
+        return res.redirect(`/applications/${appId}?notification=Interview cancelled successfully&type=success`);
+    } catch (error) {
+        console.error('Interview deletion error:', error);
+        return res.redirect(`/applications/${appId}?notification=Failed to cancel interview: ${error.message}&type=error`);
+    }
+});
+
+// Applications - reschedule interview
+app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const jobId = req.params.jobId;
+    
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    
+    // Convert local datetime to UTC for storage
+    const localDateTime = new Date(req.body.when);
+    const when = new Date(localDateTime.getTime() - (localDateTime.getTimezoneOffset() * 60000));
+    const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
+    if (!when || isNaN(when.getTime()) || !staffId) {
+        return res.redirect(`/applications/${appId}?notification=Invalid interview time or staff ID&type=error`);
+    }
+    
+    try {
+        // Validate minimum lead time (10 minutes)
+        const now = new Date();
+        const minLeadTime = 10 * 60 * 1000; // 10 minutes in milliseconds
+        if (when.getTime() - now.getTime() < minLeadTime) {
+            return res.redirect(`/applications/${appId}?notification=Interview must be scheduled at least 10 minutes in advance&type=error`);
+        }
+        
+        // Delete old schedule
+        await applications.deleteSchedule(jobId);
+        
+        // Create new schedule
+        const atTs = when.getTime() - 5*60*1000; // 5 minutes before interview
+        await applications.scheduleInterview({ appId, atTs, staffId, mode: 'voice' });
+        
+        // Add comment to application history
+        await applications.addComment(appId, req.user.id, `Interview rescheduled for ${when.toLocaleString()} with staff member ${staffId}`);
+        
+        return res.redirect(`/applications/${appId}?notification=Interview rescheduled successfully&type=success`);
+    } catch (error) {
+        console.error('Interview rescheduling error:', error);
+        return res.redirect(`/applications/${appId}?notification=Failed to reschedule interview: ${error.message}&type=error`);
+    }
 });
 
 

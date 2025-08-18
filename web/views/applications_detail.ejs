@@ -114,15 +114,11 @@
             </div>
           <% } %>
           
-          <% if (app.stage === 'Interview') { %>
-            <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
-              <div style="display:flex; gap:8px; align-items:center;">
-                <label>Interview time: <input type="datetime-local" name="when" required></label>
-                <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
-              </div>
-              <button class="btn primary" type="submit">Schedule Interview</button>
-            </form>
-          <% } %>
+                     <% if (app.stage === 'Interview') { %>
+             <div style="margin-top:16px;">
+               <a href="/applications/<%= app.id %>/interviews" class="btn primary">Manage Interviews</a>
+             </div>
+           <% } %>
         <% } %>
       </section>
     </div>

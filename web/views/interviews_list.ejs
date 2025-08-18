@@ -1,0 +1,176 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interview Management - <%= app.username %></title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-left">
+      <a href="/applications">Applications</a>
+      <a href="/applications/<%= app.id %>">← Back to Application</a>
+    </div>
+    <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
+  </header>
+  <main class="container">
+    <h1>Interview Management: <%= app.username %></h1>
+    <p class="muted">Application Type: <%= app.type %> • Current Stage: <%= app.stage %></p>
+    
+    <section>
+      <h3>Scheduled Interviews</h3>
+      <% if (schedules.length === 0) { %>
+        <p class="muted">No interviews scheduled for this application.</p>
+      <% } else { %>
+        <div class="interviews-list">
+          <% schedules.forEach(schedule => { %>
+            <div class="interview-card">
+              <div class="interview-info">
+                <h4>Interview #<%= schedule.jobId %></h4>
+                <p><strong>Date & Time:</strong> <%= schedule.localTime %></p>
+                <p><strong>Staff Member:</strong> <code><%= schedule.staffId %></code></p>
+                <p><strong>Status:</strong> 
+                  <span class="status-badge <%= schedule.status %>">
+                    <%= schedule.status.charAt(0).toUpperCase() + schedule.status.slice(1) %>
+                  </span>
+                </p>
+                <% if (schedule.info && schedule.info.channelId) { %>
+                  <p><strong>Voice Channel:</strong> <code>#<%= schedule.info.channelId %></code></p>
+                <% } %>
+              </div>
+              <div class="interview-actions">
+                <% if (schedule.status === 'scheduled') { %>
+                  <button class="btn" onclick="showRescheduleForm('<%= schedule.jobId %>', '<%= schedule.localTime %>', '<%= schedule.staffId %>')">
+                    Reschedule
+                  </button>
+                  <form method="post" action="/applications/<%= app.id %>/interviews/<%= schedule.jobId %>/delete" style="display:inline;">
+                    <button class="btn" type="submit" onclick="return confirm('Are you sure you want to cancel this interview?')">
+                      Cancel
+                    </button>
+                  </form>
+                <% } else if (schedule.status === 'done') { %>
+                  <span class="muted">Interview completed</span>
+                <% } else if (schedule.status === 'error') { %>
+                  <span class="error">Error: <%= schedule.error || 'Unknown error' %></span>
+                <% } %>
+              </div>
+            </div>
+          <% }); %>
+        </div>
+      <% } %>
+    </section>
+    
+    <section style="margin-top: 24px;">
+      <h3>Schedule New Interview</h3>
+      <form method="post" action="/applications/<%= app.id %>/schedule" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <label>Interview time: <input type="datetime-local" name="when" required></label>
+          <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
+        </div>
+        <button class="btn primary" type="submit">Schedule Interview</button>
+      </form>
+    </section>
+  </main>
+  
+  <!-- Reschedule Modal -->
+  <div id="rescheduleModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Reschedule Interview</h2>
+        <span class="close" onclick="closeRescheduleModal()">&times;</span>
+      </div>
+      <div class="modal-body">
+        <form id="rescheduleForm" method="post">
+          <div style="margin-bottom: 16px;">
+            <label>Interview time: <input type="datetime-local" name="when" required></label>
+          </div>
+          <div style="margin-bottom: 16px;">
+            <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
+          </div>
+          <div style="text-align: right;">
+            <button type="button" class="btn" onclick="closeRescheduleModal()">Cancel</button>
+            <button type="submit" class="btn primary">Reschedule</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Form validation for interview scheduling
+    const interviewForm = document.querySelector('form[action*="/schedule"]');
+    if (interviewForm) {
+      interviewForm.addEventListener('submit', function(e) {
+        const when = this.querySelector('input[name="when"]').value;
+        const staffId = this.querySelector('input[name="staff_id"]').value;
+        
+        if (!when || !staffId) {
+          e.preventDefault();
+          alert('Please fill in both interview time and staff ID.');
+          return false;
+        }
+        
+        // Validate staff ID format (Discord IDs are 17-19 digits)
+        if (!/^\d{17,19}$/.test(staffId)) {
+          e.preventDefault();
+          alert('Please enter a valid Discord Staff ID (17-19 digits).');
+          return false;
+        }
+        
+        // Validate interview time is in the future and at least 10 minutes ahead
+        const interviewTime = new Date(when);
+        const now = new Date();
+        const minLeadTime = 10 * 60 * 1000; // 10 minutes in milliseconds
+        
+        if (interviewTime <= now) {
+          e.preventDefault();
+          alert('Interview time must be in the future.');
+          return false;
+        }
+        
+        if (interviewTime.getTime() - now.getTime() < minLeadTime) {
+          e.preventDefault();
+          alert('Interview must be scheduled at least 10 minutes in advance.');
+          return false;
+        }
+      });
+    }
+    
+    // Reschedule modal functions
+    function showRescheduleForm(jobId, currentTime, currentStaffId) {
+      const modal = document.getElementById('rescheduleModal');
+      const form = document.getElementById('rescheduleForm');
+      
+      // Set the form action
+      form.action = `/applications/<%= app.id %>/interviews/${jobId}/reschedule`;
+      
+      // Convert current time to datetime-local format
+      const currentDateTime = new Date(currentTime);
+      const localDateTime = new Date(currentDateTime.getTime() - (currentDateTime.getTimezoneOffset() * 60000));
+      const localDateTimeString = localDateTime.toISOString().slice(0, 16);
+      
+      // Set current values
+      form.querySelector('input[name="when"]').value = localDateTimeString;
+      form.querySelector('input[name="staff_id"]').value = currentStaffId;
+      
+      modal.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+    
+    function closeRescheduleModal() {
+      const modal = document.getElementById('rescheduleModal');
+      modal.style.display = 'none';
+      document.body.style.overflow = 'auto';
+    }
+    
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+      const modal = document.getElementById('rescheduleModal');
+      if (event.target === modal) {
+        closeRescheduleModal();
+      }
+    }
+  </script>
+</body>
+</html>

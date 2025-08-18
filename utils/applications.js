@@ -96,6 +96,13 @@ module.exports = {
         return job;
     },
 
+    async deleteSchedule(jobId) {
+        const job = await db.get(`${SCHEDULES_KEY}.${jobId}`);
+        if (!job) return null;
+        await db.delete(`${SCHEDULES_KEY}.${jobId}`);
+        return job;
+    },
+
     async cleanupOrphanedTickets(appId) {
         const rec = await db.get(`${APPLICATIONS_KEY}.${appId}`);
         if (!rec || !rec.tickets) return rec;
