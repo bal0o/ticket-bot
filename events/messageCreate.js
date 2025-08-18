@@ -230,10 +230,7 @@ module.exports = async function (client, message) {
                 if (mapAppId) {
                     // Only relay plain messages from staff (no commands)
                     if (message.content && !message.content.startsWith('!')) {
-                        // Get application info for context
-                        const appRec = await require('../utils/applications').getApplication(mapAppId);
-                        
-                        // Create an embed for the staff message (like regular tickets)
+                        // Create a simple embed with just the message
                         const staffEmbed = new Discord.MessageEmbed()
                             .setAuthor({ 
                                 name: `${message.member?.displayName || message.author.username} (Staff)`, 
@@ -243,19 +240,8 @@ module.exports = async function (client, message) {
                             .setColor('#5865F2')
                             .setTimestamp();
                         
-                        // Add application context if available
-                        if (appRec) {
-                            staffEmbed.addFields({ 
-                                name: 'Application', 
-                                value: `${appRec.type} - ${appRec.stage}`, 
-                                inline: true 
-                            });
-                        }
-                        
                         try { 
                             await user.send({ embeds: [staffEmbed] }); 
-                            // Echo a small confirmation in the staff channel
-                            try { await message.react('📤'); } catch (_) {}
                         } catch (dmError) {
                             console.error('Failed to send DM to user:', dmError);
                             try { await message.reply('Failed to send message to user. They may have DMs disabled.'); } catch (_) {}
