@@ -230,31 +230,9 @@ module.exports = async function (client, message) {
                 if (mapAppId) {
                     // Only relay plain messages from staff (no commands)
                     if (message.content && !message.content.startsWith('!')) {
-                        // Get application info for better context
-                        const appRec = await require('../utils/applications').getApplication(mapAppId);
-                        
-                        // Create a proper embed for the staff message
-                        const staffEmbed = new Discord.MessageEmbed()
-                            .setAuthor({ 
-                                name: `${message.member?.displayName || message.author.username} (Staff)`, 
-                                iconURL: message.author.displayAvatarURL() 
-                            })
-                            .setDescription(message.content)
-                            .setColor('#5865F2')
-                            .setTimestamp()
-                            .setFooter({ text: 'Application Communication', iconURL: client.user.displayAvatarURL() });
-                        
-                        // Add application context if available
-                        if (appRec) {
-                            staffEmbed.addFields({ 
-                                name: 'Application', 
-                                value: `${appRec.type} - ${appRec.stage}`, 
-                                inline: true 
-                            });
-                        }
-                        
+                        // Send plain text message to user (like regular tickets)
                         try { 
-                            await user.send({ embeds: [staffEmbed] }); 
+                            await user.send(message.content); 
                             // Echo a small confirmation in the staff channel
                             try { await message.react('📤'); } catch (_) {}
                         } catch (dmError) {
@@ -552,14 +530,11 @@ async function processTicketMessage(message, channel, client) {
         });
     }
     
-    // For application channels, add a prefix to distinguish user messages
-    const username = isAppChannel ? `Applicant: ${message.author.username}` : message.author.username;
+    // For application channels, use plain username (no prefix needed)
+    const username = message.author.username;
     
-    // For application channels, add a header to make it clear this is from the applicant
+    // For application channels, use plain message content (no prefix needed)
     let messageContent = message.content;
-    if (isAppChannel && messageContent) {
-        messageContent = `**Applicant Response:**\n\n${messageContent}`;
-    }
 
     const hasContent = messageContent && messageContent.trim() !== "";
     let combinedMessage = null;
@@ -606,20 +581,15 @@ async function processTicketMessage(message, channel, client) {
         func.handle_errors(e, client, `messageCreate.js`, null);
     }
     
-    // For application channels, add a notification that the user has responded
+    // For application channels, add a simple notification that the user has responded
     if (isAppChannel) {
         try {
             const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
             if (appId) {
                 const appRec = await require('../utils/applications').getApplication(appId);
                 if (appRec) {
-                    // Add a small notification embed
-                    const notificationEmbed = new Discord.MessageEmbed()
-                        .setDescription(`📱 **${message.author.username}** has responded to their application`)
-                        .setColor('#10b981')
-                        .setTimestamp();
-                    
-                    await channel.send({ embeds: [notificationEmbed] }).catch(() => {});
+                    // Add a simple text notification (no embed)
+                    await channel.send(`📱 **${message.author.username}** has responded to their application`).catch(() => {});
                 }
             }
         } catch (err) {
