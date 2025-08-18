@@ -103,11 +103,14 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								console.log(`[Interview Scheduler] Guild ${guildId} not found, erroring job ${jobId}`);
 								console.log(`[Interview Scheduler] Guild cache keys:`, Array.from(client.guilds.cache.keys()));
 								job.status = 'error'; 
+								job.error = `Guild ${guildId} not found in bot's guild cache`;
 								await db.set(`ApplicationSchedules.${jobId}`, job); 
 								continue; 
 							}
 							
 							console.log(`[Interview Scheduler] Found guild: ${guild.name} (${guild.id})`);
+							console.log(`[Interview Scheduler] Guild channels:`, guild.channels.cache.size, 'channels available');
+							console.log(`[Interview Scheduler] Guild permissions:`, guild.members.me?.permissions?.toArray() || 'unknown');
 							// Build permission overwrites with proper user/role resolution
 							const perms = [
 								{ id: guild.id, deny: ['VIEW_CHANNEL'] },
@@ -201,9 +204,26 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								message: e.message,
 								code: e.code,
 								status: e.status,
-								stack: e.stack
+								stack: e.stack,
+								guildId: guildId,
+								guildName: guild?.name,
+								botPermissions: guild?.members.me?.permissions?.toArray()
 							});
-							job.status = 'error'; job.error = e?.message || String(e);
+							
+							// Provide more specific error messages
+							let errorMessage = e?.message || String(e);
+							if (e?.code === 50001) {
+								errorMessage = 'Missing Access: Bot does not have permission to access this guild';
+							} else if (e?.code === 50013) {
+								errorMessage = 'Missing Permissions: Bot lacks required permissions to create channels';
+							} else if (e?.code === 10003) {
+								errorMessage = 'Unknown Channel: The specified channel does not exist';
+							} else if (e?.code === 10004) {
+								errorMessage = 'Unknown Guild: The specified guild does not exist';
+							}
+							
+							job.status = 'error'; 
+							job.error = errorMessage;
 							await db.set(`ApplicationSchedules.${jobId}`, job);
 						}
 					}

@@ -519,6 +519,9 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
             timeZoneName: 'short'
         });
         
+        // Convert interview time to Discord timestamp (for both DMs)
+        const interviewTimestamp = Math.floor(when.getTime() / 1000);
+        
         // Send DM notification to applicant
         try {
             const dmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
@@ -526,9 +529,6 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
             }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
             
             if (dmChannel.data && dmChannel.data.id) {
-                // Convert interview time to Discord timestamp
-                const interviewTimestamp = Math.floor(when.getTime() / 1000);
-                
                 await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
                     content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nA voice channel will be created 5 minutes before your interview time. You will be able to join the channel when it becomes available.\n\nIf you need to reschedule, please contact staff as soon as possible.`
                 }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
