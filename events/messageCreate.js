@@ -76,14 +76,74 @@ module.exports = async function (client, message) {
 
             // If no tickets found
             if (activeTickets.length === 0) {
-                let ticketCountEmbed = new Discord.MessageEmbed()
-                    .setTitle(lang.active_tickets["player-active-title"] != "" ? lang.active_tickets["player-active-title"].replace(`{{COUNT}}`, "0") : `You currently have 0 ticket(s) being looked at by the team.`)
-                    .setDescription(lang.active_tickets["player-active-description"] != "" ? lang.active_tickets["player-active-description"].replace(`{{TICKETCHANNEL}}`, `<#${client.config.channel_ids.post_embed_channel_id}>`) : `If you would like to open a ticket, please head to <#${client.config.channel_ids.post_embed_channel_id}>.\n`)
-                    .setColor(client.config.bot_settings.main_color)
-                    .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()})
+                // Check if user has any application communication channels
+                const appChannels = [];
+                try {
+                    const allChannels = guild.channels.cache;
+                    for (const [channelId, channel] of allChannels) {
+                        const appId = await db.get(`AppMap.channelToApp.${channelId}`);
+                        if (appId) {
+                            const appRec = await require('../utils/applications').getApplication(appId);
+                            if (appRec && appRec.userId === message.author.id) {
+                                appChannels.push({
+                                    channel: channel,
+                                    appRec: appRec
+                                });
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error checking application channels:', err);
+                }
+                
+                if (appChannels.length === 0) {
+                    // No tickets or application channels found
+                    let ticketCountEmbed = new Discord.MessageEmbed()
+                        .setTitle(lang.active_tickets["player-active-title"] != "" ? lang.active_tickets["player-active-title"].replace(`{{COUNT}}`, "0") : `You currently have 0 ticket(s) being looked at by the team.`)
+                        .setDescription(lang.active_tickets["player-active-description"] != "" ? lang.active_tickets["player-active-description"].replace(`{{TICKETCHANNEL}}`, `<#${client.config.channel_ids.post_embed_channel_id}>`) : `If you would like to open a ticket, please head to <#${client.config.channel_ids.post_embed_channel_id}>.\n`)
+                        .setColor(client.config.bot_settings.main_color)
+                        .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()})
 
-                await message.channel.send({embeds: [ticketCountEmbed]})
-                return;
+                    await message.channel.send({embeds: [ticketCountEmbed]})
+                    return;
+                } else {
+                    // User has application communication channels, process the message
+                    if (appChannels.length === 1) {
+                        await processTicketMessage(message, appChannels[0].channel, client);
+                        return;
+                    } else {
+                        // Multiple application channels - let user choose
+                        const selectionEmbed = new Discord.MessageEmbed()
+                            .setTitle("Multiple Application Communications")
+                            .setDescription("Please select which application communication you want to send your message to:")
+                            .setColor(client.config.bot_settings.main_color);
+
+                        let appList = "";
+                        appChannels.forEach((app, index) => {
+                            appList += `${index + 1}) ${app.appRec.type} Application\n`;
+                        });
+                        selectionEmbed.addFields({ name: "Your Applications", value: appList });
+
+                        const selectionMessage = await message.channel.send({embeds: [selectionEmbed]});
+                        usersSelectingTicket.add(message.author.id);
+
+                        const filter = m => m.author.id === message.author.id && /^[1-9][0-9]*$/.test(m.content) && parseInt(m.content) <= appChannels.length;
+                        try {
+                            const collected = await message.channel.awaitMessages({ filter, max: 1, time: 30000, errors: ['time'] });
+                            const selectedApp = appChannels[parseInt(collected.first().content) - 1];
+                            if (selectedApp) {
+                                await selectionMessage.delete().catch(() => {});
+                                await processTicketMessage(message, selectedApp.channel, client);
+                            }
+                        } catch (err) {
+                            await selectionMessage.delete().catch(() => {});
+                            await message.channel.send("No valid selection made. Please try sending your message again.");
+                        } finally {
+                            usersSelectingTicket.delete(message.author.id);
+                        }
+                        return;
+                    }
+                }
             }
 
             // If only one ticket, process it directly
@@ -170,13 +230,42 @@ module.exports = async function (client, message) {
                 if (mapAppId) {
                     // Only relay plain messages from staff (no commands)
                     if (message.content && !message.content.startsWith('!')) {
-                        const relay = `Staff: ${message.member?.displayName || message.author.username}\n\n${message.content}`;
-                        try { await user.send(relay); } catch (_) {}
-                        // Optionally echo a small confirmation embed in channel
-                        try { await message.react('📤'); } catch (_) {}
+                        // Get application info for better context
+                        const appRec = await require('../utils/applications').getApplication(mapAppId);
+                        
+                        // Create a proper embed for the staff message
+                        const staffEmbed = new Discord.MessageEmbed()
+                            .setAuthor({ 
+                                name: `${message.member?.displayName || message.author.username} (Staff)`, 
+                                iconURL: message.author.displayAvatarURL() 
+                            })
+                            .setDescription(message.content)
+                            .setColor('#5865F2')
+                            .setTimestamp()
+                            .setFooter({ text: 'Application Communication', iconURL: client.user.displayAvatarURL() });
+                        
+                        // Add application context if available
+                        if (appRec) {
+                            staffEmbed.addFields({ 
+                                name: 'Application', 
+                                value: `${appRec.type} - ${appRec.stage}`, 
+                                inline: true 
+                            });
+                        }
+                        
+                        try { 
+                            await user.send({ embeds: [staffEmbed] }); 
+                            // Echo a small confirmation in the staff channel
+                            try { await message.react('📤'); } catch (_) {}
+                        } catch (dmError) {
+                            console.error('Failed to send DM to user:', dmError);
+                            try { await message.reply('Failed to send message to user. They may have DMs disabled.'); } catch (_) {}
+                        }
                     }
                 }
-            } catch (_) {}
+            } catch (error) {
+                console.error('Error handling application communication:', error);
+            }
 
             // Auto-join access roles to staff thread on first staff message (no pings)
             try {
