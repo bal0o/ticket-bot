@@ -43,12 +43,35 @@ module.exports = async function (client, message) {
                     if (userTicket) {
                         activeTickets.push({
                             channel: channel,
-                            ticketInfo: userTicket.embeds[0]
+                            ticketInfo: userTicket.embeds[0],
+                            type: 'regular'
                         });
                     }
                 } catch (err) {
                     continue;
                 }
+            }
+            
+            // Also check for application communication channels
+            try {
+                const allChannels = guild.channels.cache;
+                for (const [channelId, channel] of allChannels) {
+                    // Check if this channel is linked to an application
+                    const appId = await db.get(`AppMap.channelToApp.${channelId}`);
+                    if (appId) {
+                        const appRec = await require('../utils/applications').getApplication(appId);
+                        if (appRec && appRec.userId === message.author.id) {
+                            activeTickets.push({
+                                channel: channel,
+                                ticketInfo: { title: `Application Communication - ${appRec.type}`, footer: { text: `${message.author.id}-app` } },
+                                type: 'application',
+                                appId: appId
+                            });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Error checking application channels:', err);
             }
 
             // If no tickets found
@@ -401,6 +424,9 @@ module.exports = async function (client, message) {
 };
 
 async function processTicketMessage(message, channel, client) {
+    // Check if this is an application communication channel
+    const isAppChannel = await db.get(`AppMap.channelToApp.${channel.id}`);
+    
     // Collect and validate attachments for inline sending
     const filesToSend = [];
     for (let attachment of message.attachments) {
@@ -436,33 +462,42 @@ async function processTicketMessage(message, channel, client) {
             avatar: message.author.displayAvatarURL()
         });
     }
+    
+    // For application channels, add a prefix to distinguish user messages
+    const username = isAppChannel ? `Applicant: ${message.author.username}` : message.author.username;
+    
+    // For application channels, add a header to make it clear this is from the applicant
+    let messageContent = message.content;
+    if (isAppChannel && messageContent) {
+        messageContent = `**Applicant Response:**\n\n${messageContent}`;
+    }
 
-    const hasContent = message.content && message.content.trim() !== "";
+    const hasContent = messageContent && messageContent.trim() !== "";
     let combinedMessage = null;
     let filesMessage = null;
     const textMessageIds = [];
 
     if (hasContent && message.content.length <= 1900) {
         combinedMessage = await webhook.send({
-            content: sanitize(message.content),
-            username: message.author.username,
+            content: sanitize(messageContent),
+            username: username,
             avatarURL: message.author.displayAvatarURL(),
             files: filesToSend
         }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
     } else {
         if (filesToSend.length > 0) {
             filesMessage = await webhook.send({
-                username: message.author.username,
+                username: username,
                 avatarURL: message.author.displayAvatarURL(),
                 files: filesToSend
             }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
         }
         if (hasContent) {
-            for (let i = 0; i < message.content.length; i += 1900) {
-                const toSend = message.content.substring(i, Math.min(message.content.length, i + 1900));
+            for (let i = 0; i < messageContent.length; i += 1900) {
+                const toSend = messageContent.substring(i, Math.min(messageContent.length, i + 1900));
                 const sent = await webhook.send({
                     content: sanitize(toSend),
-                    username: message.author.username,
+                    username: username,
                     avatarURL: message.author.displayAvatarURL()
                 }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
                 if (sent && sent.id) textMessageIds.push(sent.id);
@@ -480,5 +515,26 @@ async function processTicketMessage(message, channel, client) {
         });
     } catch (e) {
         func.handle_errors(e, client, `messageCreate.js`, null);
+    }
+    
+    // For application channels, add a notification that the user has responded
+    if (isAppChannel) {
+        try {
+            const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
+            if (appId) {
+                const appRec = await require('../utils/applications').getApplication(appId);
+                if (appRec) {
+                    // Add a small notification embed
+                    const notificationEmbed = new Discord.MessageEmbed()
+                        .setDescription(`📱 **${message.author.username}** has responded to their application`)
+                        .setColor('#10b981')
+                        .setTimestamp();
+                    
+                    await channel.send({ embeds: [notificationEmbed] }).catch(() => {});
+                }
+            }
+        } catch (err) {
+            console.error('Error sending application response notification:', err);
+        }
     }
 }

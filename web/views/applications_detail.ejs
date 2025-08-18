@@ -12,21 +12,36 @@
     <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
   </header>
   <main class="container">
+    <% if (req.query.notification) { %>
+      <div class="notification <%= req.query.type || 'info' %>">
+        <%= req.query.notification %>
+      </div>
+    <% } %>
+    
     <h1>Application: <%= app.username %> (<%= app.userId %>)</h1>
-    <p class="muted">Stage: <strong><%= app.stage %></strong> • Type: <%= app.type %> • Server: <%= app.server || '' %></p>
-    <div class="grid two">
-      <section>
-        <h3>Stages</h3>
-        <div class="stages">
-          <% const all = (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']);
-             const curIdx = Math.max(0, all.indexOf(app.stage));
-             all.forEach(function(s, i){
-               const cls = i < curIdx ? 'completed' : (i === curIdx ? 'active' : 'upcoming');
-          %>
+    <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
+    
+    <!-- Stages Progress Bar - Moved to top -->
+    <section class="stages-section">
+      <h3>Application Progress</h3>
+      <div class="stages-progress">
+        <% const all = (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']);
+           const curIdx = Math.max(0, all.indexOf(app.stage));
+           all.forEach(function(s, i){
+             const cls = i < curIdx ? 'completed' : (i === curIdx ? 'active' : 'upcoming');
+        %>
+          <div class="stage-item">
             <span class="stage <%= cls %>"><%= s %></span>
-          <% }); %>
-        </div>
-      </section>
+            <% if (i < all.length - 1) { %>
+              <span class="stage-arrow <%= i < curIdx ? 'completed' : '' %>">→</span>
+            <% } %>
+          </div>
+        <% }); %>
+      </div>
+      <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
+    </section>
+
+    <div class="grid two">
       <section>
         <h3>Responses</h3>
         <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
@@ -68,14 +83,24 @@
             <button class="btn" type="submit">Deny</button>
           </form>
           <h3>Contact / Interview</h3>
-          <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
-            <button class="btn" type="submit">Open Communication Ticket</button>
-          </form>
+          <% if ((app.tickets||[]).length > 0) { %>
+            <div class="communication-status">
+              <p class="status-active">✅ Communication channel is open</p>
+              <p class="muted">Channel ID: <%= app.tickets[app.tickets.length - 1].channelId %></p>
+            </div>
+          <% } else { %>
+            <form method="post" action="/applications/<%= app.id %>/open_ticket" style="display:flex; gap:8px; align-items:center;">
+              <button class="btn" type="submit">Open Communication Ticket</button>
+            </form>
+          <% } %>
+          
           <% if (app.stage === 'Interview') { %>
-            <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-              <label>Interview time: <input type="datetime-local" name="when"></label>
-              <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID"></label>
-              <button class="btn" type="submit">Schedule Interview</button>
+            <form method="post" action="/applications/<%= app.id %>/schedule" style="margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
+              <div style="display:flex; gap:8px; align-items:center;">
+                <label>Interview time: <input type="datetime-local" name="when" required></label>
+                <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
+              </div>
+              <button class="btn primary" type="submit">Schedule Interview</button>
             </form>
           <% } %>
         <% } %>
@@ -83,6 +108,55 @@
     </div>
     
   </main>
+  
+  <script>
+    // Auto-hide notifications after 5 seconds
+    document.addEventListener('DOMContentLoaded', function() {
+      const notifications = document.querySelectorAll('.notification');
+      notifications.forEach(notification => {
+        setTimeout(() => {
+          notification.style.opacity = '0';
+          setTimeout(() => notification.remove(), 300);
+        }, 5000);
+      });
+      
+      // Add smooth transitions
+      notifications.forEach(notification => {
+        notification.style.transition = 'opacity 0.3s ease';
+      });
+    });
+    
+    // Form validation for interview scheduling
+    const interviewForm = document.querySelector('form[action*="/schedule"]');
+    if (interviewForm) {
+      interviewForm.addEventListener('submit', function(e) {
+        const when = this.querySelector('input[name="when"]').value;
+        const staffId = this.querySelector('input[name="staff_id"]').value;
+        
+        if (!when || !staffId) {
+          e.preventDefault();
+          alert('Please fill in both interview time and staff ID.');
+          return false;
+        }
+        
+        // Validate staff ID format (Discord IDs are 17-19 digits)
+        if (!/^\d{17,19}$/.test(staffId)) {
+          e.preventDefault();
+          alert('Please enter a valid Discord Staff ID (17-19 digits).');
+          return false;
+        }
+        
+        // Validate interview time is in the future
+        const interviewTime = new Date(when);
+        const now = new Date();
+        if (interviewTime <= now) {
+          e.preventDefault();
+          alert('Interview time must be in the future.');
+          return false;
+        }
+      });
+    }
+  </script>
 </body>
 </html>
 

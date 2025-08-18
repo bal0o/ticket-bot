@@ -36,11 +36,116 @@ tr:hover td { background: #141923; }
 .pre { white-space: pre-wrap; }
 .grid.two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
 section h3 { margin-top: 0; }
+
+/* New Stages Progress Bar Styles */
+.stages-section { 
+  background: var(--panel); 
+  border: 1px solid var(--border); 
+  border-radius: 12px; 
+  padding: 24px; 
+  margin-bottom: 24px; 
+  text-align: center; 
+}
+.stages-progress { 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  flex-wrap: wrap; 
+  gap: 8px; 
+  margin: 20px 0; 
+}
+.stage-item { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+}
+.stage { 
+  padding: 8px 16px; 
+  border: 2px solid var(--border); 
+  border-radius: 999px; 
+  font-size: 14px; 
+  font-weight: 500; 
+  color: var(--muted); 
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.stage.completed { 
+  background: linear-gradient(135deg, #10b981, #059669); 
+  color: white; 
+  border-color: #10b981; 
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+.stage.active { 
+  border-color: var(--accent); 
+  color: var(--text); 
+  background: rgba(88,101,242,0.1);
+  box-shadow: 0 0 0 3px rgba(88,101,242,.2) inset; 
+  transform: scale(1.05);
+}
+.stage.upcoming { 
+  opacity: .6; 
+  background: rgba(154, 164, 178, 0.1);
+}
+.stage-arrow { 
+  font-size: 20px; 
+  color: var(--muted); 
+  opacity: 0.4; 
+  transition: all 0.2s ease;
+}
+.stage-arrow.completed { 
+  color: #10b981; 
+  opacity: 0.8; 
+}
+.stage-status { 
+  margin-top: 16px; 
+  font-size: 16px; 
+  color: var(--text);
+}
+
+/* Communication Status Styles */
+.communication-status {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid #10b981;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.status-active {
+  color: #10b981;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+.communication-status .muted {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* Notification Styles */
+.notification {
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  border-left: 4px solid;
+  font-weight: 500;
+}
+.notification.info {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+.notification.success {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+  color: #10b981;
+}
+.notification.error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Legacy stages styles (keeping for backward compatibility) */
 .stages { display:flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.stage { padding: 6px 10px; border:1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
-.stage.completed { background: #0d141d; color: var(--text); border-color: #1e2a36; }
-.stage.active { border-color: var(--accent); color: var(--text); box-shadow: 0 0 0 2px rgba(88,101,242,.15) inset; }
-.stage.upcoming { opacity: .7; }
 
 form label { margin-right: 12px; display:inline-flex; gap: 6px; align-items:center; color: var(--muted); }
 input, select { background: #0e131a; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; }

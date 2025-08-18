@@ -355,14 +355,33 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         try { await db.set(`AppMap.channelToApp.${chan.id}`, appId); } catch (_) {}
         // Log to application history
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
+        
+        // Redirect with success notification
+        return res.redirect(`/applications/${appId}?notification=Communication channel opened successfully!&type=success`);
+        
         // Post intro + close button
         try {
             await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
-                content: 'This is an application communication channel. Messages you post here will be relayed to the applicant via DM.',
+                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}`,
                 components: [
                     { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
                 ]
             }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            
+            // Send DM notification to applicant
+            try {
+                const dmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
+                    recipient_id: appRec.userId
+                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                
+                if (dmChannel.data && dmChannel.data.id) {
+                    await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
+                        content: `**Application Communication Channel Opened** 📢\n\nStaff have opened a communication channel to discuss your application. You can now receive messages from staff members.\n\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}\n\n**How to respond:**\n• Staff will send you messages here in this DM\n• You can respond directly to this DM and your responses will be sent to the staff channel\n• This allows for two-way communication about your application\n\nStaff will contact you shortly!`
+                    }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                }
+            } catch (dmError) {
+                console.error('Failed to send DM notification:', dmError?.response?.data || dmError);
+            }
         } catch (_) {}
     } catch (e) {
         console.error('open_ticket error', e?.response?.data || e);
@@ -379,12 +398,65 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
     if (appRec.stage !== 'Interview') return res.redirect(`/applications/${appId}`);
+    
     const when = new Date(req.body.when);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
-    const atTs = when.getTime() - 5*60*1000; // 5 minutes before interview
-    await applications.scheduleInterview({ appId, atTs, staffId, mode: 'voice' });
-    return res.redirect(`/applications/${appId}`);
+    
+    try {
+        // Schedule the interview
+        const atTs = when.getTime() - 5*60*1000; // 5 minutes before interview
+        await applications.scheduleInterview({ appId, atTs, staffId, mode: 'voice' });
+        
+        // Send DM notification to applicant
+        try {
+            const dmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
+                recipient_id: appRec.userId
+            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            
+            if (dmChannel.data && dmChannel.data.id) {
+                const interviewTime = when.toLocaleString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+                
+                await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
+                    content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** ${interviewTime}\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nPlease be available 5 minutes before the scheduled time. Staff will contact you shortly before the interview begins.\n\nIf you need to reschedule, please contact staff as soon as possible.`
+                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }
+        } catch (dmError) {
+            console.error('Failed to send interview DM notification:', dmError?.response?.data || dmError);
+        }
+        
+        // Add comment to application history
+        await applications.addComment(appId, req.user.id, `Interview scheduled for ${when.toLocaleString()} with staff member ${staffId}`);
+        
+        // Send confirmation to staff channel if communication ticket exists
+        const appTickets = await applications.getApplication(appId);
+        if (appTickets.tickets && appTickets.tickets.length > 0) {
+            const lastTicket = appTickets.tickets[appTickets.tickets.length - 1];
+            if (lastTicket.channelId) {
+                try {
+                    await axios.post(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages`, {
+                        content: `**Interview Scheduled** 📅\n\nInterview scheduled for **${appRec.username}** on ${when.toLocaleString()} with staff member <@${staffId}>.`
+                    }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                } catch (channelError) {
+                    console.error('Failed to send channel notification:', channelError?.response?.data || channelError);
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('Interview scheduling error:', error);
+        return res.redirect(`/applications/${appId}?notification=Failed to schedule interview: ${error.message}&type=error`);
+    }
+    
+    return res.redirect(`/applications/${appId}?notification=Interview scheduled successfully!&type=success`);
 });
 
 

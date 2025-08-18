@@ -469,13 +469,35 @@ module.exports = async function (client, interaction) {
                 const member = interaction.member;
                 const isAdmin = member.roles.cache.has(config.role_ids.application_admin_role_id) || member.roles.cache.has(config.role_ids.default_admin_role_id);
                 if (!isAdmin) { await interaction.editReply({ content: 'You do not have permission to close this.' }); return; }
+                
                 // Close via shared close logic to generate transcript
                 await func.closeTicket(interaction.client, channel, interaction.member, 'Communication session closed');
-                // Attempt to log to application history with transcript URL if available from DB
+                
+                // Wait a moment for transcript generation to complete
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Get the transcript URL from the closed ticket data
                 try {
-                    await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Transcript saved.');
-                } catch (_) {}
-                await interaction.editReply({ content: 'Communication channel closed.' });
+                    const appRec = await applications.getApplication(appId);
+                    if (appRec && appRec.tickets) {
+                        const lastTicket = appRec.tickets[appRec.tickets.length - 1];
+                        if (lastTicket && lastTicket.ticketId) {
+                            // Look up the transcript URL in PlayerStats
+                            const transcriptData = await db.get(`PlayerStats.${appRec.userId}.ticketLogs.${lastTicket.ticketId}`);
+                            if (transcriptData && transcriptData.transcriptURL) {
+                                // Add transcript URL to application
+                                await applications.addComment(appId, interaction.user.id, `Communication ticket closed. Transcript available: ${transcriptData.transcriptURL}`);
+                            } else {
+                                await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Transcript generation in progress...');
+                            }
+                        }
+                    }
+                } catch (transcriptError) {
+                    console.error('Error saving transcript to application:', transcriptError);
+                    await applications.addComment(appId, interaction.user.id, 'Communication ticket closed. Error retrieving transcript.');
+                }
+                
+                await interaction.editReply({ content: 'Communication channel closed and transcript saved to application.' });
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error closing communication ticket');
             }
