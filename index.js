@@ -53,9 +53,17 @@ client.login(process.env.BOT_TOKEN).then(() => {
 			try {
 				const jobs = await db.get('ApplicationSchedules') || {};
 				const now = Date.now();
+				console.log(`[Interview Scheduler] Checking ${Object.keys(jobs).length} jobs at ${new Date(now).toISOString()}`);
+				
 				for (const jobId of Object.keys(jobs)) {
 					const job = jobs[jobId];
-					if (!job || job.status !== 'scheduled') continue;
+					if (!job || job.status !== 'scheduled') {
+						console.log(`[Interview Scheduler] Skipping job ${jobId} - status: ${job?.status || 'null'}`);
+						continue;
+					}
+					
+					console.log(`[Interview Scheduler] Job ${jobId} scheduled for ${new Date(job.at).toISOString()}, current time: ${new Date(now).toISOString()}`);
+					
 					if (now >= job.at) {
 						// Create voice channel
 						try {
@@ -67,13 +75,19 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								await db.set(`ApplicationSchedules.${jobId}`, job); 
 								continue; 
 							}
+							console.log(`[Interview Scheduler] Looking for guild ${guildId} in ${client.guilds.cache.size} available guilds`);
+							console.log(`[Interview Scheduler] Available guilds:`, Array.from(client.guilds.cache.keys()));
+							
 							const guild = client.guilds.cache.get(guildId);
 							if (!guild) { 
 								console.log(`[Interview Scheduler] Guild ${guildId} not found, erroring job ${jobId}`);
+								console.log(`[Interview Scheduler] Guild cache keys:`, Array.from(client.guilds.cache.keys()));
 								job.status = 'error'; 
 								await db.set(`ApplicationSchedules.${jobId}`, job); 
 								continue; 
 							}
+							
+							console.log(`[Interview Scheduler] Found guild: ${guild.name} (${guild.id})`);
 							const perms = [
 								{ id: guild.id, deny: ['VIEW_CHANNEL'] },
 								{ id: client.user.id, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] },
@@ -83,8 +97,14 @@ client.login(process.env.BOT_TOKEN).then(() => {
 							];
 							const name = `interview-${appRec.userId.slice(-4)}-${Math.floor(now/1000)}`;
 							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
-							if (interviewCategory) createOpts.parent = interviewCategory;
-							console.log(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId}`);
+							if (interviewCategory) {
+								createOpts.parent = interviewCategory;
+								console.log(`[Interview Scheduler] Using category ${interviewCategory} for channel creation`);
+							} else {
+								console.log(`[Interview Scheduler] No category specified, creating channel in guild root`);
+							}
+							
+							console.log(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId} with options:`, JSON.stringify(createOpts, null, 2));
 							const vc = await guild.channels.create(name, createOpts);
 							console.log(`[Interview Scheduler] Successfully created voice channel ${vc.id} for job ${jobId}`);
 							job.status = 'done'; job.completedAt = Date.now(); job.info = { channelId: vc.id };
@@ -127,6 +147,13 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								console.error('Failed to send voice channel notifications:', notifyError?.response?.data || notifyError);
 							}
 						} catch (e) {
+							console.error(`[Interview Scheduler] Error creating voice channel for job ${jobId}:`, e);
+							console.error(`[Interview Scheduler] Error details:`, {
+								message: e.message,
+								code: e.code,
+								status: e.status,
+								stack: e.stack
+							});
 							job.status = 'error'; job.error = e?.message || String(e);
 							await db.set(`ApplicationSchedules.${jobId}`, job);
 						}
@@ -142,16 +169,29 @@ client.login(process.env.BOT_TOKEN).then(() => {
 			try {
 				const cleanups = await db.get('InterviewCleanup') || {};
 				const now = Date.now();
+				console.log(`[Interview Cleanup] Checking ${Object.keys(cleanups).length} cleanup jobs at ${new Date(now).toISOString()}`);
+				
 				for (const channelId of Object.keys(cleanups)) {
 					const cleanup = cleanups[channelId];
-					if (!cleanup || now < cleanup.cleanupAt) continue;
+					if (!cleanup || now < cleanup.cleanupAt) {
+						if (cleanup) {
+							console.log(`[Interview Cleanup] Channel ${channelId} cleanup scheduled for ${new Date(cleanup.cleanupAt).toISOString()}, skipping`);
+						}
+						continue;
+					}
 					
 					try {
+						console.log(`[Interview Cleanup] Processing cleanup for channel ${channelId}`);
 						const guild = client.guilds.cache.get(guildId);
-						if (!guild) continue;
+						if (!guild) {
+							console.log(`[Interview Cleanup] Guild ${guildId} not found for channel ${channelId}`);
+							continue;
+						}
 						
+						console.log(`[Interview Cleanup] Found guild: ${guild.name} (${guild.id})`);
 						const channel = guild.channels.cache.get(channelId);
 						if (!channel) {
+							console.log(`[Interview Cleanup] Channel ${channelId} not found in guild ${guild.name}, removing from cleanup list`);
 							// Channel doesn't exist, remove from cleanup list
 							delete cleanups[channelId];
 							await db.set('InterviewCleanup', cleanups);
@@ -160,32 +200,44 @@ client.login(process.env.BOT_TOKEN).then(() => {
 						
 						// Check if anyone is in the channel
 						const memberCount = channel.members.size;
+						console.log(`[Interview Cleanup] Channel ${channelId} has ${memberCount} members`);
 						
 						if (memberCount === 0) {
 							// No one in channel, delete it
+							console.log(`[Interview Cleanup] Deleting empty channel ${channelId}`);
 							await channel.delete();
 							delete cleanups[channelId];
 							await db.set('InterviewCleanup', cleanups);
-							console.log(`Deleted empty interview channel: ${channelId}`);
+							console.log(`[Interview Cleanup] Successfully deleted empty interview channel: ${channelId}`);
 						} else {
 							// People still in channel, reschedule cleanup in 5 minutes
 							cleanup.cleanupAt = now + (5 * 60 * 1000); // 5 minutes
 							cleanup.attempts = (cleanup.attempts || 0) + 1;
 							
+							console.log(`[Interview Cleanup] Channel ${channelId} still has members, rescheduling cleanup (attempt ${cleanup.attempts}/12)`);
+							
 							// Don't reschedule more than 12 times (1 hour total)
 							if (cleanup.attempts < 12) {
 								cleanups[channelId] = cleanup;
 								await db.set('InterviewCleanup', cleanups);
+								console.log(`[Interview Cleanup] Rescheduled cleanup for channel ${channelId} to ${new Date(cleanup.cleanupAt).toISOString()}`);
 							} else {
 								// Force delete after 1 hour
+								console.log(`[Interview Cleanup] Force deleting channel ${channelId} after 1 hour of attempts`);
 								await channel.delete();
 								delete cleanups[channelId];
 								await db.set('InterviewCleanup', cleanups);
-								console.log(`Force deleted interview channel after 1 hour: ${channelId}`);
+								console.log(`[Interview Cleanup] Force deleted interview channel after 1 hour: ${channelId}`);
 							}
 						}
 					} catch (cleanupError) {
-						console.error('Error during interview cleanup:', cleanupError);
+						console.error(`[Interview Cleanup] Error during cleanup for channel ${channelId}:`, cleanupError);
+						console.error(`[Interview Cleanup] Error details:`, {
+							message: cleanupError.message,
+							code: cleanupError.code,
+							status: cleanupError.status,
+							stack: cleanupError.stack
+						});
 						// Remove from cleanup list if there's an error
 						delete cleanups[channelId];
 						await db.set('InterviewCleanup', cleanups);
