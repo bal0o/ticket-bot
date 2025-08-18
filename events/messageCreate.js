@@ -230,9 +230,30 @@ module.exports = async function (client, message) {
                 if (mapAppId) {
                     // Only relay plain messages from staff (no commands)
                     if (message.content && !message.content.startsWith('!')) {
-                        // Send plain text message to user (like regular tickets)
+                        // Get application info for context
+                        const appRec = await require('../utils/applications').getApplication(mapAppId);
+                        
+                        // Create an embed for the staff message (like regular tickets)
+                        const staffEmbed = new Discord.MessageEmbed()
+                            .setAuthor({ 
+                                name: `${message.member?.displayName || message.author.username} (Staff)`, 
+                                iconURL: message.author.displayAvatarURL() 
+                            })
+                            .setDescription(message.content)
+                            .setColor('#5865F2')
+                            .setTimestamp();
+                        
+                        // Add application context if available
+                        if (appRec) {
+                            staffEmbed.addFields({ 
+                                name: 'Application', 
+                                value: `${appRec.type} - ${appRec.stage}`, 
+                                inline: true 
+                            });
+                        }
+                        
                         try { 
-                            await user.send(message.content); 
+                            await user.send({ embeds: [staffEmbed] }); 
                             // Echo a small confirmation in the staff channel
                             try { await message.react('📤'); } catch (_) {}
                         } catch (dmError) {
@@ -581,19 +602,5 @@ async function processTicketMessage(message, channel, client) {
         func.handle_errors(e, client, `messageCreate.js`, null);
     }
     
-    // For application channels, add a simple notification that the user has responded
-    if (isAppChannel) {
-        try {
-            const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
-            if (appId) {
-                const appRec = await require('../utils/applications').getApplication(appId);
-                if (appRec) {
-                    // Add a simple text notification (no embed)
-                    await channel.send(`📱 **${message.author.username}** has responded to their application`).catch(() => {});
-                }
-            }
-        } catch (err) {
-            console.error('Error sending application response notification:', err);
-        }
-    }
+    // No notification needed for application channels - the webhook message is sufficient
 }
