@@ -12,14 +12,34 @@
     <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
   </header>
   <main class="container">
-    <% if (notification) { %>
-      <div class="notification <%= notificationType %>">
-        <%= notification %>
-      </div>
-    <% } %>
-    
-    <h1>Application: <%= app.username %> (<%= app.userId %>)</h1>
-    <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
+         <% if (notification) { %>
+       <div class="notification <%= notificationType %>">
+         <%= notification %>
+       </div>
+     <% } %>
+     
+     <% if (app.stage === 'Denied') { %>
+       <div class="application-status denied">
+         <h2>❌ Application Denied</h2>
+         <p>This application has been denied and cannot be modified further.</p>
+         <% const lastHistory = app.history && app.history.length > 0 ? app.history[app.history.length - 1] : null; %>
+         <% if (lastHistory && lastHistory.note) { %>
+           <p><strong>Reason:</strong> <%= lastHistory.note %></p>
+         <% } %>
+       </div>
+     <% } else if (app.stage === 'Approved') { %>
+       <div class="application-status approved">
+         <h2>✅ Application Approved</h2>
+         <p>This application has been approved and cannot be modified further.</p>
+         <% const lastHistory = app.history && app.history.length > 0 ? app.history[app.history.length - 1] : null; %>
+         <% if (lastHistory && lastHistory.note) { %>
+           <p><strong>Notes:</strong> <%= lastHistory.note %></p>
+         <% } %>
+       </div>
+     <% } %>
+     
+     <h1>Application: <%= app.username %> (<%= app.userId %>)</h1>
+     <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
     
     <!-- Stages Progress Bar - Moved to top -->
     <section class="stages-section">
@@ -82,22 +102,35 @@
              <% }) %>
            </ul>
          </div>
-        <form method="post" action="/applications/<%= app.id %>/comment" style="margin:12px 0;">
-          <textarea name="comment" rows="3" style="width:100%" placeholder="Add comment..."></textarea>
-          <button class="btn primary" type="submit" <%= (app.stage === 'Denied' || app.stage === 'Archived') ? 'disabled' : '' %>>Add Comment</button>
-        </form>
-        <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Archived') { %>
-          <h3>Actions</h3>
-          <form method="post" action="/applications/<%= app.id %>/advance" style="display:flex; gap:8px; align-items:center;">
-            <span class="muted">Next Stage:</span>
-            <strong><%= nextStage %></strong>
-            <input type="text" name="note" placeholder="Note" style="flex:1;">
-            <button class="btn primary" type="submit">Advance</button>
-          </form>
-          <form method="post" action="/applications/<%= app.id %>/deny" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-            <input type="text" name="note" placeholder="Reason">
-            <button class="btn" type="submit">Deny</button>
-          </form>
+                 <form method="post" action="/applications/<%= app.id %>/comment" style="margin:12px 0;">
+           <textarea name="comment" rows="3" style="width:100%" placeholder="Add comment..."></textarea>
+           <button class="btn primary" type="submit" <%= (app.stage === 'Denied' || app.stage === 'Approved' || app.stage === 'Archived') ? 'disabled' : '' %>>Add Comment</button>
+         </form>
+         <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
+                     <h3>Actions</h3>
+           <% if (app.stage === 'Interview') { %>
+             <!-- Post-interview: Only Approve or Deny with notes -->
+             <form method="post" action="/applications/<%= app.id %>/approve" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+               <input type="text" name="note" placeholder="Approval notes (required)" style="flex:1;" required>
+               <button class="btn primary" type="submit">✅ Approve</button>
+             </form>
+             <form method="post" action="/applications/<%= app.id %>/deny" style="display:flex; gap:8px; align-items:center;">
+               <input type="text" name="note" placeholder="Denial reason (required)" style="flex:1;" required>
+               <button class="btn" type="submit">❌ Deny</button>
+             </form>
+           <% } else { %>
+             <!-- Pre-interview: Normal advancement -->
+             <form method="post" action="/applications/<%= app.id %>/advance" style="display:flex; gap:8px; align-items:center;">
+               <span class="muted">Next Stage:</span>
+               <strong><%= nextStage %></strong>
+               <input type="text" name="note" placeholder="Note" style="flex:1;">
+               <button class="btn primary" type="submit">Advance</button>
+             </form>
+             <form method="post" action="/applications/<%= app.id %>/deny" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+               <input type="text" name="note" placeholder="Reason">
+               <button class="btn" type="submit">Deny</button>
+             </form>
+           <% } %>
           <h3>Contact / Interview</h3>
           <% if (channelExists && lastTicket) { %>
             <div class="communication-status">

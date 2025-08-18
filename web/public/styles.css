@@ -394,3 +394,53 @@ button.btn.primary, .btn.primary { box-shadow: 0 8px 24px rgba(58,113,255,.25); 
   color: #fbbf24;
 }
 
+/* Application Status Messages */
+.application-status {
+  background: var(--panel);
+  border: 2px solid;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.application-status.denied {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.application-status.approved {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.application-status h2 {
+  margin: 0 0 12px 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.application-status p {
+  margin: 8px 0;
+  font-size: 16px;
+}
+
+.application-status strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Error Actions */
+.error-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.error-actions .error {
+  color: #ef4444;
+  font-size: 0.9em;
+  margin-bottom: 4px;
+}
+

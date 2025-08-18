@@ -652,6 +652,50 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (re
     }
 });
 
+// Applications - skip failed interview
+app.post('/applications/:id/interviews/:jobId/skip', ensureAuth, async (req, res) => {
+    const { isStaff } = await getRoleFlags(req.user.id);
+    if (!isStaff) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const jobId = req.params.jobId;
+    
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    
+    try {
+        const schedules = await applications.listSchedules();
+        const job = schedules[jobId];
+        if (!job || job.appId !== appId) {
+            return res.redirect(`/applications/${appId}?notification=Interview not found&type=error`);
+        }
+        
+        // Mark as skipped
+        await applications.completeSchedule(jobId, 'skipped', { reason: 'Manually skipped by staff' });
+        
+        // Add comment to application history
+        await applications.addComment(appId, req.user.id, `Failed interview skipped by staff`);
+        
+        return res.redirect(`/applications/${appId}?notification=Interview marked as skipped&type=success`);
+    } catch (error) {
+        console.error('Interview skip error:', error);
+        return res.redirect(`/applications/${appId}?notification=Failed to skip interview: ${error.message}&type=error`);
+    }
+});
+
+// Applications - approve
+app.post('/applications/:id/approve', ensureAuth, async (req, res) => {
+    const roles = await fetchGuildMemberRoles(req.user.id);
+    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
+    if (!isAdmin) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Approved' || appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.status(400).send('Application is closed');
+    
+    await applications.advanceStage(appId, 'Approved', req.user.id, req.body.note || '');
+    return res.redirect(`/applications/${appId}`);
+});
+
 
 // Basic error handler
 // eslint-disable-next-line no-unused-vars
