@@ -400,6 +400,27 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
+    
+    // Check if there's already an active communication channel for this application
+    if (appRec.tickets && appRec.tickets.length > 0) {
+        const lastTicket = appRec.tickets[appRec.tickets.length - 1];
+        if (lastTicket && lastTicket.channelId) {
+            try {
+                // Check if the existing channel still exists
+                const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
+                    headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                });
+                if (channelResponse.status === 200) {
+                    // Channel exists, redirect to application with warning
+                    return res.redirect(`/applications/${appId}?notification=A communication channel is already open for this application!&type=error`);
+                }
+            } catch (error) {
+                // Channel doesn't exist, we can create a new one
+                console.log(`Existing channel ${lastTicket.channelId} not found, creating new one`);
+            }
+        }
+    }
+    
     try {
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
@@ -409,7 +430,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
             { id: config.role_ids.default_admin_role_id, type: 0, allow: (1<<10).toString() }, // VIEW_CHANNEL for default admin
             { id: adminRoleId, type: 0, allow: (1<<10).toString() } // VIEW_CHANNEL for app admins
         ];
-        const channelName = `app-comm-${appRec.userId.slice(-4)}-${Date.now().toString().slice(-4)}`;
+        const channelName = `app-${appRec.username}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
         await applications.linkTicket(appId, chan.id, chan.id);
         // Map channel -> application for interaction handlers

@@ -86,7 +86,8 @@
           <% if (channelExists && lastTicket) { %>
             <div class="communication-status">
               <p class="status-active">✅ Communication channel is open</p>
-              <p class="muted">Channel ID: <%= lastTicket.channelId %></p>
+              <p class="muted">Channel: <code>#<%= lastTicket.channelId %></code></p>
+              <p class="muted">Channel Name: <code>app-<%= app.username %>-comms</code></p>
             </div>
           <% } else if ((app.tickets||[]).length > 0 && !channelExists) { %>
             <div class="communication-status error">

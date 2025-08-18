@@ -135,6 +135,16 @@ section h3 { margin-top: 0; }
   font-size: 12px;
 }
 
+/* Code styling for channel names and IDs */
+code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  color: #e6edf3;
+}
+
 /* Notification Styles */
 .notification {
   padding: 16px;
