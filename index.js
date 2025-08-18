@@ -146,7 +146,9 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								console.log(`[Interview Scheduler] Applicant ${appRec.userId} not found in guild, using ID directly`);
 								perms.push({ id: appRec.userId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
 							}
-							const name = `interview-${appRec.userId.slice(-4)}-${Math.floor(now/1000)}`;
+							const baseUsername = String(appRec.username || appRec.userId || 'user');
+							const safeUser = baseUsername.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+							const name = `interview-${safeUser || 'user'}`;
 							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
 							if (interviewCategory) {
 								createOpts.parent = interviewCategory;
@@ -194,7 +196,7 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								
 								if (staffDm.data && staffDm.data.id) {
 									await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, {
-										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username}\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
+										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username} (<@${appRec.userId}>)\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
 									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
 								}
 							} catch (notifyError) {
