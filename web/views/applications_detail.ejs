@@ -77,7 +77,7 @@
         <h3>History</h3>
         <ul>
           <% (app.history || []).forEach(h => { %>
-            <li><strong><%= h.stage %></strong> <span class="muted"><%= new Date(h.at).toLocaleString() %></span> <%= h.by ? `by ${userNames[String(h.by)] || h.by}` : '' %><br><span class="muted"><%= h.note || '' %></span></li>
+            <li><strong><%= h.stage %></strong> <span class="muted"><%= new Date(h.at).toLocaleString() %></span> <%= h.by ? ('by ' + (userNames[String(h.by)] || h.by)) : '' %><br><span class="muted"><%= h.note || '' %></span></li>
           <% }) %>
         </ul>
          <div class="comments-section">
