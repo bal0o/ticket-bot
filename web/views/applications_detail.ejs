@@ -131,7 +131,12 @@
                <button class="btn" type="submit">Deny</button>
              </form>
            <% } %>
-          <h3>Contact / Interview</h3>
+            <form method="post" action="/applications/<%= app.id %>/archive" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+              <input type="text" name="note" placeholder="Reason (optional)">
+              <button class="btn" type="submit">Archive</button>
+            </form>
+          <% } %>
+           <h3>Contact / Interview</h3>
           <% if (channelExists && lastTicket) { %>
             <div class="communication-status">
               <p class="status-active">✅ Communication channel is open</p>

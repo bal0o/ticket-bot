@@ -267,7 +267,11 @@ app.get('/applications', ensureAuth, async (req, res) => {
     const { isStaff } = await getRoleFlags(req.user.id);
     if (!isStaff) return res.status(403).send('Forbidden');
     const stage = (req.query.stage || '').trim();
-    const items = await applications.listApplications({ stage: stage || undefined });
+    let items = await applications.listApplications({ stage: stage || undefined });
+    // By default, show only active applications (exclude Approved, Denied, Archived)
+    if (!stage && !req.query.all) {
+        items = items.filter(x => !['Approved','Denied','Archived'].includes(x.stage));
+    }
     items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
     res.render('applications_index', { items, stage });
 });
@@ -383,6 +387,19 @@ app.post('/applications/:id/deny', ensureAuth, async (req, res) => {
     if (!appRec) return res.status(404).send('Not found');
     if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.deny(appId, req.user.id, req.body.note || '');
+    return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - archive
+app.post('/applications/:id/archive', ensureAuth, async (req, res) => {
+    const roles = await fetchGuildMemberRoles(req.user.id);
+    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
+    if (!isAdmin) return res.status(403).send('Forbidden');
+    const appId = req.params.id;
+    const appRec = await applications.getApplication(appId);
+    if (!appRec) return res.status(404).send('Not found');
+    if (appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
+    await applications.advanceStage(appId, 'Archived', req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
 });
 
@@ -621,7 +638,24 @@ app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, async (req, r
         await applications.deleteSchedule(jobId);
         
         // Add comment to application history
-        await applications.addComment(appId, req.user.id, `Interview scheduled for ${new Date(job.at + 5*60*1000).toLocaleString()} was cancelled`);
+        const interviewAt = new Date(job.at + 5*60*1000);
+        await applications.addComment(appId, req.user.id, `Interview scheduled for ${interviewAt.toLocaleString()} was cancelled`);
+
+        // DM applicant and staff about cancellation
+        try {
+            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            if (applicantDm.data?.id) {
+                const ts = Math.floor(interviewAt.getTime()/1000);
+                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nYour interview scheduled for <t:${ts}:F> has been cancelled by staff. If this was a mistake, please reach out to staff to reschedule.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }
+        } catch (e) { console.error('Cancel DM (applicant) failed:', e?.response?.data || e); }
+        try {
+            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: job.staffId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            if (staffDm.data?.id) {
+                const ts = Math.floor(interviewAt.getTime()/1000);
+                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) scheduled for <t:${ts}:F> has been cancelled.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }
+        } catch (e) { console.error('Cancel DM (staff) failed:', e?.response?.data || e); }
         
         return res.redirect(`/applications/${appId}?notification=Interview cancelled successfully&type=success`);
     } catch (error) {
@@ -665,6 +699,22 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (re
         
         // Add comment to application history
         await applications.addComment(appId, req.user.id, `Interview rescheduled for ${when.toLocaleString()} with staff member ${staffId}`);
+
+        // DM applicant and staff about reschedule
+        try {
+            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            if (applicantDm.data?.id) {
+                const ts = Math.floor(when.getTime()/1000);
+                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nYour interview has been rescheduled to <t:${ts}:F>. Please be ready at that time. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }
+        } catch (e) { console.error('Reschedule DM (applicant) failed:', e?.response?.data || e); }
+        try {
+            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: staffId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            if (staffDm.data?.id) {
+                const ts = Math.floor(when.getTime()/1000);
+                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) moved to <t:${ts}:F>. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }
+        } catch (e) { console.error('Reschedule DM (staff) failed:', e?.response?.data || e); }
         
         return res.redirect(`/applications/${appId}?notification=Interview rescheduled successfully&type=success`);
     } catch (error) {
