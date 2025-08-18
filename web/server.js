@@ -290,24 +290,55 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
     
-    // Check if the communication channel actually exists
-    let channelExists = false;
-    let lastTicket = null;
-    if (appRec.tickets && appRec.tickets.length > 0) {
-        lastTicket = appRec.tickets[appRec.tickets.length - 1];
-        if (lastTicket && lastTicket.channelId) {
-            try {
-                // Try to fetch the channel to see if it exists
-                const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
-                    headers: { Authorization: `Bot ${BOT_TOKEN}` }
-                });
-                channelExists = channelResponse.status === 200;
-            } catch (error) {
-                // Channel doesn't exist or we can't access it
-                channelExists = false;
+            // Check if the communication channel actually exists
+        let channelExists = false;
+        let lastTicket = null;
+        if (appRec.tickets && appRec.tickets.length > 0) {
+            lastTicket = appRec.tickets[appRec.tickets.length - 1];
+            if (lastTicket && lastTicket.channelId) {
+                try {
+                    // Try to fetch the channel to see if it exists
+                    const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
+                        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                    });
+                    channelExists = channelResponse.status === 200;
+                    console.log(`Channel ${lastTicket.channelId} exists: ${channelExists}`);
+                    
+                    // If channel exists, check if it has the proper setup (close button)
+                    if (channelExists) {
+                        try {
+                            const messagesResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages?limit=10`, {
+                                headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                            });
+                            
+                            // Check if any message has the close button
+                            const hasCloseButton = messagesResponse.data.some(msg => 
+                                msg.components && msg.components.some(comp => 
+                                    comp.components && comp.components.some(btn => btn.custom_id === 'app_comm_close')
+                                )
+                            );
+                            
+                            if (!hasCloseButton) {
+                                console.log(`Channel ${lastTicket.channelId} exists but missing close button, adding it...`);
+                                // Add the close button message
+                                await axios.post(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages`, {
+                                    content: `📱 **Application Communication Channel**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}`,
+                                    components: [
+                                        { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
+                                    ]
+                                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                            }
+                        } catch (setupError) {
+                            console.error('Failed to check/setup channel:', setupError?.response?.data || setupError);
+                        }
+                    }
+                } catch (error) {
+                    // Channel doesn't exist or we can't access it
+                    channelExists = false;
+                    console.log(`Channel ${lastTicket.channelId} check failed:`, error.response?.status || error.message);
+                }
             }
         }
-    }
     
     res.render('applications_detail', { 
         app: appRec, 
@@ -386,9 +417,6 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         // Log to application history
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
         
-        // Redirect with success notification
-        return res.redirect(`/applications/${appId}?notification=Communication channel opened successfully!&type=success`);
-        
         // Post intro + close button
         try {
             await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
@@ -412,7 +440,12 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
             } catch (dmError) {
                 console.error('Failed to send DM notification:', dmError?.response?.data || dmError);
             }
-        } catch (_) {}
+        } catch (channelError) {
+            console.error('Failed to set up communication channel:', channelError?.response?.data || channelError);
+        }
+        
+        // Redirect with success notification
+        return res.redirect(`/applications/${appId}?notification=Communication channel opened successfully!&type=success`);
     } catch (e) {
         console.error('open_ticket error', e?.response?.data || e);
     }
