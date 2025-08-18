@@ -41,23 +41,9 @@
      <h1>Application: <%= app.username %> (<%= app.userId %>)</h1>
      <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
     
-    <!-- Stages Progress Bar - Moved to top -->
+    <!-- Stages Progress - simplified -->
     <section class="stages-section">
       <h3>Application Progress</h3>
-      <div class="stages-progress">
-        <% const all = (stages || ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived']);
-           const curIdx = Math.max(0, all.indexOf(app.stage));
-           all.forEach(function(s, i){
-             const cls = i < curIdx ? 'completed' : (i === curIdx ? 'active' : 'upcoming');
-        %>
-          <div class="stage-item">
-            <span class="stage <%= cls %>"><%= s %></span>
-            <% if (i < all.length - 1) { %>
-              <span class="stage-arrow <%= i < curIdx ? 'completed' : '' %>">→</span>
-            <% } %>
-          </div>
-        <% }); %>
-      </div>
       <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
     </section>
 
