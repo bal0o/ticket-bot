@@ -487,7 +487,7 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
     if (!appRec) return res.status(404).send('Not found');
     if (appRec.stage !== 'Interview') return res.redirect(`/applications/${appId}`);
     
-    // Parse the datetime-local input (already in user's local timezone)
+    // Parse datetime-local input (JavaScript automatically converts to UTC)
     const when = new Date(req.body.when);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
@@ -637,7 +637,7 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (re
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
     
-    // Parse the datetime-local input (already in user's local timezone)
+    // Parse datetime-local input (JavaScript automatically converts to UTC)
     const when = new Date(req.body.when);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) {
