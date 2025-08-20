@@ -327,36 +327,34 @@ try {
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
     try {
-        console.log(`[Functions] Creating staff channel for ticket #${formattedTicketNumber}...`);
-        const staffChannelName = `staff-chat-${formattedTicketNumber}`;
-        const staffOverwrites = [
-            {
-                id: staffGuild.id,
-                deny: ['VIEW_CHANNEL', 'ADD_REACTIONS'],
-            },
-            {
-                id: client.user.id,
-                allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'ADD_REACTIONS', 'MANAGE_CHANNELS'],
-            },
-            {
-                id: client.config.role_ids.default_admin_role_id,
-                allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
-            }
-        ];
-        if (accessRoleIDs && Array.isArray(accessRoleIDs)) {
-            for (const roleId of accessRoleIDs) {
-                if (!roleId) continue;
-                staffOverwrites.push({ id: roleId, allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'] });
-            }
-        }
-
-        const staffChannel = await staffGuild.channels.create(staffChannelName, {
-            type: 'text',
-            parent: (ticketCategory) ? ticketCategory : postchannelCategory || null,
-            permissionOverwrites: staffOverwrites,
-            reason: `Private staff discussion for ticket #${formattedTicketNumber}`
+        console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
+        // Create as public thread first so we can add role permissions
+        const thread = await ticketChannel.threads.create({
+            name: `staff-chat-${formattedTicketNumber}`,
+            autoArchiveDuration: 10080,
+            reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
+            type: 'GUILD_PUBLIC_THREAD'
         });
-        console.log(`[Functions] Staff channel created: ${staffChannel.name} (${staffChannel.id})`);
+        console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
+        console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
+        console.log(`[Functions] Thread permissions: ${thread.permissionOverwrites ? 'Available' : 'Not available'}`);
+
+        // Send a role-mention ping so the thread appears in the sidebar immediately
+        try {
+            const rolePingIds = Array.isArray(accessRoleIDs) ? accessRoleIDs.filter(Boolean) : [];
+            if (rolePingIds.length > 0) {
+                const rolePingTags = rolePingIds.map(id => `<@&${id}>`).join(' ');
+                await thread.send({
+                    content: `${rolePingTags}\nStaff thread for ticket #${formattedTicketNumber}`,
+                    allowedMentions: { parse: [], roles: rolePingIds }
+                });
+            } else {
+                // Fallback to a plain text seed message if no roles to ping
+                await thread.send({ content: `Staff thread for ticket #${formattedTicketNumber}` });
+            }
+        } catch (seedErr) {
+            console.error('[Functions] Failed to seed staff thread with role ping:', seedErr);
+        }
 
         if (bmInfo) {
             const staffEmbed = new Discord.MessageEmbed()
@@ -380,14 +378,93 @@ try {
                 staffEmbed.addField('BM Bans', bmInfo.banInfo.join('\n').substring(0, 1024));
             }
             
-            try { await staffChannel.send({ embeds: [staffEmbed] }); } catch (_) {}
+            try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
         }
 
-        // Seed staff channel so it appears immediately
-        try { await staffChannel.send({ content: `Staff discussion channel for ticket #${formattedTicketNumber}.` }); } catch (_) {}
+        // Add access roles to the staff thread
+        if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
+            try {
+                for (const roleId of accessRoleIDs) {
+                    if (!roleId) continue;
+                    const role = staffGuild.roles.cache.get(roleId);
+                    if (role) {
+                        try {
+                            // In Discord.js v13, threads have different permission handling
+                            // Try to add the role to the thread using the thread's edit method
+                            console.log(`[Functions] Attempting to add role ${role.name} (${roleId}) to staff thread for ticket #${formattedTicketNumber}`);
+                            
+                                                                    // Add the role directly to the thread permissions
+                                        try {
+                                            // For public threads, we can use permissionOverwrites
+                                            if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
+                                                await thread.permissionOverwrites.create(role, {
+                                                    VIEW_CHANNEL: true,
+                                                    SEND_MESSAGES: true,
+                                                    READ_MESSAGE_HISTORY: true
+                                                });
+                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via permissionOverwrites`);
+                                            } else {
+                                                // Fallback: try to edit the thread with permissionOverwrites
+                                                await thread.edit({
+                                                    permissionOverwrites: [
+                                                        {
+                                                            id: roleId,
+                                                            type: 'role',
+                                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+                                                        }
+                                                    ]
+                                                });
+                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via thread.edit`);
+                                            }
+                                        } catch (roleError) {
+                                            console.error(`[Functions] Failed to add role ${role.name} to thread permissions:`, roleError);
+                                        }
+                                                            } catch (roleError) {
+                                        console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
+                                    }
+                    } else {
+                        console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
+                    }
+                }
+            } catch (e) {
+                func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
+            }
+            
+            // Convert thread to private after setting role permissions
+            try {
+                console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
+                await thread.edit({
+                    type: 'GUILD_PRIVATE_THREAD'
+                });
+                console.log(`[Functions] Successfully converted thread to private`);
+            } catch (convertError) {
+                console.error(`[Functions] Failed to convert thread to private:`, convertError);
+            }
+            
+            // Debug: Check final thread state
+            try {
+                console.log(`[Functions] Final thread state for ticket #${formattedTicketNumber}:`);
+                console.log(`[Functions] - Thread ID: ${thread.id}`);
+                console.log(`[Functions] - Thread Name: ${thread.name}`);
+                console.log(`[Functions] - Thread Type: ${thread.type}`);
+                console.log(`[Functions] - Thread Archived: ${thread.archived}`);
+                console.log(`[Functions] - Thread Locked: ${thread.locked}`);
+                console.log(`[Functions] - Thread Parent Channel: ${thread.parent?.name} (${thread.parent?.id})`);
+                
+                // Check if thread is visible to the bot
+                const fetchedThread = await ticketChannel.threads.fetch(thread.id).catch(() => null);
+                if (fetchedThread) {
+                    console.log(`[Functions] - Thread is fetchable by bot`);
+                } else {
+                    console.log(`[Functions] - WARNING: Thread is NOT fetchable by bot`);
+                }
+            } catch (debugError) {
+                console.error(`[Functions] Error during thread debugging:`, debugError);
+            }
+        }
 
     } catch (e) {
-        func.handle_errors(e, client, `functions.js`, `Failed to create a staff channel or send info for ticket #${formattedTicketNumber}`);
+        func.handle_errors(e, client, `functions.js`, `Failed to create a private thread or send info for ticket #${formattedTicketNumber}`);
     }
 
 
@@ -713,15 +790,9 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Update ticket count
         await module.exports.updateTicketStatus(client);
         
-        // Try to archive staff thread if exists; otherwise delete staff channel if created
         const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
         if (thread) {
             await thread.setArchived(true, 'Ticket closed.');
-        } else {
-            const sibling = channel.guild.channels.cache.find(c => c.name === `staff-chat-${globalTicketNumber}` && c.parentId === channel.parentId);
-            if (sibling) {
-                try { await sibling.delete('Ticket closed.'); } catch (_) {}
-            }
         }
 
         // Delete channel after a short delay
