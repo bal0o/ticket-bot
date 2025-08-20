@@ -336,10 +336,26 @@ module.exports = {
 	// Initialize metrics with actual staff user IDs from roles (called after bot is ready)
 	initStaffMetrics: async (client) => {
 		try {
-			if (!client || !client.guilds) return;
+			if (!client || !client.guilds) {
+				console.log('[Metrics] Client not ready, cannot initialize staff metrics');
+				return;
+			}
+			
+			console.log(`[Metrics] Client config:`, {
+				hasConfig: !!client.config,
+				hasChannelIds: !!client.config?.channel_ids,
+				staffGuildId: client.config?.channel_ids?.staff_guild_id,
+				availableGuilds: Array.from(client.guilds.cache.keys())
+			});
 			
 			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
-			if (!staffGuild) return;
+			if (!staffGuild) {
+				console.log('[Metrics] Staff guild not found, cannot initialize staff metrics');
+				return;
+			}
+			
+			console.log(`[Metrics] Found staff guild: ${staffGuild.name} (${staffGuild.id})`);
+			console.log(`[Metrics] Guild has ${staffGuild.roles.cache.size} roles and ${staffGuild.members.cache.size} members`);
 			
 			const handlerRaw = require("../content/handler/options.json");
 			const allTicketTypes = Object.keys(handlerRaw.options);
@@ -350,21 +366,37 @@ module.exports = {
 				try {
 					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
 					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
+						console.log(`[Metrics] Processing ${ticketType} with access roles:`, questionFile["access-role-id"]);
 						for (const roleId of questionFile["access-role-id"]) {
 							if (!roleId) continue;
 							const role = staffGuild.roles.cache.get(roleId);
-							if (role && role.members) {
-								// Add all user IDs from this role
-								for (const [userId, member] of role.members) {
-									allStaffUserIds.add(userId);
+							if (role) {
+								console.log(`[Metrics] Found role ${role.name} (${role.id}) with ${role.members?.size || 0} members`);
+								if (role.members && role.members.size > 0) {
+									// Add all user IDs from this role
+									for (const [userId, member] of role.members) {
+										allStaffUserIds.add(userId);
+										console.log(`[Metrics] Added staff member: ${member.user?.tag || userId} (${userId})`);
+									}
+								} else {
+									console.log(`[Metrics] Warning: Role ${role.name} has no members`);
 								}
+							} else {
+								console.log(`[Metrics] Warning: Role ID ${roleId} not found in guild`);
 							}
 						}
 					}
-				} catch (_) {}
+				} catch (error) {
+					console.error(`[Metrics] Error processing ${ticketType}:`, error);
+				}
 			}
 			
 			console.log(`[Metrics] Initializing staff metrics for ${allStaffUserIds.size} staff members across ${allTicketTypes.length} ticket types`);
+			
+			if (allStaffUserIds.size === 0) {
+				console.log('[Metrics] Warning: No staff members found! This may indicate an issue with role configuration or guild access.');
+				return;
+			}
 			
 			// Initialize metrics for all staff members
 			for (const ticketType of allTicketTypes) {
