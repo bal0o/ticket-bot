@@ -367,16 +367,26 @@ try {
                     const role = staffGuild.roles.cache.get(roleId);
                     if (role) {
                         try {
-                            // In Discord.js v13, threads inherit permissions from parent channel
-                            // We'll add the role to the parent channel's permissions instead
-                            await ticketChannel.permissionOverwrites.create(role, {
-                                VIEW_CHANNEL: true,
-                                SEND_MESSAGES: true,
-                                READ_MESSAGE_HISTORY: true
-                            });
-                            console.log(`[Functions] Added role ${role.name} (${roleId}) to parent channel permissions for ticket #${formattedTicketNumber}`);
+                            // In Discord.js v13, we need to use the thread's permission overwrites
+                            // The thread object should have permissionOverwrites property
+                            if (thread.permissionOverwrites) {
+                                await thread.permissionOverwrites.create(role, {
+                                    VIEW_CHANNEL: true,
+                                    SEND_MESSAGES: true,
+                                    READ_MESSAGE_HISTORY: true
+                                });
+                                console.log(`[Functions] Added role ${role.name} (${roleId}) to staff thread permissions for ticket #${formattedTicketNumber}`);
+                            } else {
+                                // Fallback: add to parent channel if thread permissions not available
+                                await ticketChannel.permissionOverwrites.create(role, {
+                                    VIEW_CHANNEL: true,
+                                    SEND_MESSAGES: true,
+                                    READ_MESSAGE_HISTORY: true
+                                });
+                                console.log(`[Functions] Added role ${role.name} (${roleId}) to parent channel permissions (fallback) for ticket #${formattedTicketNumber}`);
+                            }
                         } catch (roleError) {
-                            console.error(`[Functions] Failed to add role ${role.name} to parent channel permissions:`, roleError);
+                            console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
                         }
                     } else {
                         console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
