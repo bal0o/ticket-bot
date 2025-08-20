@@ -362,19 +362,24 @@ try {
         // Add access roles to the staff thread
         if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
             try {
-                let added = 0;
                 for (const roleId of accessRoleIDs) {
                     if (!roleId) continue;
                     const role = staffGuild.roles.cache.get(roleId);
-                    if (!role || !role.members) continue;
-                    for (const [_, member] of role.members) {
+                    if (role) {
                         try {
-                            await thread.members.add(member.id);
-                            added++;
-                            if (added >= 25) break; // safety cap
-                        } catch (_) {}
+                            // Add the role to the thread's permission overwrites
+                            await thread.permissionOverwrites.create(role, {
+                                VIEW_CHANNEL: true,
+                                SEND_MESSAGES: true,
+                                READ_MESSAGE_HISTORY: true
+                            });
+                            console.log(`[Functions] Added role ${role.name} (${roleId}) to staff thread permissions for ticket #${formattedTicketNumber}`);
+                        } catch (roleError) {
+                            console.error(`[Functions] Failed to add role ${role.name} to staff thread permissions:`, roleError);
+                        }
+                    } else {
+                        console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
                     }
-                    if (added >= 25) break;
                 }
             } catch (e) {
                 func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
