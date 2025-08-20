@@ -7,6 +7,18 @@ const {QuickDB} = require("quick.db")
 module.exports = async function (client, message) {
     // Initialize the ticket status
     await func.updateTicketStatus(client);
+    
+    // Initialize staff metrics with actual user IDs from roles
+    try {
+        const metrics = require('../utils/metrics');
+        await metrics.initStaffMetrics(client);
+        
+        // Run cleanup once to fix any existing role ID entries
+        console.log('[Ready] Running one-time cleanup of incorrect role IDs...');
+        await metrics.cleanupRoleIds(client);
+    } catch (error) {
+        console.error('[Ready] Error initializing staff metrics:', error);
+    }
 
     const db = new QuickDB();
 

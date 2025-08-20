@@ -177,21 +177,8 @@ module.exports = {
 			const allTicketTypes = Object.keys(handlerRaw.options);
 			const allServers = ['EU1', 'EU2', 'EU3', 'EU4', 'EU5', 'US1', 'US2', 'US3', 'US4', 'US5']; // All configured servers
 			
-			// Get all unique user IDs from access roles across all ticket types
-			const allStaffUserIds = new Set();
-			for (const ticketType of allTicketTypes) {
-				try {
-					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
-					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
-						// Note: We can't get actual user IDs here since we don't have guild access
-						// But we can initialize with common staff IDs if they exist in config
-						// For now, we'll initialize with the role IDs as placeholders
-						questionFile["access-role-id"].forEach(roleId => {
-							if (roleId) allStaffUserIds.add(roleId);
-						});
-					}
-				} catch (_) {}
-			}
+			// Note: We can't get actual user IDs here since we don't have guild access
+			// The detailed initialization with actual user IDs happens in initStaffMetrics() after bot is ready
 			
 			// Initialize all ticket types and servers with 0 values to ensure Grafana graphs start properly
 			for (const ticketType of allTicketTypes) {
@@ -206,21 +193,7 @@ module.exports = {
 					ticketStaffMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
 				}
 				
-				// Initialize "closed by" metrics for all staff members who could close this ticket type
-				for (const staffId of allStaffUserIds) {
-					ticketsClosedCounter.inc({ type: ticketType, closed_by: staffId }, 0);
-				}
-				
-				// Initialize staff actions counter for all staff members who could perform actions on this ticket type
-				for (const staffId of allStaffUserIds) {
-					staffActionsCounter.inc({ action: 'openticket', type: ticketType, staff_id: staffId }, 0);
-					staffActionsCounter.inc({ action: 'closeticket', type: ticketType, staff_id: staffId }, 0);
-					staffActionsCounter.inc({ action: 'moveticket', type: ticketType, staff_id: staffId }, 0);
-					staffActionsCounter.inc({ action: 'claimticket', type: ticketType, staff_id: staffId }, 0);
-				}
-				
-				// Initialize tickets claimed counter for this ticket type
-				ticketsClaimedCounter.inc({ type: ticketType }, 0);
+
 			}
 			
 
@@ -358,6 +331,161 @@ module.exports = {
 				// Staff actions/claims are optional to rebuild; skip to avoid heavy scans
 			}
 		} catch (_) {}
+	},
+	
+	// Initialize metrics with actual staff user IDs from roles (called after bot is ready)
+	initStaffMetrics: async (client) => {
+		try {
+			if (!client || !client.guilds) return;
+			
+			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
+			if (!staffGuild) return;
+			
+			const handlerRaw = require("../content/handler/options.json");
+			const allTicketTypes = Object.keys(handlerRaw.options);
+			
+			// Get all unique user IDs from access roles across all ticket types
+			const allStaffUserIds = new Set();
+			for (const ticketType of allTicketTypes) {
+				try {
+					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
+					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
+						for (const roleId of questionFile["access-role-id"]) {
+							if (!roleId) continue;
+							const role = staffGuild.roles.cache.get(roleId);
+							if (role && role.members) {
+								// Add all user IDs from this role
+								for (const [userId, member] of role.members) {
+									allStaffUserIds.add(userId);
+								}
+							}
+						}
+					}
+				} catch (_) {}
+			}
+			
+			console.log(`[Metrics] Initializing staff metrics for ${allStaffUserIds.size} staff members across ${allTicketTypes.length} ticket types`);
+			
+			// Initialize metrics for all staff members
+			for (const ticketType of allTicketTypes) {
+				// Initialize "closed by" metrics for all staff members
+				for (const staffId of allStaffUserIds) {
+					ticketsClosedCounter.inc({ type: ticketType, closed_by: staffId }, 0);
+				}
+				
+				// Initialize staff actions counter for all staff members
+				for (const staffId of allStaffUserIds) {
+					staffActionsCounter.inc({ action: 'openticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'closeticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'moveticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'claimticket', type: ticketType, staff_id: staffId }, 0);
+				}
+				
+				// Initialize tickets claimed counter for this ticket type
+				ticketsClaimedCounter.inc({ type: ticketType }, 0);
+			}
+			
+			console.log(`[Metrics] Staff metrics initialization complete`);
+		} catch (error) {
+			console.error(`[Metrics] Error initializing staff metrics:`, error);
+		}
+	},
+	
+	// Clean up incorrect role IDs from metrics database and replace with actual user IDs
+	cleanupRoleIds: async (client) => {
+		try {
+			if (!client || !client.guilds) {
+				console.log('[Metrics] Client not ready, cannot cleanup role IDs');
+				return;
+			}
+			
+			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
+			if (!staffGuild) {
+				console.log('[Metrics] Staff guild not found, cannot cleanup role IDs');
+				return;
+			}
+			
+			console.log('[Metrics] Starting cleanup of incorrect role IDs from metrics database...');
+			
+			// Get all access role IDs from question files
+			const handlerRaw = require("../content/handler/options.json");
+			const allTicketTypes = Object.keys(handlerRaw.options);
+			const roleIdsToClean = new Set();
+			
+			for (const ticketType of allTicketTypes) {
+				try {
+					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
+					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
+						questionFile["access-role-id"].forEach(roleId => {
+							if (roleId) roleIdsToClean.add(roleId);
+						});
+					}
+				} catch (_) {}
+			}
+			
+			console.log(`[Metrics] Found ${roleIdsToClean.size} role IDs to clean up`);
+			
+			// Clean up ticketsClosedCounter - remove role IDs and add actual user IDs
+			let cleaned = 0;
+			for (const ticketType of allTicketTypes) {
+				for (const roleId of roleIdsToClean) {
+					// Check if this role ID exists in the database
+					const existingValue = await kv.get(`Metrics.total.ticketsClosed.${ticketType}.${roleId}`);
+					if (existingValue && existingValue > 0) {
+						console.log(`[Metrics] Cleaning up ticketsClosed for ${ticketType} - role ${roleId} (value: ${existingValue})`);
+						
+						// Get actual user IDs from this role
+						const role = staffGuild.roles.cache.get(roleId);
+						if (role && role.members && role.members.size > 0) {
+							// Distribute the value among actual users (simple approach: give to first user)
+							const firstUserId = role.members.firstKey();
+							if (firstUserId) {
+								await kv.set(`Metrics.total.ticketsClosed.${ticketType}.${firstUserId}`, existingValue);
+								console.log(`[Metrics] Moved ${existingValue} closed tickets from role ${roleId} to user ${firstUserId}`);
+							}
+						}
+						
+						// Remove the role ID entry
+						await kv.delete(`Metrics.total.ticketsClosed.${ticketType}.${roleId}`);
+						cleaned++;
+					}
+				}
+			}
+			
+			// Clean up staffActionsCounter - remove role IDs and add actual user IDs
+			for (const action of ['openticket', 'closeticket', 'moveticket', 'claimticket']) {
+				for (const ticketType of allTicketTypes) {
+					for (const roleId of roleIdsToClean) {
+						const existingValue = await kv.get(`Metrics.total.staffActions.${action}.${ticketType}.${roleId}`);
+						if (existingValue && existingValue > 0) {
+							console.log(`[Metrics] Cleaning up staffActions for ${action} ${ticketType} - role ${roleId} (value: ${existingValue})`);
+							
+							// Get actual user IDs from this role
+							const role = staffGuild.roles.cache.get(roleId);
+							if (role && role.members && role.members.size > 0) {
+								// Distribute the value among actual users (simple approach: give to first user)
+								const firstUserId = role.members.firstKey();
+								if (firstUserId) {
+									await kv.set(`Metrics.total.staffActions.${action}.${ticketType}.${firstUserId}`, existingValue);
+									console.log(`[Metrics] Moved ${existingValue} ${action} actions from role ${roleId} to user ${firstUserId}`);
+								}
+							}
+							
+							// Remove the role ID entry
+							await kv.delete(`Metrics.total.staffActions.${action}.${ticketType}.${roleId}`);
+							cleaned++;
+						}
+					}
+				}
+			}
+			
+			console.log(`[Metrics] Cleanup complete! Cleaned up ${cleaned} incorrect role ID entries`);
+			console.log('[Metrics] Note: Role ID values were distributed to the first user in each role');
+			console.log('[Metrics] You may want to manually adjust these values if needed');
+			
+		} catch (error) {
+			console.error(`[Metrics] Error during role ID cleanup:`, error);
+		}
 	},
 };
 
