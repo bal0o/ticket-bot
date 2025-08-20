@@ -357,6 +357,17 @@ module.exports = {
 			console.log(`[Metrics] Found staff guild: ${staffGuild.name} (${staffGuild.id})`);
 			console.log(`[Metrics] Guild has ${staffGuild.roles.cache.size} roles and ${staffGuild.members.cache.size} members`);
 			
+			// Try to fetch members if the cache is empty
+			if (staffGuild.members.cache.size === 0) {
+				console.log('[Metrics] Guild member cache is empty, attempting to fetch members...');
+				try {
+					await staffGuild.members.fetch();
+					console.log(`[Metrics] After fetch: Guild now has ${staffGuild.members.cache.size} members`);
+				} catch (fetchError) {
+					console.error('[Metrics] Error fetching guild members:', fetchError);
+				}
+			}
+			
 			const handlerRaw = require("../content/handler/options.json");
 			const allTicketTypes = Object.keys(handlerRaw.options);
 			
@@ -372,6 +383,18 @@ module.exports = {
 							const role = staffGuild.roles.cache.get(roleId);
 							if (role) {
 								console.log(`[Metrics] Found role ${role.name} (${role.id}) with ${role.members?.size || 0} members`);
+								
+								// Try to fetch role members if they're not loaded
+								if (role.members && role.members.size === 0) {
+									console.log(`[Metrics] Role ${role.name} has no members in cache, attempting to fetch...`);
+									try {
+										await role.members.fetch();
+										console.log(`[Metrics] After fetch: Role ${role.name} now has ${role.members.size} members`);
+									} catch (fetchError) {
+										console.error(`[Metrics] Error fetching members for role ${role.name}:`, fetchError);
+									}
+								}
+								
 								if (role.members && role.members.size > 0) {
 									// Add all user IDs from this role
 									for (const [userId, member] of role.members) {
@@ -379,7 +402,7 @@ module.exports = {
 										console.log(`[Metrics] Added staff member: ${member.user?.tag || userId} (${userId})`);
 									}
 								} else {
-									console.log(`[Metrics] Warning: Role ${role.name} has no members`);
+									console.log(`[Metrics] Warning: Role ${role.name} still has no members after fetch attempt`);
 								}
 							} else {
 								console.log(`[Metrics] Warning: Role ID ${roleId} not found in guild`);

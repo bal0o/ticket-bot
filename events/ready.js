@@ -8,6 +8,10 @@ module.exports = async function (client, message) {
     // Initialize the ticket status
     await func.updateTicketStatus(client);
     
+    // Wait a bit for the guild to fully load before initializing metrics
+    console.log('[Ready] Waiting 5 seconds for guild to fully load...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
     // Initialize staff metrics with actual user IDs from roles
     try {
         const metrics = require('../utils/metrics');
