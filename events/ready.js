@@ -9,8 +9,8 @@ module.exports = async function (client, message) {
     await func.updateTicketStatus(client);
     
     // Wait a bit for the guild to fully load before initializing metrics
-    console.log('[Ready] Waiting 5 seconds for guild to fully load...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('[Ready] Waiting 15 seconds for guild to fully load...');
+    await new Promise(resolve => setTimeout(resolve, 15000));
     
     // Initialize staff metrics with actual user IDs from roles
     try {

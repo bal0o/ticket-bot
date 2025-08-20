@@ -365,6 +365,27 @@ module.exports = {
 					console.log(`[Metrics] After fetch: Guild now has ${staffGuild.members.cache.size} members`);
 				} catch (fetchError) {
 					console.error('[Metrics] Error fetching guild members:', fetchError);
+					console.log('[Metrics] This usually means the bot lacks the "Server Members Intent" permission in Discord Developer Portal');
+				}
+			}
+			
+			// Check if we still have very few members (just the bot)
+			if (staffGuild.members.cache.size <= 1) {
+				console.log('[Metrics] Warning: Guild member cache still very small. This indicates:');
+				console.log('[Metrics] 1. The bot lacks "Server Members Intent" in Discord Developer Portal, OR');
+				console.log('[Metrics] 2. The bot lacks permission to view members in this guild');
+				console.log('[Metrics] 3. The guild is still loading (try increasing the delay)');
+				
+				// Try one more fetch with a longer timeout
+				try {
+					console.log('[Metrics] Attempting one more fetch with longer timeout...');
+					await Promise.race([
+						staffGuild.members.fetch(),
+						new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
+					]);
+					console.log(`[Metrics] After second fetch: Guild now has ${staffGuild.members.cache.size} members`);
+				} catch (secondError) {
+					console.error('[Metrics] Second fetch also failed:', secondError);
 				}
 			}
 			
@@ -384,25 +405,18 @@ module.exports = {
 							if (role) {
 								console.log(`[Metrics] Found role ${role.name} (${role.id}) with ${role.members?.size || 0} members`);
 								
-								// Try to fetch role members if they're not loaded
-								if (role.members && role.members.size === 0) {
-									console.log(`[Metrics] Role ${role.name} has no members in cache, attempting to fetch...`);
-									try {
-										await role.members.fetch();
-										console.log(`[Metrics] After fetch: Role ${role.name} now has ${role.members.size} members`);
-									} catch (fetchError) {
-										console.error(`[Metrics] Error fetching members for role ${role.name}:`, fetchError);
-									}
-								}
+								// Get members with this role from the guild member cache
+								const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
+								console.log(`[Metrics] Role ${role.name} has ${membersWithRole.size} members (from guild cache)`);
 								
-								if (role.members && role.members.size > 0) {
+								if (membersWithRole.size > 0) {
 									// Add all user IDs from this role
-									for (const [userId, member] of role.members) {
+									for (const [userId, member] of membersWithRole) {
 										allStaffUserIds.add(userId);
 										console.log(`[Metrics] Added staff member: ${member.user?.tag || userId} (${userId})`);
 									}
 								} else {
-									console.log(`[Metrics] Warning: Role ${role.name} still has no members after fetch attempt`);
+									console.log(`[Metrics] Warning: Role ${role.name} has no members in guild cache`);
 								}
 							} else {
 								console.log(`[Metrics] Warning: Role ID ${roleId} not found in guild`);
