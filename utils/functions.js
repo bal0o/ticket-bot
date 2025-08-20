@@ -359,6 +359,28 @@ try {
             try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
         }
 
+        // Add access roles to the staff thread
+        if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
+            try {
+                let added = 0;
+                for (const roleId of accessRoleIDs) {
+                    if (!roleId) continue;
+                    const role = staffGuild.roles.cache.get(roleId);
+                    if (!role || !role.members) continue;
+                    for (const [_, member] of role.members) {
+                        try {
+                            await thread.members.add(member.id);
+                            added++;
+                            if (added >= 25) break; // safety cap
+                        } catch (_) {}
+                    }
+                    if (added >= 25) break;
+                }
+            } catch (e) {
+                func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
+            }
+        }
+
     } catch (e) {
         func.handle_errors(e, client, `functions.js`, `Failed to create a private thread or send info for ticket #${formattedTicketNumber}`);
     }

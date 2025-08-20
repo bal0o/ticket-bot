@@ -73,6 +73,25 @@ const ticketStaffMessagesTotalCounter = new client.Counter({
 	labelNames: ['type', 'server']
 });
 
+// User-specific metrics counters
+const userTicketDurationSumCounter = new client.Counter({
+	name: 'ticketbot_user_ticket_duration_seconds_sum',
+	help: 'Sum of ticket open durations in seconds per user',
+	labelNames: ['opened_by', 'type', 'server']
+});
+
+const userTicketDurationCountCounter = new client.Counter({
+	name: 'ticketbot_user_ticket_duration_tickets_total',
+	help: 'Number of closed tickets contributing to duration sum per user',
+	labelNames: ['opened_by', 'type', 'server']
+});
+
+const userTicketMessagesTotalCounter = new client.Counter({
+	name: 'ticketbot_user_ticket_messages_total',
+	help: 'Total messages counted across tickets per user',
+	labelNames: ['opened_by', 'type', 'server']
+});
+
 registry.registerMetric(openTicketsGauge);
 registry.registerMetric(ticketsOpenedCounter);
 registry.registerMetric(userTicketsOpenedCounter);
@@ -84,6 +103,9 @@ registry.registerMetric(ticketDurationCountCounter);
 registry.registerMetric(ticketMessagesTotalCounter);
 registry.registerMetric(ticketUserMessagesTotalCounter);
 registry.registerMetric(ticketStaffMessagesTotalCounter);
+registry.registerMetric(userTicketDurationSumCounter);
+registry.registerMetric(userTicketDurationCountCounter);
+registry.registerMetric(userTicketMessagesTotalCounter);
 
 module.exports = {
 	registry,
@@ -150,6 +172,59 @@ module.exports = {
 	// Hydrate counters from persisted totals on startup to avoid resets breaking graphs
 	initPersisted: async () => {
 		try {
+			// Get all available ticket types and servers from configuration
+			const handlerRaw = require("../content/handler/options.json");
+			const allTicketTypes = Object.keys(handlerRaw.options);
+			const allServers = ['EU1', 'EU2', 'EU3', 'EU4', 'EU5', 'US1', 'US2', 'US3', 'US4', 'US5']; // All configured servers
+			
+			// Get all unique user IDs from access roles across all ticket types
+			const allStaffUserIds = new Set();
+			for (const ticketType of allTicketTypes) {
+				try {
+					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
+					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
+						// Note: We can't get actual user IDs here since we don't have guild access
+						// But we can initialize with common staff IDs if they exist in config
+						// For now, we'll initialize with the role IDs as placeholders
+						questionFile["access-role-id"].forEach(roleId => {
+							if (roleId) allStaffUserIds.add(roleId);
+						});
+					}
+				} catch (_) {}
+			}
+			
+			// Initialize all ticket types and servers with 0 values to ensure Grafana graphs start properly
+			for (const ticketType of allTicketTypes) {
+				for (const server of allServers) {
+					// Initialize counters with 0 to ensure labels exist
+					ticketsOpenedCounter.inc({ type: ticketType, server: server }, 0);
+					ticketsClaimedCounter.inc({ type: ticketType }, 0);
+					ticketDurationSumCounter.inc({ type: ticketType, server: server }, 0);
+					ticketDurationCountCounter.inc({ type: ticketType, server: server }, 0);
+					ticketMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
+					ticketUserMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
+					ticketStaffMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
+				}
+				
+				// Initialize "closed by" metrics for all staff members who could close this ticket type
+				for (const staffId of allStaffUserIds) {
+					ticketsClosedCounter.inc({ type: ticketType, closed_by: staffId }, 0);
+				}
+				
+				// Initialize staff actions counter for all staff members who could perform actions on this ticket type
+				for (const staffId of allStaffUserIds) {
+					staffActionsCounter.inc({ action: 'openticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'closeticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'moveticket', type: ticketType, staff_id: staffId }, 0);
+					staffActionsCounter.inc({ action: 'claimticket', type: ticketType, staff_id: staffId }, 0);
+				}
+				
+				// Initialize tickets claimed counter for this ticket type
+				ticketsClaimedCounter.inc({ type: ticketType }, 0);
+			}
+			
+
+
 			let opened = await kv.get('Metrics.total.ticketsOpened') || {};
 			for (const t of Object.keys(opened)) {
 				const byServer = opened[t] || {};
