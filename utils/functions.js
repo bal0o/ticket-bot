@@ -367,26 +367,54 @@ try {
                     const role = staffGuild.roles.cache.get(roleId);
                     if (role) {
                         try {
-                            // In Discord.js v13, we need to use the thread's permission overwrites
-                            // The thread object should have permissionOverwrites property
-                            if (thread.permissionOverwrites) {
+                            // In Discord.js v13, threads have different permission handling
+                            // Try to add the role to the thread using the thread's edit method
+                            console.log(`[Functions] Attempting to add role ${role.name} (${roleId}) to staff thread for ticket #${formattedTicketNumber}`);
+                            
+                            // Method 1: Try to use thread.permissionOverwrites if it exists
+                            if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
                                 await thread.permissionOverwrites.create(role, {
                                     VIEW_CHANNEL: true,
                                     SEND_MESSAGES: true,
                                     READ_MESSAGE_HISTORY: true
                                 });
-                                console.log(`[Functions] Added role ${role.name} (${roleId}) to staff thread permissions for ticket #${formattedTicketNumber}`);
-                            } else {
-                                // Fallback: add to parent channel if thread permissions not available
+                                console.log(`[Functions] Successfully added role ${role.name} to staff thread permissions via permissionOverwrites`);
+                            }
+                            // Method 2: Try to use thread.edit with permissionOverwrites
+                            else if (typeof thread.edit === 'function') {
+                                await thread.edit({
+                                    permissionOverwrites: [
+                                        {
+                                            id: roleId,
+                                            type: 'role',
+                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+                                        }
+                                    ]
+                                });
+                                console.log(`[Functions] Successfully added role ${role.name} to staff thread permissions via thread.edit`);
+                            }
+                            // Method 3: Fallback to parent channel
+                            else {
                                 await ticketChannel.permissionOverwrites.create(role, {
                                     VIEW_CHANNEL: true,
                                     SEND_MESSAGES: true,
                                     READ_MESSAGE_HISTORY: true
                                 });
-                                console.log(`[Functions] Added role ${role.name} (${roleId}) to parent channel permissions (fallback) for ticket #${formattedTicketNumber}`);
+                                console.log(`[Functions] Added role ${role.name} to parent channel permissions (fallback) for ticket #${formattedTicketNumber}`);
                             }
                         } catch (roleError) {
                             console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
+                            // Try fallback if the main method failed
+                            try {
+                                await ticketChannel.permissionOverwrites.create(role, {
+                                    VIEW_CHANNEL: true,
+                                    SEND_MESSAGES: true,
+                                    READ_MESSAGE_HISTORY: true
+                                });
+                                console.log(`[Functions] Added role ${role.name} to parent channel permissions after main method failed`);
+                            } catch (fallbackError) {
+                                console.error(`[Functions] Fallback also failed for role ${role.name}:`, fallbackError);
+                            }
                         }
                     } else {
                         console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
