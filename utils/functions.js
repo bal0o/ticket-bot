@@ -341,7 +341,8 @@ try {
 
         // Send a role-mention ping so the thread appears in the sidebar immediately
         try {
-            const rolePingIds = Array.isArray(accessRoleIDs) ? accessRoleIDs.filter(Boolean) : [];
+            // Only ping the roles configured in ping-role-id for this ticket type
+            const rolePingIds = Array.isArray(pingRoleIDs) ? pingRoleIDs.filter(Boolean) : [];
             if (rolePingIds.length > 0) {
                 const rolePingTags = rolePingIds.map(id => `<@&${id}>`).join(' ');
                 await thread.send({
