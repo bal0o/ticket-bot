@@ -343,7 +343,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo);
 try {
 	const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-	const serverVal = m && m[1] ? m[1] : 'unknown';
+	const serverVal = m && m[1] ? m[1] : 'none';
 	const metrics = require('./metrics');
 	metrics.ticketOpened(ticketType, serverVal, user.id);
 } catch (_) {}

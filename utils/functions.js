@@ -749,7 +749,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             let ticketType = footerParts[1]?.trim() || 'Unknown';
             if (ticketType.includes('#')) ticketType = ticketType.split('#')[0].trim();
             const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
-            let server = 'unknown';
+            let server = 'none';
             const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
             if (m && m[1]) server = m[1];
             const openedAt = embed.timestamp ? new Date(embed.timestamp).getTime() : null;

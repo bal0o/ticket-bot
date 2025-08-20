@@ -113,7 +113,7 @@ module.exports = {
 	// Increment and persist totals
 	ticketOpened: (type, server, openedBy) => {
 		const t = type || 'unknown';
-		const s = server || 'unknown';
+		const s = (server && String(server).trim().toLowerCase() !== 'unknown') ? server : 'none';
 		const ob = String(openedBy || 'unknown');
 		ticketsOpenedCounter.inc({ type: t, server: s });
 		userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s });
@@ -141,7 +141,7 @@ module.exports = {
 	// Record per-ticket aggregates for duration and message totals
 	recordTicketAggregates: (type, server, durationSeconds, messageCount, userMessages, staffMessages, openedBy) => {
 		const t = type || 'unknown';
-		const s = server || 'unknown';
+		const s = (server && String(server).trim().toLowerCase() !== 'unknown') ? server : 'none';
 		const ob = String(openedBy || 'unknown');
 		const dur = Math.max(0, Math.floor(durationSeconds || 0));
 		const msgs = Math.max(0, Math.floor(messageCount || 0));
@@ -182,28 +182,32 @@ module.exports = {
 			
 			// Initialize all ticket types and servers with 0 values to ensure Grafana graphs start properly
 			for (const ticketType of allTicketTypes) {
-				for (const server of allServers) {
+				let serverSelectionEnabled = false;
+				try {
+					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
+					serverSelectionEnabled = !!(questionFile && questionFile.server_selection && questionFile.server_selection.enabled);
+				} catch (_) {}
+				const serversToInit = serverSelectionEnabled ? allServers : ['none'];
+				for (const server of serversToInit) {
 					// Initialize counters with 0 to ensure labels exist
 					ticketsOpenedCounter.inc({ type: ticketType, server: server }, 0);
-					ticketsClaimedCounter.inc({ type: ticketType }, 0);
 					ticketDurationSumCounter.inc({ type: ticketType, server: server }, 0);
 					ticketDurationCountCounter.inc({ type: ticketType, server: server }, 0);
 					ticketMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
 					ticketUserMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
 					ticketStaffMessagesTotalCounter.inc({ type: ticketType, server: server }, 0);
 				}
-				
-
+				// Initialize tickets claimed counter for this ticket type
+				ticketsClaimedCounter.inc({ type: ticketType }, 0);
 			}
 			
-
-
 			let opened = await kv.get('Metrics.total.ticketsOpened') || {};
 			for (const t of Object.keys(opened)) {
 				const byServer = opened[t] || {};
 				for (const s of Object.keys(byServer)) {
 					const v = byServer[s] || 0;
-					if (v > 0) ticketsOpenedCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketsOpenedCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			let userOpened = await kv.get('Metrics.total.user.ticketsOpened') || {};
@@ -213,7 +217,8 @@ module.exports = {
 					const byServer = byType[t] || {};
 					for (const s of Object.keys(byServer)) {
 						const v = byServer[s] || 0;
-						if (v > 0) userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s }, v);
+						const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+						if (v > 0) userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: sl }, v);
 					}
 				}
 			}
@@ -246,35 +251,40 @@ module.exports = {
 			for (const t of Object.keys(durSum)) {
 				for (const s of Object.keys(durSum[t] || {})) {
 					const v = durSum[t][s] || 0;
-					if (v > 0) ticketDurationSumCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketDurationSumCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			let durCount = await kv.get('Metrics.total.duration.count') || {};
 			for (const t of Object.keys(durCount)) {
 				for (const s of Object.keys(durCount[t] || {})) {
 					const v = durCount[t][s] || 0;
-					if (v > 0) ticketDurationCountCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketDurationCountCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			let msgsTotal = await kv.get('Metrics.total.messages') || {};
 			for (const t of Object.keys(msgsTotal)) {
 				for (const s of Object.keys(msgsTotal[t] || {})) {
 					const v = msgsTotal[t][s] || 0;
-					if (v > 0) ticketMessagesTotalCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketMessagesTotalCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			let userMsgs = await kv.get('Metrics.total.messages.user') || {};
 			for (const t of Object.keys(userMsgs)) {
 				for (const s of Object.keys(userMsgs[t] || {})) {
 					const v = userMsgs[t][s] || 0;
-					if (v > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			let staffMsgs = await kv.get('Metrics.total.messages.staff') || {};
 			for (const t of Object.keys(staffMsgs)) {
 				for (const s of Object.keys(staffMsgs[t] || {})) {
 					const v = staffMsgs[t][s] || 0;
-					if (v > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: s }, v);
+					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
+					if (v > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: sl }, v);
 				}
 			}
 			// If totals are empty (first run), rebuild from existing DB so counters are not zeroed on restart
@@ -290,7 +300,7 @@ module.exports = {
 						for (const ticketId of Object.keys(logs)) {
 							const t = logs[ticketId] || {};
 							const type = (t.ticketType || 'unknown');
-							const server = (t.server || 'unknown');
+							const server = (t.server || 'none');
 							openedAgg[type] = openedAgg[type] || {};
 							openedAgg[type][server] = (openedAgg[type][server] || 0) + 1;
 							userOpenedAgg[userId] = userOpenedAgg[userId] || {};
