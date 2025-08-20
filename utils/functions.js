@@ -327,12 +327,16 @@ try {
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
     try {
+        console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         const thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
-            type: 'GUILD_PUBLIC_THREAD'
+            type: 'GUILD_PRIVATE_THREAD'
         });
+        console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
+        console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
+        console.log(`[Functions] Thread permissions: ${thread.permissionOverwrites ? 'Available' : 'Not available'}`);
 
         if (bmInfo) {
             const staffEmbed = new Discord.MessageEmbed()
@@ -422,6 +426,27 @@ try {
                 }
             } catch (e) {
                 func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
+            }
+            
+            // Debug: Check final thread state
+            try {
+                console.log(`[Functions] Final thread state for ticket #${formattedTicketNumber}:`);
+                console.log(`[Functions] - Thread ID: ${thread.id}`);
+                console.log(`[Functions] - Thread Name: ${thread.name}`);
+                console.log(`[Functions] - Thread Type: ${thread.type}`);
+                console.log(`[Functions] - Thread Archived: ${thread.archived}`);
+                console.log(`[Functions] - Thread Locked: ${thread.locked}`);
+                console.log(`[Functions] - Thread Parent Channel: ${thread.parent?.name} (${thread.parent?.id})`);
+                
+                // Check if thread is visible to the bot
+                const fetchedThread = await ticketChannel.threads.fetch(thread.id).catch(() => null);
+                if (fetchedThread) {
+                    console.log(`[Functions] - Thread is fetchable by bot`);
+                } else {
+                    console.log(`[Functions] - WARNING: Thread is NOT fetchable by bot`);
+                }
+            } catch (debugError) {
+                console.error(`[Functions] Error during thread debugging:`, debugError);
             }
         }
 
