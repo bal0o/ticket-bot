@@ -328,11 +328,12 @@ try {
 
     try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
+        // Create as public thread first so we can add role permissions
         const thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
-            type: 'GUILD_PRIVATE_THREAD'
+            type: 'GUILD_PUBLIC_THREAD'
         });
         console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
         console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
@@ -375,30 +376,31 @@ try {
                             // Try to add the role to the thread using the thread's edit method
                             console.log(`[Functions] Attempting to add role ${role.name} (${roleId}) to staff thread for ticket #${formattedTicketNumber}`);
                             
-                                                                    // For private threads in Discord.js v13, we need to use thread.members.add() for roles
-                                        // This is the correct way to add role members to private threads
+                                                                    // Add the role directly to the thread permissions
                                         try {
-                                            // Get all members with this role
-                                            const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
-                                            console.log(`[Functions] Found ${membersWithRole.size} members with role ${role.name}`);
-                                            
-                                            if (membersWithRole.size > 0) {
-                                                let addedCount = 0;
-                                                for (const [userId, member] of membersWithRole) {
-                                                    try {
-                                                        await thread.members.add(userId);
-                                                        addedCount++;
-                                                        console.log(`[Functions] Added member ${member.user?.tag || userId} to thread`);
-                                                    } catch (memberError) {
-                                                        console.error(`[Functions] Failed to add member ${member.user?.tag || userId}:`, memberError);
-                                                    }
-                                                }
-                                                console.log(`[Functions] Successfully added ${addedCount} members with role ${role.name} to staff thread`);
+                                            // For public threads, we can use permissionOverwrites
+                                            if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
+                                                await thread.permissionOverwrites.create(role, {
+                                                    VIEW_CHANNEL: true,
+                                                    SEND_MESSAGES: true,
+                                                    READ_MESSAGE_HISTORY: true
+                                                });
+                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via permissionOverwrites`);
                                             } else {
-                                                console.log(`[Functions] Warning: No members found with role ${role.name}`);
+                                                // Fallback: try to edit the thread with permissionOverwrites
+                                                await thread.edit({
+                                                    permissionOverwrites: [
+                                                        {
+                                                            id: roleId,
+                                                            type: 'role',
+                                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+                                                        }
+                                                    ]
+                                                });
+                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via thread.edit`);
                                             }
                                         } catch (roleError) {
-                                            console.error(`[Functions] Failed to add role ${role.name} members to thread:`, roleError);
+                                            console.error(`[Functions] Failed to add role ${role.name} to thread permissions:`, roleError);
                                         }
                                                             } catch (roleError) {
                                         console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
@@ -409,6 +411,17 @@ try {
                 }
             } catch (e) {
                 func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
+            }
+            
+            // Convert thread to private after setting role permissions
+            try {
+                console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
+                await thread.edit({
+                    type: 'GUILD_PRIVATE_THREAD'
+                });
+                console.log(`[Functions] Successfully converted thread to private`);
+            } catch (convertError) {
+                console.error(`[Functions] Failed to convert thread to private:`, convertError);
             }
             
             // Debug: Check final thread state
