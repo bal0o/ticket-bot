@@ -328,12 +328,28 @@ try {
 
     try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
-        // Create as public thread first so we can add role permissions
+        // Create as private thread with initial members from access roles
+        const initialMembers = [];
+        if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
+            for (const roleId of accessRoleIDs) {
+                if (!roleId) continue;
+                const role = staffGuild.roles.cache.get(roleId);
+                if (role) {
+                    const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
+                    for (const [userId, member] of membersWithRole) {
+                        initialMembers.push(userId);
+                    }
+                }
+            }
+        }
+        
+        console.log(`[Functions] Found ${initialMembers.length} initial members for thread`);
+        
         const thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
-            type: 'GUILD_PUBLIC_THREAD'
+            type: 'GUILD_PRIVATE_THREAD'
         });
         console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
         console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
@@ -372,56 +388,37 @@ try {
                     const role = staffGuild.roles.cache.get(roleId);
                     if (role) {
                         try {
-                            // In Discord.js v13, threads have different permission handling
-                            // Try to add the role to the thread using the thread's edit method
-                            console.log(`[Functions] Attempting to add role ${role.name} (${roleId}) to staff thread for ticket #${formattedTicketNumber}`);
+                            // Since we're creating a private thread, we need to add members individually
+                            // This is the Discord.js v13 way to handle private thread access
+                            console.log(`[Functions] Adding members with role ${role.name} (${roleId}) to private thread for ticket #${formattedTicketNumber}`);
                             
-                                                                    // Add the role directly to the thread permissions
-                                        try {
-                                            // For public threads, we can use permissionOverwrites
-                                            if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
-                                                await thread.permissionOverwrites.create(role, {
-                                                    VIEW_CHANNEL: true,
-                                                    SEND_MESSAGES: true,
-                                                    READ_MESSAGE_HISTORY: true
-                                                });
-                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via permissionOverwrites`);
-                                            } else {
-                                                // Fallback: try to edit the thread with permissionOverwrites
-                                                await thread.edit({
-                                                    permissionOverwrites: [
-                                                        {
-                                                            id: roleId,
-                                                            type: 'role',
-                                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
-                                                        }
-                                                    ]
-                                                });
-                                                console.log(`[Functions] Successfully added role ${role.name} to thread permissions via thread.edit`);
-                                            }
-                                        } catch (roleError) {
-                                            console.error(`[Functions] Failed to add role ${role.name} to thread permissions:`, roleError);
-                                        }
-                                                            } catch (roleError) {
-                                        console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
+                            const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
+                            console.log(`[Functions] Found ${membersWithRole.size} members with role ${role.name}`);
+                            
+                            if (membersWithRole.size > 0) {
+                                let addedCount = 0;
+                                for (const [userId, member] of membersWithRole) {
+                                    try {
+                                        await thread.members.add(userId);
+                                        addedCount++;
+                                        console.log(`[Functions] Added member ${member.user?.tag || userId} to private thread`);
+                                    } catch (memberError) {
+                                        console.error(`[Functions] Failed to add member ${member.user?.tag || userId}:`, memberError);
                                     }
+                                }
+                                console.log(`[Functions] Successfully added ${addedCount} members with role ${role.name} to private thread`);
+                            } else {
+                                console.log(`[Functions] Warning: No members found with role ${role.name}`);
+                            }
+                        } catch (roleError) {
+                            console.error(`[Functions] Failed to add role ${role.name} members to thread:`, roleError);
+                        }
                     } else {
                         console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
                     }
                 }
             } catch (e) {
                 func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
-            }
-            
-            // Convert thread to private after setting role permissions
-            try {
-                console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
-                await thread.edit({
-                    type: 'GUILD_PRIVATE_THREAD'
-                });
-                console.log(`[Functions] Successfully converted thread to private`);
-            } catch (convertError) {
-                console.error(`[Functions] Failed to convert thread to private:`, convertError);
             }
             
             // Debug: Check final thread state
