@@ -327,33 +327,36 @@ try {
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
     try {
-        console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
-        // Create as private thread with initial members from access roles
-        const initialMembers = [];
-        if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
+        console.log(`[Functions] Creating staff channel for ticket #${formattedTicketNumber}...`);
+        const staffChannelName = `staff-chat-${formattedTicketNumber}`;
+        const staffOverwrites = [
+            {
+                id: staffGuild.id,
+                deny: ['VIEW_CHANNEL', 'ADD_REACTIONS'],
+            },
+            {
+                id: client.user.id,
+                allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'ADD_REACTIONS', 'MANAGE_CHANNELS'],
+            },
+            {
+                id: client.config.role_ids.default_admin_role_id,
+                allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
+            }
+        ];
+        if (accessRoleIDs && Array.isArray(accessRoleIDs)) {
             for (const roleId of accessRoleIDs) {
                 if (!roleId) continue;
-                const role = staffGuild.roles.cache.get(roleId);
-                if (role) {
-                    const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
-                    for (const [userId, member] of membersWithRole) {
-                        initialMembers.push(userId);
-                    }
-                }
+                staffOverwrites.push({ id: roleId, allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'] });
             }
         }
-        
-        console.log(`[Functions] Found ${initialMembers.length} initial members for thread`);
-        
-        const thread = await ticketChannel.threads.create({
-            name: `staff-chat-${formattedTicketNumber}`,
-            autoArchiveDuration: 10080,
-            reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
-            type: 'GUILD_PRIVATE_THREAD'
+
+        const staffChannel = await staffGuild.channels.create(staffChannelName, {
+            type: 'text',
+            parent: (ticketCategory) ? ticketCategory : postchannelCategory || null,
+            permissionOverwrites: staffOverwrites,
+            reason: `Private staff discussion for ticket #${formattedTicketNumber}`
         });
-        console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
-        console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
-        console.log(`[Functions] Thread permissions: ${thread.permissionOverwrites ? 'Available' : 'Not available'}`);
+        console.log(`[Functions] Staff channel created: ${staffChannel.name} (${staffChannel.id})`);
 
         if (bmInfo) {
             const staffEmbed = new Discord.MessageEmbed()
@@ -377,74 +380,14 @@ try {
                 staffEmbed.addField('BM Bans', bmInfo.banInfo.join('\n').substring(0, 1024));
             }
             
-            try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
+            try { await staffChannel.send({ embeds: [staffEmbed] }); } catch (_) {}
         }
 
-        // Add access roles to the staff thread
-        if (accessRoleIDs && Array.isArray(accessRoleIDs) && accessRoleIDs.length > 0) {
-            try {
-                for (const roleId of accessRoleIDs) {
-                    if (!roleId) continue;
-                    const role = staffGuild.roles.cache.get(roleId);
-                    if (role) {
-                        try {
-                            // Since we're creating a private thread, we need to add members individually
-                            // This is the Discord.js v13 way to handle private thread access
-                            console.log(`[Functions] Adding members with role ${role.name} (${roleId}) to private thread for ticket #${formattedTicketNumber}`);
-                            
-                            const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
-                            console.log(`[Functions] Found ${membersWithRole.size} members with role ${role.name}`);
-                            
-                            if (membersWithRole.size > 0) {
-                                let addedCount = 0;
-                                for (const [userId, member] of membersWithRole) {
-                                    try {
-                                        await thread.members.add(userId);
-                                        addedCount++;
-                                        console.log(`[Functions] Added member ${member.user?.tag || userId} to private thread`);
-                                    } catch (memberError) {
-                                        console.error(`[Functions] Failed to add member ${member.user?.tag || userId}:`, memberError);
-                                    }
-                                }
-                                console.log(`[Functions] Successfully added ${addedCount} members with role ${role.name} to private thread`);
-                            } else {
-                                console.log(`[Functions] Warning: No members found with role ${role.name}`);
-                            }
-                        } catch (roleError) {
-                            console.error(`[Functions] Failed to add role ${role.name} members to thread:`, roleError);
-                        }
-                    } else {
-                        console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
-                    }
-                }
-            } catch (e) {
-                func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
-            }
-            
-            // Debug: Check final thread state
-            try {
-                console.log(`[Functions] Final thread state for ticket #${formattedTicketNumber}:`);
-                console.log(`[Functions] - Thread ID: ${thread.id}`);
-                console.log(`[Functions] - Thread Name: ${thread.name}`);
-                console.log(`[Functions] - Thread Type: ${thread.type}`);
-                console.log(`[Functions] - Thread Archived: ${thread.archived}`);
-                console.log(`[Functions] - Thread Locked: ${thread.locked}`);
-                console.log(`[Functions] - Thread Parent Channel: ${thread.parent?.name} (${thread.parent?.id})`);
-                
-                // Check if thread is visible to the bot
-                const fetchedThread = await ticketChannel.threads.fetch(thread.id).catch(() => null);
-                if (fetchedThread) {
-                    console.log(`[Functions] - Thread is fetchable by bot`);
-                } else {
-                    console.log(`[Functions] - WARNING: Thread is NOT fetchable by bot`);
-                }
-            } catch (debugError) {
-                console.error(`[Functions] Error during thread debugging:`, debugError);
-            }
-        }
+        // Seed staff channel so it appears immediately
+        try { await staffChannel.send({ content: `Staff discussion channel for ticket #${formattedTicketNumber}.` }); } catch (_) {}
 
     } catch (e) {
-        func.handle_errors(e, client, `functions.js`, `Failed to create a private thread or send info for ticket #${formattedTicketNumber}`);
+        func.handle_errors(e, client, `functions.js`, `Failed to create a staff channel or send info for ticket #${formattedTicketNumber}`);
     }
 
 
@@ -770,9 +713,15 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Update ticket count
         await module.exports.updateTicketStatus(client);
         
+        // Try to archive staff thread if exists; otherwise delete staff channel if created
         const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
         if (thread) {
             await thread.setArchived(true, 'Ticket closed.');
+        } else {
+            const sibling = channel.guild.channels.cache.find(c => c.name === `staff-chat-${globalTicketNumber}` && c.parentId === channel.parentId);
+            if (sibling) {
+                try { await sibling.delete('Ticket closed.'); } catch (_) {}
+            }
         }
 
         // Delete channel after a short delay
