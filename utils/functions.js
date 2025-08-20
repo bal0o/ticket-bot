@@ -375,51 +375,34 @@ try {
                             // Try to add the role to the thread using the thread's edit method
                             console.log(`[Functions] Attempting to add role ${role.name} (${roleId}) to staff thread for ticket #${formattedTicketNumber}`);
                             
-                            // Method 1: Try to use thread.permissionOverwrites if it exists
-                            if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
-                                await thread.permissionOverwrites.create(role, {
-                                    VIEW_CHANNEL: true,
-                                    SEND_MESSAGES: true,
-                                    READ_MESSAGE_HISTORY: true
-                                });
-                                console.log(`[Functions] Successfully added role ${role.name} to staff thread permissions via permissionOverwrites`);
-                            }
-                            // Method 2: Try to use thread.edit with permissionOverwrites
-                            else if (typeof thread.edit === 'function') {
-                                await thread.edit({
-                                    permissionOverwrites: [
-                                        {
-                                            id: roleId,
-                                            type: 'role',
-                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+                                                                    // For private threads in Discord.js v13, we need to use thread.members.add() for roles
+                                        // This is the correct way to add role members to private threads
+                                        try {
+                                            // Get all members with this role
+                                            const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
+                                            console.log(`[Functions] Found ${membersWithRole.size} members with role ${role.name}`);
+                                            
+                                            if (membersWithRole.size > 0) {
+                                                let addedCount = 0;
+                                                for (const [userId, member] of membersWithRole) {
+                                                    try {
+                                                        await thread.members.add(userId);
+                                                        addedCount++;
+                                                        console.log(`[Functions] Added member ${member.user?.tag || userId} to thread`);
+                                                    } catch (memberError) {
+                                                        console.error(`[Functions] Failed to add member ${member.user?.tag || userId}:`, memberError);
+                                                    }
+                                                }
+                                                console.log(`[Functions] Successfully added ${addedCount} members with role ${role.name} to staff thread`);
+                                            } else {
+                                                console.log(`[Functions] Warning: No members found with role ${role.name}`);
+                                            }
+                                        } catch (roleError) {
+                                            console.error(`[Functions] Failed to add role ${role.name} members to thread:`, roleError);
                                         }
-                                    ]
-                                });
-                                console.log(`[Functions] Successfully added role ${role.name} to staff thread permissions via thread.edit`);
-                            }
-                            // Method 3: Fallback to parent channel
-                            else {
-                                await ticketChannel.permissionOverwrites.create(role, {
-                                    VIEW_CHANNEL: true,
-                                    SEND_MESSAGES: true,
-                                    READ_MESSAGE_HISTORY: true
-                                });
-                                console.log(`[Functions] Added role ${role.name} to parent channel permissions (fallback) for ticket #${formattedTicketNumber}`);
-                            }
-                        } catch (roleError) {
-                            console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
-                            // Try fallback if the main method failed
-                            try {
-                                await ticketChannel.permissionOverwrites.create(role, {
-                                    VIEW_CHANNEL: true,
-                                    SEND_MESSAGES: true,
-                                    READ_MESSAGE_HISTORY: true
-                                });
-                                console.log(`[Functions] Added role ${role.name} to parent channel permissions after main method failed`);
-                            } catch (fallbackError) {
-                                console.error(`[Functions] Fallback also failed for role ${role.name}:`, fallbackError);
-                            }
-                        }
+                                                            } catch (roleError) {
+                                        console.error(`[Functions] Failed to add role ${role.name} to permissions:`, roleError);
+                                    }
                     } else {
                         console.log(`[Functions] Warning: Role ID ${roleId} not found in guild`);
                     }
