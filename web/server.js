@@ -136,20 +136,23 @@ function sanitizeFilename(input) {
 }
 
 async function findOwnerByFilename(filename) {
-    // We look up any PlayerStats.<uid>.ticketLogs.<ticketId>.transcriptURL that ends with filename
+    // Accept either user-facing (.html) or staff/full (.full.html) filenames
+    const candidates = new Set([filename]);
+    if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
+    if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
+
     const all = await db.all();
-    const suffix = `/${filename}`;
+    const suffixes = Array.from(candidates).map(c => `/${c}`);
     for (const row of all) {
         const key = row.id || row.ID || row.key; // quick.db variants
         if (!key || !key.startsWith('PlayerStats.')) continue;
-        // Load lazily only when key likely contains transcriptURL
-        if (key.includes('.transcriptURL')) {
-            const url = row.value ?? row.data;
-            if (typeof url === 'string' && (url.endsWith(suffix) || url === filename)) {
-                // extract userId from key: PlayerStats.<userId>.ticketLogs.<ticketId>.transcriptURL
-                const parts = key.split('.');
-                return parts[1];
-            }
+        if (!key.includes('.transcriptURL')) continue;
+        const url = row.value ?? row.data;
+        if (typeof url !== 'string') continue;
+        // Match any candidate suffix or exact
+        if (suffixes.some(suf => url.endsWith(suf)) || Array.from(candidates).some(c => url === c)) {
+            const parts = key.split('.');
+            return parts[1];
         }
     }
     // Fallback: scan each user's ticket logs
@@ -161,7 +164,9 @@ async function findOwnerByFilename(filename) {
         if (!logs || typeof logs !== 'object') continue;
         for (const ticketId of Object.keys(logs)) {
             const t = logs[ticketId];
-            if (t?.transcriptURL && (t.transcriptURL.endsWith(suffix) || t.transcriptURL === filename)) {
+            const url = t?.transcriptURL;
+            if (typeof url !== 'string') continue;
+            if (suffixes.some(suf => url.endsWith(suf)) || Array.from(candidates).some(c => url === c)) {
                 return userId;
             }
         }
@@ -1024,7 +1029,7 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
         }
     }
     const allowed = await canViewTranscript(req.user.id, effectiveFilename);
-    if (!allowed) return res.status(403).send('Forbidden');
+    if (!allowed) return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     res.render('transcript', { filename: effectiveFilename });
 });
 
@@ -1033,7 +1038,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     const allowed = await canViewTranscript(req.user.id, filename);
-    if (!allowed) return res.status(403).send('Forbidden');
+    if (!allowed) return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     const abs = path.join(TRANSCRIPT_DIR, filename);
     if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
     if (!fs.existsSync(abs)) return res.status(404).send('Not found');
