@@ -142,15 +142,15 @@ async function findOwnerByFilename(filename) {
     if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
 
     const all = await db.all();
-    const suffixes = Array.from(candidates).map(c => `/${c}`);
+    const candList = Array.from(candidates);
     for (const row of all) {
         const key = row.id || row.ID || row.key; // quick.db variants
         if (!key || !key.startsWith('PlayerStats.')) continue;
         if (!key.includes('.transcriptURL')) continue;
         const url = row.value ?? row.data;
         if (typeof url !== 'string') continue;
-        // Match any candidate suffix or exact
-        if (suffixes.some(suf => url.endsWith(suf)) || Array.from(candidates).some(c => url === c)) {
+        // Match any candidate regardless of preceding slash
+        if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
             const parts = key.split('.');
             return parts[1];
         }
@@ -166,7 +166,7 @@ async function findOwnerByFilename(filename) {
             const t = logs[ticketId];
             const url = t?.transcriptURL;
             if (typeof url !== 'string') continue;
-            if (suffixes.some(suf => url.endsWith(suf)) || Array.from(candidates).some(c => url === c)) {
+            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
                 return userId;
             }
         }
@@ -233,7 +233,15 @@ app.use(passport.session());
 
 app.use(async (req, res, next) => {
     res.locals.user = req.user || null;
-    res.locals.roleFlags = req.user ? await getRoleFlags(req.user.id) : { isStaff: false, isAdmin: false };
+    res.locals.roleFlags = req.user ? await getRoleFlags(req.user.id) : { isStaff: false, isAdmin: false, roleIds: [] };
+    // Applications visibility: admins or explicit application admin role id
+    try {
+        const appAdminRoleId = config.role_ids?.application_admin_role_id;
+        const rf = res.locals.roleFlags || { isAdmin: false, roleIds: [] };
+        res.locals.canSeeApplications = !!(rf.isAdmin || (appAdminRoleId && rf.roleIds && rf.roleIds.includes(appAdminRoleId)));
+    } catch (_) {
+        res.locals.canSeeApplications = false;
+    }
     next();
 });
 
