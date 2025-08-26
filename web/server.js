@@ -179,9 +179,11 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function canViewTranscript(userId, filename) {
+    console.log('[auth] canViewTranscript start', { userId, filename });
     const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
-    if (isAdmin) return true;
-    if (userHasOverride(userId, filename)) return true;
+    console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
+    if (isAdmin) { console.log('[auth] allow: admin'); return true; }
+    if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override'); return true; }
     // Fast-path: check the current user's own ticket logs directly
     try {
         const candList = [filename];
@@ -193,12 +195,14 @@ async function canViewTranscript(userId, filename) {
             const url = t?.transcriptURL;
             if (typeof url !== 'string') continue;
             if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
+                console.log('[auth] allow: owner via own logs', { ticketId: tid, url });
                 return true;
             }
         }
-    } catch (_) {}
+    } catch (e) { console.log('[auth] own logs check error', e?.message || e); }
     const ownerId = await findOwnerByFilename(filename);
-    if (ownerId && ownerId === userId) return true;
+    console.log('[auth] owner lookup', { ownerId });
+    if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup'); return true; }
     // If not owner/admin, see if staff but only with per-type permission; infer type from DB
     if (isStaff) {
         try {
@@ -213,6 +217,7 @@ async function canViewTranscript(userId, filename) {
                 canonicalFull = filename.replace(/\.html$/i, '.full.html');
             }
             const suffix = `/${canonicalFull}`;
+            console.log('[auth] staff mode; canonical', { canonicalFull });
             let ticketType = null;
             for (const row of all) {
                 const key = row.id || row.ID || row.key;
@@ -222,13 +227,23 @@ async function canViewTranscript(userId, filename) {
                     const base = key.replace(/\.transcriptURL$/, '');
                     const typeKey = `${base}.ticketType`;
                     const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
-                    if (tRow) ticketType = tRow.value ?? tRow.data;
+                    if (tRow) {
+                        ticketType = tRow.value ?? tRow.data;
+                        console.log('[auth] inferred ticketType', { ticketType });
+                    }
                     break;
                 }
             }
-            if (ticketType && userCanSeeTicketType(roleIds, ticketType)) return true;
-        } catch (_) {}
+            if (ticketType) {
+                const can = userCanSeeTicketType(roleIds, ticketType);
+                console.log('[auth] staff type permission', { ticketType, can });
+                if (can) return true;
+            } else {
+                console.log('[auth] staff: could not infer ticketType for', { filename });
+            }
+        } catch (e) { console.log('[auth] staff check error', e?.message || e); }
     }
+    console.log('[auth] deny: no rule matched', { userId, filename, isStaff, isAdmin });
     return false;
 }
 
@@ -1059,8 +1074,12 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
             effectiveFilename = alt;
         }
     }
+    console.log('[web] /transcripts view', { userId: req.user.id, filename, effectiveFilename, isStaff });
     const allowed = await canViewTranscript(req.user.id, effectiveFilename);
-    if (!allowed) return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    if (!allowed) {
+        console.log('[web] /transcripts deny', { userId: req.user.id, filename: effectiveFilename });
+        return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    }
     res.render('transcript', { filename: effectiveFilename });
 });
 
@@ -1068,8 +1087,12 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
 app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
+    console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
     const allowed = await canViewTranscript(req.user.id, filename);
-    if (!allowed) return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    if (!allowed) {
+        console.log('[web] /transcripts/raw deny', { userId: req.user.id, filename });
+        return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    }
     const abs = path.join(TRANSCRIPT_DIR, filename);
     if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
     if (!fs.existsSync(abs)) return res.status(404).send('Not found');
