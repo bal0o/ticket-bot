@@ -7,7 +7,7 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
-const { QuickDB } = require('quick.db');
+const { createDB } = require('../utils/quickdb');
 const metrics = require('../utils/metrics');
 const permissions = require('../utils/permissions');
 
@@ -42,7 +42,7 @@ if (!BOT_TOKEN) {
 }
 
 // --- Databases ---
-const db = new QuickDB(); // shares ./json.sqlite by default
+const db = createDB(); // persist to ./data/json.sqlite
 // Admin overrides removed per requirements; no external permissions DB
 
 // --- Auth setup ---

@@ -1,5 +1,5 @@
-const { QuickDB } = require('quick.db');
-const db = new QuickDB();
+const { createDB } = require('./quickdb');
+const db = createDB();
 
 const APPLICATIONS_KEY = 'Applications';
 const SCHEDULES_KEY = 'ApplicationSchedules';

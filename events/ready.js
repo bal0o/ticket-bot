@@ -2,7 +2,7 @@ const Discord = require("discord.js");
 const messageId = require("../config/messageid.json");
 const fs = require("fs");
 const func = require("../utils/functions.js");
-const {QuickDB} = require("quick.db")
+const { createDB } = require('../utils/quickdb')
 
 module.exports = async function (client, message) {
     // Initialize the ticket status
@@ -24,7 +24,7 @@ module.exports = async function (client, message) {
         console.error('[Ready] Error initializing staff metrics:', error);
     }
 
-    const db = new QuickDB();
+    const db = createDB();
 
     // See if the Embed for creating tickets is available and if its not, make one.
     let buttonEmbed = undefined

@@ -1,6 +1,6 @@
 const client = require('prom-client');
-const { QuickDB } = require('quick.db');
-const kv = new QuickDB();
+const { createDB } = require('./quickdb');
+const kv = createDB();
 
 // Create a singleton registry
 const registry = new client.Registry();

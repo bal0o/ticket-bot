@@ -40,8 +40,8 @@ client.login(config.tokens.bot_token).then(() => {
 
 	// Start application interview scheduler loop
 	try {
-		const { QuickDB } = require('quick.db');
-		const db = new QuickDB();
+		const { createDB } = require('./utils/quickdb');
+		const db = createDB();
 		const cfg = require('./config/config.json');
 		const guildId = cfg.channel_ids.public_guild_id; // Use public guild for interview channels
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;

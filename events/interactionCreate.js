@@ -6,8 +6,8 @@ const Discord = require("discord.js");
 const unirest = require("unirest");
 const func = require("../utils/functions.js");
 const lang = require("../content/handler/lang.json");
-const {QuickDB} = require("quick.db")
-const db = new QuickDB();
+const { createDB } = require('../utils/quickdb')
+const db = createDB();
 const metrics = require('../utils/metrics');
 const applications = require('../utils/applications');
 

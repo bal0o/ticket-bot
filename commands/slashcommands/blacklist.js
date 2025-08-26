@@ -3,8 +3,8 @@ const moment = require("moment");
 const { SlashCommandBuilder } = require("@discordjs/builders")
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
-const {QuickDB} = require("quick.db");
-const db = new QuickDB();
+const { createDB } = require('../../utils/quickdb');
+const db = createDB();
 
 module.exports = {
     data: new SlashCommandBuilder()

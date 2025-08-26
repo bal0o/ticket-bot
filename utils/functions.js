@@ -1,7 +1,7 @@
 const Discord = require("discord.js");
 const metrics = require('./metrics');
-const {QuickDB} = require("quick.db")
-const db = new QuickDB();
+const { createDB } = require('./quickdb')
+const db = createDB();
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
 const messageid = require("../config/messageid.json");

@@ -1,13 +1,8 @@
 const path = require('path');
 
-let _handlerOptions = null;
-let _questionFiles = new Map();
-
 function loadHandlerOptions() {
-	if (_handlerOptions) return _handlerOptions;
 	try {
-		_handlerOptions = require('../content/handler/options.json');
-		return _handlerOptions;
+		return require('../content/handler/options.json');
 	} catch (_) {
 		return { options: {} };
 	}
@@ -15,24 +10,13 @@ function loadHandlerOptions() {
 
 function getQuestionFileForType(ticketType) {
 	if (!ticketType) return null;
-	
-	// Check cache first
-	if (_questionFiles.has(ticketType)) {
-		return _questionFiles.get(ticketType);
-	}
-	
 	const handlerOptions = loadHandlerOptions();
 	const key = Object.keys(handlerOptions.options || {}).find(k => k.toLowerCase() === String(ticketType).toLowerCase());
 	if (!key) return null;
-	
 	const file = handlerOptions.options[key]?.question_file;
 	if (!file) return null;
-	
 	try {
-		const questionFile = require(path.join('..', 'content', 'questions', file));
-		// Cache the result
-		_questionFiles.set(ticketType, questionFile);
-		return questionFile;
+		return require(path.join('..', 'content', 'questions', file));
 	} catch (_) {
 		return null;
 	}
