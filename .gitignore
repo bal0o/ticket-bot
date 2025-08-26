@@ -28,3 +28,5 @@ transcripts/
 .dist/
 dist/
 build/
+
+config/config.json
