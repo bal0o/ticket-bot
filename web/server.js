@@ -217,7 +217,7 @@ async function canViewTranscript(userId, filename) {
             for (const row of all) {
                 const key = row.id || row.ID || row.key;
                 const val = row.value ?? row.data;
-                if (typeof val === 'string' && val.endsWith(suffix)) {
+                if (typeof val === 'string' && (val.endsWith(suffix) || val.endsWith(canonicalFull))) {
                     // derive key prefix to look up .ticketType
                     const base = key.replace(/\.transcriptURL$/, '');
                     const typeKey = `${base}.ticketType`;
