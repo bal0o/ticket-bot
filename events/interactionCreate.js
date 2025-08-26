@@ -291,14 +291,13 @@ module.exports = async function (client, interaction) {
                             }
                         } catch (_) {}
                     }
-                    // Update channel name to remove -claimed
+                    // Update channel name to remove -claimed (tolerate rate limits)
                     try {
                         if (interaction.channel.name.endsWith('-claimed')) {
-                            // Fire-and-forget to avoid blocking on route-specific rate limits
-                            interaction.channel.setName(interaction.channel.name.replace(/-claimed$/, '')).catch(() => {});
+                            await interaction.channel.setName(interaction.channel.name.replace(/-claimed$/, '')).catch(() => {});
                         }
                     } catch (_) {}
-                    // Update button label to Claim Ticket
+                    // Update button label to Claim Ticket (always attempt)
                     try {
                         const rows = interaction.message.components.map(row => {
                             const newRow = new Discord.MessageActionRow();
@@ -339,14 +338,13 @@ module.exports = async function (client, interaction) {
                     } catch (_) {}
                 }
 
-                // Rename channel to append -claimed
+                // Rename channel to append -claimed (tolerate rate limits)
                 try {
                     if (!interaction.channel.name.endsWith('-claimed')) {
-                        // Fire-and-forget to avoid blocking on route-specific rate limits
-                        interaction.channel.setName(`${interaction.channel.name}-claimed`).catch(() => {});
+                        await interaction.channel.setName(`${interaction.channel.name}-claimed`).catch(() => {});
                     }
                 } catch (_) {}
-                // Update button label to Unclaim
+                // Update button label to Unclaim (always attempt)
                 try {
                     const rows = interaction.message.components.map(row => {
                         const newRow = new Discord.MessageActionRow();
@@ -724,15 +722,16 @@ module.exports = async function (client, interaction) {
                             "⚠️ I couldn't rename this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong."
                         ).catch(() => {});
                     }
-                    // Update the pinned embed's footer to include the ticket type
+                    // Update the pinned embed's title and footer to include the ticket type
                     const myPins = await interaction.channel.messages.fetchPinned();
                     const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
                     if (LastPin && LastPin.embeds[0]) {
                         const embed = LastPin.embeds[0];
+                        // Update title to reflect new type
+                        try { embed.setTitle(`${newTicketType} #${ticketNumber}`); } catch (_) {}
                         const footerParts = embed.footer.text.split("|");
                         const idParts = footerParts[0].trim().split('-');
-                        const ticketType = embed.title.split(" | ")[0];
-                        embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
+                        embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${newTicketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
                         await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
                         // Persist DB ticketType for web authz consistency
                         try {
@@ -745,18 +744,13 @@ module.exports = async function (client, interaction) {
                     }
                     // Notify staff roles configured in ping-role-id for the target type
                     try {
-                        const handlerRaw = require("../content/handler/options.json");
-                        const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == newTicketType.toLowerCase());
-                        if (found) {
-                            const qf = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-                            const pingRoleIDs = Array.isArray(qf['ping-role-id']) ? qf['ping-role-id'].filter(Boolean) : [];
-                            if (pingRoleIDs.length > 0) {
-                                const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
-                                await interaction.channel.send({
-                                    content: `${tags}\nTicket moved to ${newTicketType}.`,
-                                    allowedMentions: { parse: [], roles: pingRoleIDs }
-                                }).catch(() => {});
-                            }
+                        const pingRoleIDs = Array.isArray(targetQf && targetQf['ping-role-id']) ? targetQf['ping-role-id'].filter(Boolean) : [];
+                        if (pingRoleIDs.length > 0) {
+                            const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
+                            await interaction.channel.send({
+                                content: `${tags}\nTicket moved to ${newTicketType}.`,
+                                allowedMentions: { parse: [], roles: pingRoleIDs }
+                            }).catch(() => {});
                         }
                     } catch (_) {}
                     // Delete move-related messages
