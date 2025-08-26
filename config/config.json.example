@@ -64,10 +64,11 @@
     },
 
 "tokens": {
-"Linking_System_API_Key_Or_Secret": "",
-"cheetosToken": "",
-"steamToken": "",
-"battlemetricsToken": ""
+	"bot_token": "your_discord_bot_token_here",
+	"Linking_System_API_Key_Or_Secret": "",
+	"cheetosToken": "",
+	"steamToken": "",
+	"battlemetricsToken": ""
 },
 
 "misc": {

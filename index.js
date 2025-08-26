@@ -1,4 +1,4 @@
-require("dotenv").config({ path: "./config/.env" });
+// Environment variables are now loaded from config.json
 const { Client,Collection,Intents } = require("discord.js");
 const config = require("./config/config.json");
 const axios = require("axios");
@@ -29,7 +29,7 @@ try {
 
 
 let startTime = new Date().getTime();
-client.login(process.env.BOT_TOKEN).then(() => {
+client.login(config.tokens.bot_token).then(() => {
 
 	eval(require("./utils/handler_manager")(client));
 	let endTime = new Date().getTime();
@@ -181,23 +181,23 @@ client.login(process.env.BOT_TOKEN).then(() => {
 								// Notify applicant
 								const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
 									recipient_id: appRec.userId
-								}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								}, { headers: { Authorization: `Bot ${config.tokens.bot_token}` } });
 								
 								if (applicantDm.data && applicantDm.data.id) {
 									await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, {
 										content: `**Interview Voice Channel Ready** 🎤\n\nYour interview voice channel is now available!\n\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when you're ready to begin your interview.`
-									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+									}, { headers: { Authorization: `Bot ${config.tokens.bot_token}` } });
 								}
 								
 								// Notify staff member
 								const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
 									recipient_id: job.staffId
-								}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+								}, { headers: { Authorization: `Bot ${config.tokens.bot_token}` } });
 								
 								if (staffDm.data && staffDm.data.id) {
 									await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, {
-										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username} (<@${appRec.userId}>)\n**Channel:** <#${vc.id}>\n**Interview Start:** <t:${interviewStartTime}:F>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
-									}, { headers: { Authorization: `Bot ${process.env.BOT_TOKEN}` } });
+										content: `**Interview Voice Channel Ready** 🎤\n\nInterview voice channel is now available!\n\n**Applicant:** ${appRec.username} (<@${appRec.userId}>)\n**Channel:** <#${vc.id}>\n**Duration:** ${interviewDuration} minutes\n\nPlease join the voice channel when ready to begin the interview.`
+									}, { headers: { Authorization: `Bot ${config.tokens.bot_token}` } });
 								}
 							} catch (notifyError) {
 								console.error('Failed to send voice channel notifications:', notifyError?.response?.data || notifyError);

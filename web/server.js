@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.resolve(__dirname, '../config/.env') });
+// Environment variables are now loaded from config.json
 
 const express = require('express');
 const session = require('express-session');
@@ -19,14 +19,14 @@ const WEB_ENABLED = config.web?.enabled !== false;
 const HOST = config.web?.host || '0.0.0.0';
 const PORT = config.web?.port || 3050;
 const SESSION_SECRET = config.web?.session_secret || 'change_me';
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || config.web?.discord_oauth?.client_id || '';
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || config.web?.discord_oauth?.client_secret || '';
+const DISCORD_CLIENT_ID = config.web?.discord_oauth?.client_id || '';
+const DISCORD_CLIENT_SECRET = config.web?.discord_oauth?.client_secret || '';
 const DISCORD_CALLBACK_URL = config.web?.discord_oauth?.callback_url || 'http://localhost:3050/auth/callback';
 const DISCORD_SCOPES = config.web?.discord_oauth?.scopes || ['identify'];
 const STAFF_GUILD_ID = config.web?.staff_guild_id || config.channel_ids?.staff_guild_id;
 const STAFF_ROLE_IDS = new Set((config.web?.roles?.staff_role_ids || []).filter(Boolean));
 const ADMIN_ROLE_IDS = new Set((config.web?.roles?.admin_role_ids || []).filter(Boolean));
-const BOT_TOKEN = process.env.BOT_TOKEN; // from ../config/.env
+const BOT_TOKEN = config.tokens?.bot_token;
 const TRANSCRIPT_DIR = path.resolve(process.cwd(), config.transcript_settings?.save_path || './transcripts/');
 
 if (!WEB_ENABLED) {
@@ -34,10 +34,10 @@ if (!WEB_ENABLED) {
     process.exit(0);
 }
 if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
-    console.warn('[web] Missing Discord OAuth client ID/secret. Set in config.web.discord_oauth or env.');
+    console.warn('[web] Missing Discord OAuth client ID/secret. Set in config.web.discord_oauth.');
 }
 if (!BOT_TOKEN) {
-    console.warn('[web] Missing BOT_TOKEN in config/.env. Guild role checks will fail.');
+    console.warn('[web] Missing bot_token in config.tokens. Guild role checks will fail.');
 }
 
 // --- Databases ---

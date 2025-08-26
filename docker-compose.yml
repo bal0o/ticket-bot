@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  ticket-bot:
+    build: .
+    container_name: ticket-bot
+    restart: unless-stopped
+    ports:
+      - "3050:3050"
+    volumes:
+      # Expose config directory for configuration files
+      - ./config:/app/config:rw
+      # Expose content directory for questions and handler files
+      - ./content:/app/content:rw
+      # Expose transcripts directory for saved transcripts
+      - ./transcripts:/app/transcripts:rw
+      # Expose data directory for database files
+      - ./data:/app/data:rw
+      # Expose logs directory
+      - ./logs:/app/logs:rw
+    networks:
+      - ticket-bot-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3050/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  ticket-bot-network:
+    driver: bridge
