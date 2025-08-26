@@ -1,4 +1,4 @@
-require("dotenv").config({ path: "./config/.env" });
+// Environment variables are now loaded from config.json
 const { Client,Collection,Intents } = require("discord.js");
 const config = require("./config/config.json");
 const axios = require("axios");

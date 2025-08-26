@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.resolve(__dirname, '../config/.env') });
+// Environment variables are now loaded from config.json
 
 const express = require('express');
 const session = require('express-session');

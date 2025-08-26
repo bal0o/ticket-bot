@@ -1,4 +1,4 @@
-require("dotenv").config({ path: "./config/.env"});
+// Environment variables are now loaded from config.json
 const config = require("../config/config.json");
 const transcript = require("../utils/fetchTranscript.js");
 const { readdirSync } = require("fs");
