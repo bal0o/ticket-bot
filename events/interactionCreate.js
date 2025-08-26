@@ -10,6 +10,7 @@ const { createDB } = require('../utils/quickdb')
 const db = createDB();
 const metrics = require('../utils/metrics');
 const applications = require('../utils/applications');
+const perms = require('../utils/permissions');
 
 // Initialize commands collection if it doesn't exist
 if (!Discord.Collection.prototype.commands) {
@@ -711,6 +712,11 @@ module.exports = async function (client, interaction) {
                     let renameSucceeded = true;
                     try {
                         await interaction.channel.setName(newName);
+                        // Reapply permission overwrites based on new ticket type
+                        const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: interaction.guild, ticketType: newTicketType });
+                        if (Array.isArray(overwrites) && overwrites.length > 0) {
+                            await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
+                        }
                     } catch (error) {
                         renameSucceeded = false;
                         func.handle_errors(error, client, 'interactionCreate.js', null);
@@ -728,7 +734,31 @@ module.exports = async function (client, interaction) {
                         const ticketType = embed.title.split(" | ")[0];
                         embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
                         await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
+                        // Persist DB ticketType for web authz consistency
+                        try {
+                            const userId = idParts[0];
+                            const tnum = idParts[1];
+                            if (userId && tnum) {
+                                await db.set(`PlayerStats.${userId}.ticketLogs.${tnum}.ticketType`, newTicketType);
+                            }
+                        } catch (e) { func.handle_errors(e, client, 'interactionCreate.js', 'Failed to update DB ticketType on selectCategory move'); }
                     }
+                    // Notify staff roles configured in ping-role-id for the target type
+                    try {
+                        const handlerRaw = require("../content/handler/options.json");
+                        const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == newTicketType.toLowerCase());
+                        if (found) {
+                            const qf = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+                            const pingRoleIDs = Array.isArray(qf['ping-role-id']) ? qf['ping-role-id'].filter(Boolean) : [];
+                            if (pingRoleIDs.length > 0) {
+                                const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
+                                await interaction.channel.send({
+                                    content: `${tags}\nTicket moved to ${newTicketType}.`,
+                                    allowedMentions: { parse: [], roles: pingRoleIDs }
+                                }).catch(() => {});
+                            }
+                        }
+                    } catch (_) {}
                     // Delete move-related messages
                     await interaction.message.delete().catch(() => {});
                     // DM the ticket creator
