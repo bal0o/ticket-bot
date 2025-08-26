@@ -186,16 +186,17 @@ async function findTicketContextByFilename(filename) {
         if (/\.staff\.html$/i.test(filename)) candidates.add(filename.replace(/\.staff\.html$/i, '.full.html'));
         if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
         if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
-        const candList = Array.from(candidates);
+        const candList = Array.from(candidates).map(c => c.toLowerCase());
         const all = await db.all();
         for (const row of all) {
             const key = row.id || row.ID || row.key;
             if (!key) continue;
             const m = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.transcriptURL$/);
             if (!m) continue;
-            const url = row.value ?? row.data;
+            const url = (row.value ?? row.data);
             if (typeof url !== 'string') continue;
-            if (!candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) continue;
+            const urlLower = url.toLowerCase();
+            if (!candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) continue;
             const ownerId = m[1];
             const ticketId = m[2];
             // Try to get ticketType fast via get
@@ -208,6 +209,23 @@ async function findTicketContextByFilename(filename) {
                 if (tRow) ticketType = tRow.value ?? tRow.data;
             }
             return { ownerId, ticketId, ticketType };
+        }
+
+        // Secondary fallback: derive ticketId from filename suffix (e.g., ...-0003.*) and look up by id
+        const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+        const idMatch = base.match(/-(\d{1,8})$/);
+        if (idMatch) {
+            const ticketId = idMatch[1];
+            for (const row of all) {
+                const key = row.id || row.ID || row.key;
+                if (!key) continue;
+                const m2 = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.ticketType$/);
+                if (!m2) continue;
+                if (m2[2] !== ticketId) continue;
+                const ownerId = m2[1];
+                const ticketType = row.value ?? row.data;
+                return { ownerId, ticketId, ticketType };
+            }
         }
     } catch (_) {}
     return null;
