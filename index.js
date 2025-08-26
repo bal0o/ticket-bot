@@ -29,7 +29,7 @@ try {
 
 
 let startTime = new Date().getTime();
-client.login(process.env.BOT_TOKEN).then(() => {
+client.login(config.bot_token || process.env.BOT_TOKEN).then(() => {
 
 	eval(require("./utils/handler_manager")(client));
 	let endTime = new Date().getTime();

@@ -7,11 +7,6 @@ services:
     restart: unless-stopped
     ports:
       - "3050:3050"
-    environment:
-      - NODE_ENV=production
-      - BOT_TOKEN=${BOT_TOKEN}
-      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
-      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
     volumes:
       # Expose config directory for configuration files
       - ./config:/app/config:rw

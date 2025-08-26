@@ -16,10 +16,10 @@ This document explains how to run the Discord Ticket Bot using Docker.
    cd ticket-bot
    ```
 
-2. **Set up environment variables:**
+2. **Set up configuration:**
    ```bash
-   cp env.example .env
-   # Edit .env with your actual values
+   cp config/config.json.example config/config.json
+   # Edit config/config.json with your actual values
    ```
 
 3. **Create necessary directories:**
@@ -47,14 +47,14 @@ The Docker setup exposes the following directories to the host:
 
 ```
 ticket-bot/
-├── config/           # Configuration files (config.json, .env)
+├── config/           # Configuration files (config.json)
 ├── content/          # Questions and handler files
 ├── transcripts/      # Saved ticket transcripts
 ├── data/            # Database files (json.sqlite)
 ├── logs/            # Application logs
 ├── Dockerfile       # Docker image definition
 ├── docker-compose.yml # Docker services configuration
-└── .env             # Environment variables
+└── config.json      # Main configuration file
 ```
 
 ## Volume Mounts
@@ -65,18 +65,21 @@ ticket-bot/
 - **`./data:/app/data:rw`** - Database files
 - **`./logs:/app/logs:rw`** - Application logs
 
-## Environment Variables
+## Configuration
+
+All configuration is now centralized in `config/config.json`. The main fields you need to configure:
 
 ### Required
-- `BOT_TOKEN` - Your Discord bot token
-- `DISCORD_CLIENT_ID` - Discord OAuth client ID
-- `DISCORD_CLIENT_SECRET` - Discord OAuth client secret
+- `bot_token` - Your Discord bot token
+- `web.discord_oauth.client_id` - Discord OAuth client ID
+- `web.discord_oauth.client_secret` - Discord OAuth client secret
 
 ### Optional
-- `NODE_ENV` - Environment (default: production)
-- `SESSION_SECRET` - Web session secret
-- `WEB_HOST` - Web server host (default: 0.0.0.0)
-- `WEB_PORT` - Web server port (default: 3050)
+- `web.session_secret` - Web session secret
+- `web.host` - Web server host (default: 0.0.0.0)
+- `web.port` - Web server port (default: 3050)
+- `channel_ids.*` - Your Discord channel IDs
+- `role_ids.*` - Your Discord role IDs
 
 ## Docker Commands
 
@@ -124,7 +127,7 @@ The container includes health checks that monitor the web interface:
 
 ### Container won't start
 1. Check logs: `docker-compose logs ticket-bot`
-2. Verify environment variables are set correctly
+2. Verify configuration in `config/config.json` is correct
 3. Ensure required directories exist and have proper permissions
 
 ### Database issues
@@ -144,7 +147,7 @@ The container includes health checks that monitor the web interface:
 
 ## Production Considerations
 
-1. **Use Docker secrets** for sensitive environment variables
+1. **Secure your config.json** - Never commit it to version control
 2. **Set up proper logging** with log rotation
 3. **Configure backups** for the data and transcripts directories
 4. **Use Docker networks** for security isolation
@@ -158,8 +161,6 @@ For development, you can create a `docker-compose.override.yml`:
 version: '3.8'
 services:
   ticket-bot:
-    environment:
-      - NODE_ENV=development
     volumes:
       - ./src:/app/src:ro  # Mount source code for development
     command: ["npm", "run", "dev"]
@@ -167,8 +168,8 @@ services:
 
 ## Security Notes
 
-- Never commit `.env` files to version control
-- Use Docker secrets in production environments
+- Never commit `config/config.json` to version control
+- Keep your bot token and OAuth credentials secure
 - Regularly update the base Node.js image
 - Monitor container logs for suspicious activity
 - Restrict network access using Docker networks
