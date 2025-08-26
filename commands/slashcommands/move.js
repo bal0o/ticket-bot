@@ -126,11 +126,22 @@ module.exports = {
                     channelId: channel.id,
                     ticketType,
                     categoryId,
-                    newName
+                    newName: newChannelName
                 };
                 return;
             }
         }
+        // Notify staff roles for the target ticket type
+        try {
+            const pingRoleIDs = Array.isArray(questionFilesystem['ping-role-id']) ? questionFilesystem['ping-role-id'].filter(Boolean) : [];
+            if (pingRoleIDs.length > 0) {
+                const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
+                await channel.send({
+                    content: `${tags}\nTicket moved to ${ticketType}.`,
+                    allowedMentions: { parse: [], roles: pingRoleIDs }
+                }).catch(() => {});
+            }
+        } catch (_) {}
         await interaction.editReply(`Ticket moved to ${ticketType}${renameSucceeded ? '' : ' (with errors)'}.`);
     }
 }; 
