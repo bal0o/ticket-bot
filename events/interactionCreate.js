@@ -110,20 +110,33 @@ module.exports = async function (client, interaction) {
                 
                 const channel = interaction.channel;
                 if (!channel) {
-                    await interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true });
+                    try { await interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true }); } catch(_) {}
                     return;
                 }
                 
                 const reason = interaction.fields.getTextInputValue('closeReason') || 'No Reason Provided.';
-                await func.closeTicket(client, channel, interaction.member, reason);
-                await interaction.editReply({ content: `Your ticket has been closed.`, ephemeral: true });
+                let closed = false;
+                try {
+                    const result = await Promise.race([
+                        (async () => { await func.closeTicket(client, channel, interaction.member, reason); return 'done'; })(),
+                        new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))
+                    ]);
+                    closed = result === 'done';
+                } catch (e) {
+                    func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
+                }
+                try {
+                    await interaction.editReply({ content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.' , ephemeral: true });
+                } catch (e) {
+                    // Ignore Unknown Message (10008) from expired/cleared ephemeral
+                    if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed after close');
+                }
             } catch (error) {
                 func.handle_errors(error, client, 'interactionCreate.js', 'Error handling close ticket modal');
                 try {
                     await interaction.editReply({ content: 'An error occurred while closing the ticket. Please try again.', ephemeral: true });
                 } catch (e) {
                     // If we can't edit the reply, the interaction has probably timed out
-                    console.error('Failed to edit reply:', e);
                 }
             }
             return;
