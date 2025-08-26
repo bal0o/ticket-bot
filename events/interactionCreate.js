@@ -765,6 +765,64 @@ module.exports = async function (client, interaction) {
                 });
         }
 
+        if (interaction.customId === 'ticketclose') {
+            try {
+                if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
+                if (interaction.message.channel?.type === "GUILD_PUBLIC_THREAD" || interaction.message.channel?.type === "DM" || interaction.message.channel?.type === "GUILD_PRIVATE_THREAD") return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
+                if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
+
+                const handlerRaw = require("../content/handler/options.json");
+                const myPins = await interaction.channel.messages.fetchPinned();
+                const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
+                if (!LastPin || !LastPin.embeds[0]) return func.handle_errors(null, client, `interactionCreate.js`, `Can not find the pinned embed. Please make sure the initial embed is pinned for me to grab data. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
+
+                let ticketTypeClose = LastPin.embeds[0].title.split(" #")[0]
+                const foundClose = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase());
+                let typeFile = require(`../content/questions/${handlerRaw.options[foundClose].question_file}`);
+                let accessRoleIDs = typeFile["access-role-id"] || [];
+                let accepted = 0;
+                for (let role of accessRoleIDs) {
+                    if (interaction.member.roles.cache.find(x => x.id == role)) accepted++
+                }
+                if (interaction.member.roles.cache.find(x => x.id == client.config.role_ids.default_admin_role_id)) accepted++
+                if (accepted === 0) {
+                    let role = interaction.message.guild.roles.cache.find(role => role.id === client.config.role_ids.default_admin_role_id)
+                    await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    return;
+                }
+                // Claim enforcement: only claimer (or bypass) can close when restricted
+                try {
+                    if (client.config?.claims?.enabled && client.config?.claims?.restrict_to_claimer) {
+                        const claim = (client.claims && client.claims.get(interaction.channel.id)) || await db.get(`Claims.${interaction.channel.id}`);
+                        if (claim && claim.userId && claim.userId !== interaction.user.id) {
+                            const bypassRoles = new Set((client.config?.claims?.role_bypass_ids || []).concat([client.config.role_ids.default_admin_role_id].filter(Boolean)));
+                            const hasBypass = interaction.member.roles.cache.some(r => bypassRoles.has(r.id));
+                            if (!hasBypass) {
+                                await interaction.reply({ content: `This ticket is claimed by <@${claim.userId}>.`, ephemeral: true }).catch(() => {});
+                                return;
+                            }
+                        }
+                    }
+                } catch (_) {}
+
+                // Show close ticket modal
+                const closeTicketModal = new Discord.Modal()
+                    .setCustomId('closeTicketModal')
+                    .setTitle(lang.close_ticket["close-modal-title"] != "" ? lang.close_ticket["close-modal-title"] : 'Close Ticket');
+                const closeReason = new Discord.TextInputComponent()
+                    .setCustomId('closeReason')
+                    .setLabel(lang.close_ticket["close-modal-reason-title"] != "" ? lang.close_ticket["close-modal-reason-title"] : 'Reason for closing')
+                    .setStyle('PARAGRAPH')
+                    .setRequired(true);
+                const firstActionRow = new Discord.MessageActionRow().addComponents(closeReason);
+                closeTicketModal.addComponents(firstActionRow);
+                await interaction.showModal(closeTicketModal);
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'Error preparing close modal');
+            }
+            return;
+        }
+
         if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
         
         const files = readdirSync("./content/questions/");
