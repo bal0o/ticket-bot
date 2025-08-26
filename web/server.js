@@ -187,6 +187,24 @@ async function findTicketContextByFilename(filename) {
         if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
         if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
         const candList = Array.from(candidates).map(c => c.toLowerCase());
+        // Preferred: scan aggregated PlayerStats object for reliability
+        try {
+            const ps = await db.get('PlayerStats');
+            if (ps && typeof ps === 'object') {
+                for (const ownerId of Object.keys(ps)) {
+                    const logs = ps[ownerId]?.ticketLogs || {};
+                    for (const ticketId of Object.keys(logs)) {
+                        const t = logs[ticketId];
+                        const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
+                        const urlLower = url.toLowerCase();
+                        if (candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) {
+                            const ticketType = t.ticketType || null;
+                            return { ownerId, ticketId, ticketType };
+                        }
+                    }
+                }
+            }
+        } catch (_) {}
         const all = await db.all();
         for (const row of all) {
             const key = row.id || row.ID || row.key;
@@ -216,6 +234,19 @@ async function findTicketContextByFilename(filename) {
         const idMatch = base.match(/-(\d{1,8})$/);
         if (idMatch) {
             const ticketId = idMatch[1];
+            // Try via aggregated object first
+            try {
+                const ps = await db.get('PlayerStats');
+                if (ps && typeof ps === 'object') {
+                    for (const ownerId of Object.keys(ps)) {
+                        const t = ps[ownerId]?.ticketLogs?.[ticketId];
+                        if (t && (t.ticketType || t.transcriptURL)) {
+                            const ticketType = t.ticketType || null;
+                            return { ownerId, ticketId, ticketType };
+                        }
+                    }
+                }
+            } catch (_) {}
             for (const row of all) {
                 const key = row.id || row.ID || row.key;
                 if (!key) continue;
