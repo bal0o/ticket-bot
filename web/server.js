@@ -203,8 +203,16 @@ async function canViewTranscript(userId, filename) {
     if (isStaff) {
         try {
             const all = await db.all();
-            // Search the log which has this filename to infer ticketType
-            const suffix = `/${filename.replace(/\.html$/, '.full.html')}`;
+            // Normalize requested filename to canonical full transcript name
+            let canonicalFull = filename;
+            if (/\.staff\.html$/i.test(filename)) {
+                canonicalFull = filename.replace(/\.staff\.html$/i, '.full.html');
+            } else if (/\.full\.html$/i.test(filename)) {
+                canonicalFull = filename;
+            } else if (/\.html$/i.test(filename)) {
+                canonicalFull = filename.replace(/\.html$/i, '.full.html');
+            }
+            const suffix = `/${canonicalFull}`;
             let ticketType = null;
             for (const row of all) {
                 const key = row.id || row.ID || row.key;
