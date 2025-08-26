@@ -294,7 +294,7 @@ async function canViewTranscript(userId, filename) {
             console.log('[auth] staff mode; context', ctx);
             if (ctx && ctx.ticketType) {
                 const can = userCanSeeTicketType(roleIds, ctx.ticketType);
-                console.log('[auth] staff type permission', { ticketType, can });
+                console.log('[auth] staff type permission', { ticketType: ctx.ticketType, can });
                 if (can) return true;
             } else {
                 console.log('[auth] staff: could not infer ticketType for', { filename });
