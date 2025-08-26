@@ -620,172 +620,116 @@ module.exports = async function (client, interaction) {
         if (interaction.customId === 'moveticket') {
             await interaction.deferReply({ ephemeral: true });
 
-            // Get all categories in the server
-            const categories = interaction.guild.channels.cache.filter(c => c.type === 'GUILD_CATEGORY');
-            
-            // Get ticket categories from options.json
             const handlerRaw = require("../content/handler/options.json");
-            const ticketCategories = new Set();
-            
-            // Collect all unique ticket categories from options
-            Object.values(handlerRaw.options).forEach(option => {
-                const questionFile = require(`../content/questions/${option.question_file}`);
-                // Only add if ticket-category is set
-                if (questionFile["ticket-category"]) {
-                    ticketCategories.add(questionFile["ticket-category"]);
-                }
-            });
+            // Build move options from configured ticket types that have a valid ticket-category present in the guild
+            const typeOptions = [];
+            for (const typeKey of Object.keys(handlerRaw.options)) {
+                try {
+                    const qf = require(`../content/questions/${handlerRaw.options[typeKey].question_file}`);
+                    const categoryId = qf["ticket-category"];
+                    if (!categoryId) continue;
+                    const cat = interaction.guild.channels.cache.get(categoryId);
+                    if (!cat || cat.type !== 'GUILD_CATEGORY') continue;
+                    typeOptions.push({ typeKey, categoryName: cat.name, categoryId });
+                } catch (_) {}
+            }
 
-            // Filter categories to only include ticket categories
-            const ticketCategoryChannels = categories.filter(category => 
-                category && ticketCategories.has(category.id)
-            );
-            
-            if (ticketCategoryChannels.size === 0) {
-                await interaction.editReply({ content: 'No ticket categories found. Please make sure ticket categories are properly configured.', ephemeral: true });
+            if (typeOptions.length === 0) {
+                await interaction.editReply({ content: 'No valid ticket types found with configured categories. Please check options and question files.', ephemeral: true });
                 return;
             }
 
-            // Create a select menu with only ticket categories
+            // Create a select menu for ticket types (not raw categories)
             const row = new Discord.MessageActionRow()
                 .addComponents(
                     new Discord.MessageSelectMenu()
-                        .setCustomId('selectCategory')
-                        .setPlaceholder('Select a category')
+                        .setCustomId('selectMoveType')
+                        .setPlaceholder('Select a ticket type')
                         .addOptions(
-                            ticketCategoryChannels.map(category => ({
-                                label: category.name,
-                                value: category.id,
-                                description: `Move ticket to ${category.name}`
+                            typeOptions.map(opt => ({
+                                label: opt.typeKey,
+                                value: opt.typeKey,
+                                description: `Move to ${opt.typeKey} (${opt.categoryName})`
                             }))
                         )
                 );
 
-            await interaction.editReply({ content: 'Select the category to move this ticket to:', components: [row], ephemeral: true });
+            await interaction.editReply({ content: 'Select the ticket type to move this ticket to:', components: [row], ephemeral: true });
         }
 
-        if (interaction.customId === 'selectCategory') {
+        if (interaction.customId === 'selectMoveType') {
             await interaction.deferReply({ ephemeral: true });
 
-            const categoryId = interaction.values[0];
-            const category = interaction.guild.channels.cache.get(categoryId);
-
-            if (!category) {
-                await interaction.editReply({ content: 'Could not find the selected category. Please try again.', ephemeral: true });
+            const typeKey = interaction.values[0];
+            const handlerRaw = require("../content/handler/options.json");
+            const opt = handlerRaw.options[typeKey];
+            if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', ephemeral: true }); return; }
+            const qf = require(`../content/questions/${opt.question_file}`);
+            const categoryId = qf["ticket-category"]; 
+            const category = categoryId ? interaction.guild.channels.cache.get(categoryId) : null;
+            if (!category || category.type !== 'GUILD_CATEGORY') {
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
                 return;
             }
 
             // Get the current channel name and parse it
             const currentName = interaction.channel.name;
             const nameParts = currentName.split('-');
-            
-            // Extract server name, ticket type, and ticket number
             let serverName = null;
-            let ticketNumber = null;
-            let ticketTypePart = null;
-            
-            // Find the ticket number (it's always the last part)
-            ticketNumber = nameParts[nameParts.length - 1];
-            
-            // If there are more than 2 parts, the first part is the server name
-            if (nameParts.length > 2) {
-                serverName = nameParts[0];
-                // Everything between server name and ticket number is the ticket type
-                ticketTypePart = nameParts.slice(1, -1).join('-');
-            } else {
-                // If only 2 parts, then it's just ticket type and number
-                ticketTypePart = nameParts[0];
-            }
-            
-            // Use category name as new ticket type
-            const newTicketType = category.name.toLowerCase();
-            
-            // Create new channel name preserving the server name (if present) and ticket number
-            const newName = serverName ? `${serverName}-${newTicketType}-${ticketNumber}` : `${newTicketType}-${ticketNumber}`;
+            let ticketNumber = nameParts[nameParts.length - 1];
+            if (nameParts.length > 2) serverName = nameParts[0];
 
-            // Move the channel to the selected category and rename it
+            // Use options key for display; slug for channel name
+            const displayType = typeKey.trim();
+            const slugType = displayType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            const newName = serverName ? `${serverName}-${slugType}-${ticketNumber}` : `${slugType}-${ticketNumber}`;
+
             await interaction.channel.setParent(categoryId)
                 .then(async () => {
-                    // Try to rename the channel after moving it
                     let renameSucceeded = true;
                     try {
                         await interaction.channel.setName(newName);
-                        // Reapply permission overwrites based on new ticket type
-                        const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: interaction.guild, ticketType: newTicketType });
-                        if (Array.isArray(overwrites) && overwrites.length > 0) {
-                            await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
-                        }
+                        const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: interaction.guild, ticketType: displayType });
+                        if (Array.isArray(overwrites) && overwrites.length > 0) await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
                     } catch (error) {
                         renameSucceeded = false;
                         func.handle_errors(error, client, 'interactionCreate.js', null);
-                        await interaction.channel.send(
-                            "⚠️ I couldn't rename this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong."
-                        ).catch(() => {});
+                        await interaction.channel.send("⚠️ I couldn't rename this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
                     }
-                    // Update the pinned embed's title and footer to include the ticket type
+
+                    // Update pinned embed title/footer and DB
                     const myPins = await interaction.channel.messages.fetchPinned();
                     const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
                     if (LastPin && LastPin.embeds[0]) {
                         const embed = LastPin.embeds[0];
-                        // Update title to reflect new type
-                        try { embed.setTitle(`${newTicketType} #${ticketNumber}`); } catch (_) {}
-                        const footerParts = embed.footer.text.split("|");
+                        try { embed.setTitle(`${displayType} #${ticketNumber}`); } catch (_) {}
+                        const footerParts = embed.footer.text.split('|');
                         const idParts = footerParts[0].trim().split('-');
-                        embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${newTicketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
-                        await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
-                        // Persist DB ticketType for web authz consistency
-                        try {
-                            const userId = idParts[0];
-                            const tnum = idParts[1];
-                            if (userId && tnum) {
-                                await db.set(`PlayerStats.${userId}.ticketLogs.${tnum}.ticketType`, newTicketType);
-                            }
-                        } catch (e) { func.handle_errors(e, client, 'interactionCreate.js', 'Failed to update DB ticketType on selectCategory move'); }
+                        embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                        await LastPin.edit({ embeds: [embed] }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
+                        try { if (idParts[0] && idParts[1]) await db.set(`PlayerStats.${idParts[0]}.ticketLogs.${idParts[1]}.ticketType`, displayType); } catch (_) {}
                     }
-                    // Notify staff roles configured in ping-role-id for the target type
+
+                    // Staff ping for target type
                     try {
-                        const pingRoleIDs = Array.isArray(targetQf && targetQf['ping-role-id']) ? targetQf['ping-role-id'].filter(Boolean) : [];
+                        const pingRoleIDs = Array.isArray(qf['ping-role-id']) ? qf['ping-role-id'].filter(Boolean) : [];
                         if (pingRoleIDs.length > 0) {
                             const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
-                            await interaction.channel.send({
-                                content: `${tags}\nTicket moved to ${newTicketType}.`,
-                                allowedMentions: { parse: [], roles: pingRoleIDs }
-                            }).catch(() => {});
+                            await interaction.channel.send({ content: `${tags}\nTicket moved to ${displayType}.`, allowedMentions: { parse: [], roles: pingRoleIDs } }).catch(() => {});
                         }
                     } catch (_) {}
-                    // Delete move-related messages
+
                     await interaction.message.delete().catch(() => {});
-                    // DM the ticket creator
-                    const userId = interaction.channel.topic;
-                    if (userId) {
-                        const user = await client.users.fetch(userId).catch(() => null);
-                        if (user) {
-                            user.send(`Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${category.name}.`).catch(() => {});
-                        }
+                    const topicUser = interaction.channel.topic;
+                    if (topicUser) {
+                        const user = await client.users.fetch(topicUser).catch(() => null);
+                        if (user) user.send(`Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`).catch(() => {});
                     }
-                    // Remove the ephemeral 'thinking' reply
                     await interaction.deleteReply().catch(() => {});
-                    // Delete any lingering select menu or 'thinking...' messages
-                    const messages = await interaction.channel.messages.fetch({ limit: 20 }).catch(() => []);
-                    for (const msg of messages.values()) {
-                        if (
-                            msg.author.id === client.user.id &&
-                            (
-                                msg.components.some(row => row.components.some(comp => comp.customId === 'selectCategory')) ||
-                                msg.content.includes('Brit Support is thinking...')
-                            )
-                        ) {
-                            await msg.delete().catch(() => {});
-                        }
-                    }
                 })
                 .catch(async error => {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
-                    try {
-                        await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', ephemeral: true });
-                    } catch (e) {
-                        if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed');
-                    }
+                    try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', ephemeral: true }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
                 });
         }
 
