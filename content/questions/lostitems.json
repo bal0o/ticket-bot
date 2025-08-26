@@ -1,0 +1,81 @@
+{
+    "server_selection": {
+        "enabled": true,
+        "question": "Which server did you lose your items on?",
+        "servers": [
+            "EU1",
+            "EU2",
+            "EU3",
+            "EU4",
+            "EU5",
+            "US1",
+            "US2",
+            "US3",
+            "US4",
+            "US5"
+        ]
+    },
+    "questions": [
+        "Make a list of exactly what was lost.",
+        "What were you doing when the items were lost?"
+    ],
+
+    "pre-message": "Welcome to the Lost Items Request System!\n\nPlease provide accurate information to help us process your request efficiently.\n\nNote: Laginators will NOT be refunded.",
+    "post-message": "Thank you for submitting your lost items request. Our team will review your request and get back to you as soon as possible. Please be patient while we process your request.",
+    "accept-message": "Your lost items request has been approved. The items will be returned to you shortly.",
+    "deny-message": "Your lost items request has been denied. Please contact support if you have any questions.",
+    "post-channel": "",
+    "transcript-channel": "1375479114311401644",
+    "ticket-category": "1379456565924466768",
+    "access-role-id":  ["1368697881740967966", "1368697297453715496", "1368696874177134745", "1368692575674044447", "1368696296365621331"],
+    "ping-role-id":  ["1368697881740967966", "1368697297453715496"],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": true,
+    "display-user-discord-info": true,
+    "needVerified": true,
+    "allow_feedback": true,
+    "open-as-ticket": true,
+    "max-active-tickets": 1,
+    "send_close_dm": true,
+
+    "check-server-activity": {
+        "enabled": true,
+        "show-only-online-server": true,
+        "show-online-status": true,
+        "show-hours": true,
+        "show-last-seen": true
+    },
+
+    "active_ticket_button_content": {
+        "accept": {
+            "title": "Items Returned",
+            "emoji": "✅",
+            "enabled": true
+        },
+        "deny": {
+            "title": "Request Denied",
+            "emoji": "⛔",
+            "enabled": true
+        },
+        "custom_response_message": {
+            "title": "Custom Close Reply",
+            "emoji": "💬",
+            "enabled": true
+        },
+        "make_a_ticket": {
+            "title": "Open Lost Items Request",
+            "emoji": "📦",
+            "enabled": true
+        }
+    },
+
+    "feedback_questions": [
+        "How was your experience with the lost items process?",
+        "Was the response time satisfactory?",
+        "How would you rate your experience out of 5?",
+        "Would you recommend our lost items system to others?",
+        "Do you have any suggestions for improving the lost items process?"
+    ],
+    "successful_feedback_message": "Thank you for your feedback! Your input helps us improve our lost items system for everyone."
+}

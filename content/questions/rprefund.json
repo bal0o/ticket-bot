@@ -1,0 +1,84 @@
+{
+    "server_selection": {
+        "enabled": true,
+        "question": "Which server are you requesting a refund for?",
+        "servers": [
+            "EU1",
+            "EU2",
+            "EU3",
+            "EU4",
+            "EU5",
+            "US1",
+            "US2",
+            "US3",
+            "US4",
+            "US5"
+        ]
+    },
+    "questions": [
+        "What type of encounter did YOU purchase? (Heli, Raidable Base, Bradley, etc)",
+        "What tier was your encouter?",
+        "How much RP did you lose?",
+        "Do you have any evidence you can share? (Screenshot clip, etc.)",
+        "Tell us a little bit about what happened?"
+    ],
+
+    "pre-message": "Welcome to the RP Refund Request System!\n\nPlease provide accurate information to help us process your refund request efficiently.\n\nNote: Refunds are subject to review and approval based on our refund policy.",
+    "post-message": "Thank you for submitting your RP refund request. Our team will review your request and get back to you as soon as possible. Please be patient while we process your request.",
+    "accept-message": "Your RP refund request has been approved. The refund process will begin shortly.",
+    "deny-message": "Your RP refund request has been denied. Please contact support if you have any questions.",
+    "post-channel": "",
+    "transcript-channel": "1379458808195317852",
+    "ticket-category": "1379456393358217216",
+    "access-role-id":  ["1368696296365621331", "1368692575674044447", "1368696874177134745", "1368697297453715496", "1368697881740967966", "1368697870215024732"],
+    "ping-role-id":  ["1368697870215024732", "1368697881740967966"],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": true,
+    "display-user-discord-info": true,
+    "needVerified": true,
+    "allow_feedback": true,
+    "open-as-ticket": true,
+    "max-active-tickets": 1,
+    "send_close_dm": true,
+
+    "check-server-activity": {
+        "enabled": true,
+        "show-only-online-server": true,
+        "show-online-status": true,
+        "show-hours": true,
+        "show-last-seen": true
+    },
+
+    "active_ticket_button_content": {
+        "accept": {
+            "title": "Refund Approved",
+            "emoji": "✅",
+            "enabled": true
+        },
+        "deny": {
+            "title": "Refund Denied",
+            "emoji": "⛔",
+            "enabled": true
+        },
+        "custom_response_message": {
+            "title": "Custom Close Reply",
+            "emoji": "💬",
+            "enabled": true
+        },
+        "make_a_ticket": {
+            "title": "Open Refund Request",
+            "emoji": "💰",
+            "enabled": true
+        }
+    },
+
+    "feedback_questions": [
+        "How was your experience with the refund process?",
+        "Was the response time satisfactory?",
+        "How would you rate your experience out of 5?",
+        "Would you recommend our refund system to others?",
+        "Do you have any suggestions for improving the refund process?"
+    ],
+    "successful_feedback_message": "Thank you for your feedback! Your input helps us improve our refund system for everyone."
+}

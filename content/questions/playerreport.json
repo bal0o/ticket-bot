@@ -1,0 +1,85 @@
+{
+	"questions": [
+		"Who are you reporting?  Provide as much identifying information as you have.",
+		"Is there anyone else involved?  If yes, provide their information here.",
+		"Please describe the situation.  Be as detailed as you can.",
+		"Is this issue ongoing?",
+		"Do you have any evidence to share?  Include links here if you can; if not, put them in the ticket once it has been made."
+	], 
+
+	"pre-message": "Welcome to the Player Report System! Thank you for helping us keep our community safe.",
+	"post-message": "Thanks for all that info. If you have anything else to add you can simply type in our DMs and it will be sent to the team.",
+	"accept-message": "This message is sent if the users ticket has been auto accepted",
+	"deny-message": "This message is sent if the users ticket has been auto denied",
+	"post-channel": "",
+	"transcript-channel": "1379458808195317852",
+	"ticket-category": "1379458826708713522",
+	"access-role-id": ["1368697297453715496", "1368696874177134745", "1368692575674044447", "1368696296365621331"],
+	"ping-role-id": ["1368697297453715496", "1368696874177134745"],
+    "anonymous-only-replies": false,
+	"check-cheetos": false,
+	"check-steamid": true,
+	"display-user-discord-info": true,
+	"needVerified": true,
+	"allow_feedback": true,
+	"open-as-ticket": true,
+	"max-active-tickets": 5,
+	"send_close_dm": true,
+
+	"check-server-activity": {
+		"enabled": true,
+		"show-only-online-server": true,
+		"show-online-status": true,
+		"show-hours": true,
+		"show-last-seen": true
+	},
+
+	"active_ticket_button_content": {
+		"accept": {
+			"title": "Player Banned",
+			"emoji": "✅",
+			"enabled": true
+		},
+		"deny": {
+			"title": "Report Denied",
+			"emoji": "⛔",
+			"enabled": true
+		},
+		"custom_response_message": {
+			"title": "Custom Close Reply",
+			"emoji": "💬",
+			"enabled": true
+		},
+		"make_a_ticket": {
+			"title": "Open a Ticket",
+			"emoji": "📝",
+			"enabled": true
+		}
+	},
+
+	"feedback_questions": [
+		"How was your experience in your ticket?",
+		"What would you recommend for improvements?",
+		"What you rate your experience out of 5?",
+		"Would you be happy to use our system again?",
+		"You can only have 5 questions in your forms."
+	],
+	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone.",
+
+	"server_selection": {
+		"enabled": true,
+		"question": "Which server are you reporting this issue on?",
+	    "servers": [
+			"EU1",
+			"EU2",
+			"EU3",
+			"EU4",
+			"EU5",
+			"US1",
+			"US2",
+			"US3",
+			"US4",
+			"US5"
+		]
+	}
+}

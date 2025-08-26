@@ -1,0 +1,78 @@
+{
+    "server_selection": {
+        "enabled": true,
+        "question": "Which server are you playing on?",
+        "servers": [
+            "EU1",
+            "EU2",
+            "EU3",
+            "EU4",
+            "EU5",
+            "US1",
+            "US2",
+            "US3",
+            "US4",
+            "US5"
+        ]
+    },
+    "questions": [
+        "What is the topic of this ticket? Include a brief summary of why you made this ticket...",
+        "Please provide detailed information",
+        "Please include any links that may be relevant"
+    ],
+    "pre-message": "Welcome to the General Support System! Please let us know how we can help you by answering the following questions. Our team is here to assist you.",
+    "post-message": "Thank you for reaching out to our support team! We have received your request and will get back to you as soon as possible.",
+    "accept-message": "Your support request has been resolved. If you need further assistance, feel free to open another ticket.",
+    "deny-message": "Your support request has been closed. If you have further questions, please contact us again.",
+    "post-channel": "",
+    "transcript-channel": "1379458808195317852",
+    "ticket-category": "1379551738343723068",
+    "access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745", "1368697297453715496", "1368697881740967966", "1368697870215024732"],
+    "ping-role-id": ["1368697870215024732", "1368697881740967966"],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": true,
+    "display-user-discord-info": true,
+    "needVerified": true,
+    "allow_feedback": true,
+    "open-as-ticket": true,
+    "max-active-tickets": 1,
+    "check-server-activity": {
+        "enabled": true,
+        "show-only-online-server": true,
+        "show-online-status": true,
+        "show-hours": true,
+        "show-last-seen": true
+    },
+    "active_ticket_button_content": {
+        "accept": {
+            "title": "Support Resolved",
+            "emoji": "✅",
+            "enabled": true
+        },
+        "deny": {
+            "title": "Support Closed",
+            "emoji": "⛔",
+            "enabled": true
+        },
+        "custom_response_message": {
+            "title": "Custom Close Reply",
+            "emoji": "💬",
+            "enabled": true
+        },
+        "make_a_ticket": {
+            "title": "Open Support Ticket",
+            "emoji": "📝",
+            "enabled": true
+        }
+    },
+    "feedback_questions": [
+        "How was your experience with our support team?",
+        "Was the response time satisfactory?",
+        "How would you rate your experience out of 5?",
+        "Would you recommend our support system to others?",
+        "Do you have any suggestions for improving our support process?"
+    ],
+    "successful_feedback_message": "Thank you for your feedback! Your input helps us improve our support system for everyone.",
+    "send_close_dm": true
+}

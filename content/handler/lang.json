@@ -1,0 +1,109 @@
+{
+    "error_messages": {
+        "unknown-error": "An unknown error has occured... Please try again later.",
+        "must-be-in-vc": "You must be in a voice channel to use this command.",
+        "no-bot-in-vc": "I am not in a voice channel.",
+        "no-songs-in-queue": "There are no songs in the queue.",
+        "not-a-supported-link": "I do not support this link.",
+        "not-a-youtube-link": "This is not a valid YouTube link.",
+        "no-permissions-to-move": "I do not have permissions to move you.",
+        "must-be-in-same-vc": "You must be in the same voice channel as me to use this command.",
+        "no-results-for-query": "Could not find any results for your query."
+    },
+    
+    "close_ticket": {
+        "close-ticket-channel-embed-title": "{{ADMIN}} closed the ticket with reason:",
+        "close-ticket-button-title": "Close Ticket",
+        "close-transcript-embed-title": "Ticket Closed by {{ADMIN}}",
+        "close-transcript-embed-reason-title": "Close Reason",
+        "close-transcript-embed-response-title": "Response Time",
+        "close-modal-title": "Close Ticket",
+        "close-modal-reason-title": "What is the reason for closing this ticket?",
+        "player-close-embed-title": "Your {{TICKETTYPE}} ticket (#{{TICKETNUMBER}}) has been closed with the following response:",
+        "player-close-embed-title-no-reason": "Your {{TICKETTYPE}} ticket (#{{TICKETNUMBER}}) has been closed",
+        "close-command-confirmation-title": "**Request to close the application**",
+        "close-command-confirmation-description": "Please confirm you want to close the ticket by typing `close`",
+        "close-default-reason": "No Reason Provided."
+    },
+
+    "custom_reply_close_ticket": {
+        "close-transcript-embed-title": "Custom Reply by {{ADMIN}}",
+        "close-transcript-embed-reason-title": "Reply",
+        "close-transcript-embed-response-title": "Response Time",
+        "player-close-embed-title": "Your {{TICKETTYPE}} ticket (#{{TICKETNUMBER}}) has been closed with the following response:",
+        "close-modal-title": "Custom Reply",
+        "close-modal-reason-title": "What would you like to say to the user?"
+       
+    },
+
+    "accepted_ticket": {
+        "accepted-transcript-embed-title": "Accepted by {{ADMIN}}",
+        "accepted-transcript-embed-response-title": "Response Time",
+        "player-accepted-embed-title": "Your {{TICKETTYPE}} ticket (#{{TICKETNUMBER}}) has been closed with the following response:"
+
+    },
+
+    "denied_ticket": {
+        "denied-transcript-embed-title": "Denied by {{ADMIN}}",
+        "denied-transcript-embed-response-title": "Response Time",
+        "player-denied-embed-title": "Your {{TICKETTYPE}} ticket (#{{TICKETNUMBER}}) has been closed with the following response:"
+
+    },
+
+    "feedback_messages": {
+        "feedback-error-no-channel": "Thanks for your feedback, sadly our systems aren't working properly and it did not get saved. Please let a member of staff know!",
+        "ticket-feedback-button-title": "Send Ticket Feedback",
+        "ticket-feedback-modal-title": "Ticket Feedback"
+    },
+
+    "cheetos": {
+        "cheetos-links": "{{COUNT}} links from Cheetos",
+        "ticket-cheetos-links-empty" : "{{USER}} has 0 links via Cheetos!",
+        "ticket-cheetos-links-not-empty": "{{USER}} has {{COUNT}} links via Cheetos!"
+    },
+
+    "ticket_creation": {
+        "player-embed-title": "Ticket Opened",
+        "player-embed-description": "A ticket has been opened for you (Ticket #{{TICKETNUMBER}}), please type here in your DMs to send messages to the staff team!",
+        "initial-message-content": "{{USERNAME}} has opened a {{TICKETTYPE}} ticket",
+        "ticket-creation-confirmation": "Your ticket has been successfully opened in our DMs!",
+        "blacklisted-user-error": "You are not allowed to use this system.",
+        "modal-title": "Please answer the following questions"
+    },
+
+    "active_tickets": {
+        "player-active-title": "You currently have {{COUNT}} ticket(s) being looked at by the team.",
+        "player-active-description": "If you would like to open a ticket, please head to {{TICKETCHANNEL}}."
+
+    },
+
+    "attachments": {
+        "user-blacklisted-extension": "**Attachment `({{ATTACHMENT}})` contains a blacklisted extension and was not sent!**",
+        "staff-blacklisted-extension": "**User tried sending a file with a blacklisted extension!**\n`({{ATTACHMENT}})`",
+        "staff-attachment-recieved": "**Attachment recieved from the user!**",
+        "staff-attachment-sent": "**Attachment successfully sent to the user!**",
+        "user-attachment-sent": "**Attachment(s) successfully sent to the staff team!**",
+        "user-attachment-recieved": "**Attachment recieved from {{ADMIN}}!**"
+    },
+
+    "user_errors": {
+        "fast-ticket-creation": "You can not make another ticket that quickly!",
+        "verification-needed": "{{USER}}, you need to verify to make a '{{TICKETTYPE}}' ticket. {{VERIFYLINK}}",
+        "no-steamid-verification-needed": "{{USER}}, no SteamID found! You need to verify to make a '{{TICKETTYPE}}' ticket. {{VERIFYLINK}}",
+        "too-many-pending-tickets": "{{USER}}, you have too many tickets open, please wait for them to be resolved.",
+        "ticket-already-open": "{{USER}}, you have reached your maximum limit of tickets. Please close some of your existing tickets before creating new ones."
+    },
+
+    "send_ticket_messages": {
+        "hidden": "(STAFF Hidden)",
+        "visible": "(STAFF Visible)"
+    },
+
+    "misc": {
+        "pre-embed-footer": "If you wish to stop this process, type `stop` or wait 10 minutes and it will cancel.",
+        "incorrect-roles-for-action": "It seems you do not have the correct roles to perform that action! You need the {{ROLENAME}} role or an 'access-role' if one is set!",
+        "api-access-denied": "The API could not be accessed so we could not verify your accounts. Ticket Cancelled.",
+        "no-user-found": "Could not find that user to send them a message. Have they left the discord?",
+        "generic-error-message": "Sorry we could not perform this action right now, the staff team have been made aware of the issue!"
+    }
+}

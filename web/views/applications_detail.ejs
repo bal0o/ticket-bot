@@ -1,0 +1,232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Application</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-left"><a href="/applications">Applications</a></div>
+    <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
+  </header>
+  <main class="container">
+         <% if (notification) { %>
+       <div class="notification <%= notificationType %>">
+         <%= notification %>
+       </div>
+     <% } %>
+     
+     <% if (app.stage === 'Denied') { %>
+       <div class="application-status denied">
+         <h2>❌ Application Denied</h2>
+         <p>This application has been denied and cannot be modified further.</p>
+         <% const lastHistory = app.history && app.history.length > 0 ? app.history[app.history.length - 1] : null; %>
+         <% if (lastHistory && lastHistory.note) { %>
+           <p><strong>Reason:</strong> <%= lastHistory.note %></p>
+         <% } %>
+       </div>
+     <% } else if (app.stage === 'Approved') { %>
+       <div class="application-status approved">
+         <h2>✅ Application Approved</h2>
+         <p>This application has been approved and cannot be modified further.</p>
+         <% const lastHistory = app.history && app.history.length > 0 ? app.history[app.history.length - 1] : null; %>
+         <% if (lastHistory && lastHistory.note) { %>
+           <p><strong>Notes:</strong> <%= lastHistory.note %></p>
+         <% } %>
+       </div>
+     <% } %>
+     
+     <h1>Application: <%= app.username %> (<%= app.userId %>)</h1>
+     <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
+    
+    <!-- Stages Progress - simplified -->
+    <section class="stages-section">
+      <h3>Application Progress</h3>
+      <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
+    </section>
+
+    <div class="grid two">
+      <section>
+        <h3>Responses</h3>
+        <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
+        <h3>Tickets</h3>
+        <ul>
+          <% (app.tickets || []).forEach(t => { %>
+            <li>#<%= t.ticketId %> — <span class="muted"><%= new Date(t.createdAt).toLocaleString() %></span></li>
+          <% }) %>
+          <% if ((app.tickets||[]).length===0) { %><li class="muted">None yet</li><% } %>
+        </ul>
+      </section>
+      <section>
+        <h3>History</h3>
+        <ul>
+          <% (app.history || []).forEach(h => { %>
+            <li><strong><%= h.stage %></strong> <span class="muted"><%= new Date(h.at).toLocaleString() %></span> <%= h.by ? ('by ' + (userNames[String(h.by)] || h.by)) : '' %><br><span class="muted"><%= h.note || '' %></span></li>
+          <% }) %>
+        </ul>
+         <div class="comments-section">
+           <h3>Comments</h3>
+           <ul>
+             <% (app.comments || []).forEach(c => { %>
+               <li>
+                 <strong><%= userNames[String(c.by)] || c.by %></strong> <span class="muted"><%= new Date(c.at).toLocaleString() %></span><br>
+                 <div>
+                   <%= c.comment %>
+                 </div>
+               </li>
+             <% }) %>
+           </ul>
+         </div>
+                 <form method="post" action="/applications/<%= app.id %>/comment" style="margin:12px 0;">
+           <textarea name="comment" rows="3" style="width:100%" placeholder="Add comment..."></textarea>
+           <button class="btn primary" type="submit" <%= (app.stage === 'Denied' || app.stage === 'Approved' || app.stage === 'Archived') ? 'disabled' : '' %>>Add Comment</button>
+         </form>
+         <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
+                     <h3>Actions</h3>
+           <% if (app.stage === 'Interview') { %>
+             <!-- Post-interview: Only Approve or Deny with notes -->
+             <form method="post" action="/applications/<%= app.id %>/approve" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+               <input type="text" name="note" placeholder="Approval notes (required)" style="flex:1;" required>
+               <button class="btn primary" type="submit">✅ Approve</button>
+             </form>
+             <form method="post" action="/applications/<%= app.id %>/deny" style="display:flex; gap:8px; align-items:center;">
+               <input type="text" name="note" placeholder="Denial reason (required)" style="flex:1;" required>
+               <button class="btn" type="submit">❌ Deny</button>
+             </form>
+           <% } else { %>
+             <!-- Pre-interview: Normal advancement -->
+             <form method="post" action="/applications/<%= app.id %>/advance" style="display:flex; gap:8px; align-items:center;">
+               <span class="muted">Next Stage:</span>
+               <strong><%= nextStage %></strong>
+               <input type="text" name="note" placeholder="Note" style="flex:1;">
+               <button class="btn primary" type="submit">Advance</button>
+             </form>
+             <form method="post" action="/applications/<%= app.id %>/deny" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+               <input type="text" name="note" placeholder="Reason">
+               <button class="btn" type="submit">Deny</button>
+             </form>
+           <% } %>
+            <form method="post" action="/applications/<%= app.id %>/archive" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+              <input type="text" name="note" placeholder="Reason (optional)">
+              <button class="btn" type="submit">Archive</button>
+            </form>
+          <% } %>
+           <h3>Contact / Interview</h3>
+          <% if (channelExists && lastTicket) { %>
+            <div class="communication-status">
+              <p class="status-active">✅ Communication channel is open</p>
+              <p class="muted">Channel: <code>#<%= lastTicket.channelId %></code></p>
+              <p class="muted">Channel Name: <code>app-<%= app.username %>-comms</code></p>
+            </div>
+          <% } else { %>
+            <div class="communication-status">
+              <p class="muted">No communication channel is currently open</p>
+              <form method="post" action="/applications/<%= app.id %>/open_ticket" style="margin-top:8px;">
+                <button class="btn" type="submit">Open Communication Channel</button>
+              </form>
+            </div>
+          <% } %>
+          
+                     <% if (app.stage === 'Interview') { %>
+              <div style="margin-top:16px;">
+                <a href="/applications/<%= app.id %>/interviews" class="btn primary">Manage Interviews</a>
+              </div>
+            <% } %>
+        </section>
+    </div>
+    
+     </main>
+   
+   <!-- Transcript Modal -->
+   <div id="transcriptModal" class="modal">
+     <div class="modal-content">
+       <div class="modal-header">
+         <h2 id="transcriptModalTitle">Transcript</h2>
+         <span class="close" onclick="closeTranscriptModal()">&times;</span>
+       </div>
+       <div class="modal-body">
+         <iframe id="transcriptFrame" src="" width="100%" height="600px" frameborder="0"></iframe>
+       </div>
+     </div>
+   </div>
+   
+   <script>
+    // Auto-hide notifications after 5 seconds
+    document.addEventListener('DOMContentLoaded', function() {
+      const notifications = document.querySelectorAll('.notification');
+      notifications.forEach(notification => {
+        setTimeout(() => {
+          notification.style.opacity = '0';
+          setTimeout(() => notification.remove(), 300);
+        }, 5000);
+      });
+      
+      // Add smooth transitions
+      notifications.forEach(notification => {
+        notification.style.transition = 'opacity 0.3s ease';
+      });
+    });
+    
+    // Form validation for interview scheduling
+    const interviewForm = document.querySelector('form[action*="/schedule"]');
+    if (interviewForm) {
+      interviewForm.addEventListener('submit', function(e) {
+        const when = this.querySelector('input[name="when"]').value;
+        const staffId = this.querySelector('input[name="staff_id"]').value;
+        
+        if (!when || !staffId) {
+          e.preventDefault();
+          alert('Please fill in both interview time and staff ID.');
+          return false;
+        }
+        
+        // Validate staff ID format (Discord IDs are 17-19 digits)
+        if (!/^\d{17,19}$/.test(staffId)) {
+          e.preventDefault();
+          alert('Please enter a valid Discord Staff ID (17-19 digits).');
+          return false;
+        }
+        
+                // Validate interview time is in the future
+        const interviewTime = new Date(when);
+        const now = new Date();
+        
+        
+        if (interviewTime <= now) {
+          e.preventDefault();
+          alert('Interview time must be in the future.');
+          return false;
+        }
+        
+        
+       });
+     }
+     
+     // Transcript modal functions
+     function openTranscriptModal(url, title) {
+       document.getElementById('transcriptModalTitle').textContent = title;
+       document.getElementById('transcriptFrame').src = url;
+       document.getElementById('transcriptModal').style.display = 'block';
+       document.body.style.overflow = 'hidden'; // Prevent background scrolling
+     }
+     
+     function closeTranscriptModal() {
+       document.getElementById('transcriptModal').style.display = 'none';
+       document.getElementById('transcriptFrame').src = '';
+       document.body.style.overflow = 'auto'; // Restore scrolling
+     }
+     
+     // Close modal when clicking outside of it
+     window.onclick = function(event) {
+       const modal = document.getElementById('transcriptModal');
+       if (event.target === modal) {
+         closeTranscriptModal();
+       }
+     }
+   </script>
+ </body>
+ </html>
+
+

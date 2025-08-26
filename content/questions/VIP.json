@@ -1,0 +1,65 @@
+{
+	"questions": [
+		"Do you have a transaction ID?  This should be in your confirmation email.",
+		"What can we help you with?"
+	],
+
+	"pre-message": "Welcome to the VIP Transactions Support System! Thank you for reaching out. Our team will review your request and get back to you as soon as possible.",
+	"post-message": "Thanks for all that info. If you have anything else to add you can simply type in our DMs and it will be sent to the team.",
+	"accept-message": "This message is sent if the users ticket has been auto accepted",
+	"deny-message": "This message is sent if the users ticket has been auto denied",
+	"post-channel": "",
+	"transcript-channel": "1379458808195317852",
+	"ticket-category": "1379551978677604514",
+	"access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745", "1399121105863835760"],
+	"ping-role-id": ["1399121105863835760"],
+    "anonymous-only-replies": false,
+	"check-cheetos": false,
+	"check-steamid": true,
+	"display-user-discord-info": true,
+	"needVerified": true,
+	"allow_feedback": true,
+	"open-as-ticket": true,
+	"max-active-tickets": 1,
+	"send_close_dm": true,
+
+	"check-server-activity": {
+		"enabled": true,
+		"show-only-online-server": true,
+		"show-online-status": true,
+		"show-hours": true,
+		"show-last-seen": true
+	},
+
+	"active_ticket_button_content": {
+		"accept": {
+			"title": "",
+			"emoji": "",
+			"enabled": false
+		},
+		"deny": {
+			"title": "",
+			"emoji": "",
+			"enabled": false
+		},
+		"custom_response_message": {
+			"title": "",
+			"emoji": "",
+			"enabled": true
+		},
+		"make_a_ticket": {
+			"title": "",
+			"emoji": "",
+			"enabled": true
+		}
+	},
+
+	"feedback_questions": [
+		"How was your experience in your ticket?",
+		"What would you recommend for improvements?",
+		"What you rate your experience out of 5?",
+		"Would you be happy to use our system again?",
+		"You can only have 5 questions in your forms."
+	],
+	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone."
+}

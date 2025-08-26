@@ -1,0 +1,68 @@
+{
+	"questions": [
+		"What was the reason for your ban / mute?  Griefing, exploitation, racism, etc.",
+		"Please explain your side of what happened.  Do NOT use AI.",
+		"Is this your first ban on our servers?",
+		"Have you spoken to staff before/after the ban / mute?"
+	],
+	
+	"pre-message": "Welcome to the Appeals System! Thank you for submitting your appeal. Our team will review your request and get back to you as soon as possible.",
+	"post-message": "Thanks for all that info. If you have anything else to add you can simply type in our DMs and it will be sent to the team.",
+	"accept-message": "This message is sent if the users ticket has been auto accepted",
+	"deny-message": "This message is sent if the users ticket has been auto denied",
+	"post-channel": "",
+	"transcript-channel": "1379458808195317852",
+	"ticket-category": "1379550808349085807",
+	"access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745"],
+	"ping-role-id": ["1368696874177134745"],
+    "anonymous-only-replies": true,
+	"check-cheetos": false,
+	"check-steamid": true,
+	"display-user-discord-info": true,
+	"needVerified": true,
+	"allow_feedback": false,
+	"open-as-ticket": true,
+	"max-active-tickets": 1,
+	"send_close_dm": true,
+
+	"check-server-activity": {
+		"enabled": true,
+		"show-only-online-server": false,
+		"show-online-status": true,
+		"show-hours": true,
+		"show-last-seen": true
+	},
+
+	"active_ticket_button_content": {
+		"accept": {
+			"title": "Accept Appeal",
+			"emoji": "",
+			"enabled": true
+		},
+		"deny": {
+			"title": "Deny Appeal",
+			"emoji": "",
+			"enabled": true
+		},
+		"custom_response_message": {
+			"title": "Custom Close Reply",
+			"emoji": "",
+			"enabled": true
+		},
+		"make_a_ticket": {
+			"title": "Open a Ticket",
+			"emoji": "",
+			"enabled": true
+		}
+	},
+
+	"feedback_questions": [
+		"How was your experience in your ticket?",
+		"What would you recommend for improvements?",
+		"What you rate your experience out of 5?",
+		"Would you be happy to use our system again?",
+		"You can only have 5 questions in your forms."
+	],
+	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone."
+	
+}

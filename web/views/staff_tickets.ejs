@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Staff Tickets</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-left"><a href="/">Tickets</a></div>
+    <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
+  </header>
+  <main class="container">
+  <h1>All Tickets</h1>
+  <form method="get" action="/staff" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+    <label>User ID:
+      <input type="text" id="userInput" name="user" list="userList" autocomplete="off" value="<%= (query && query.user) || '' %>">
+      <datalist id="userList"></datalist>
+    </label>
+    <label>Type:
+      <select name="type">
+        <option value="">Any</option>
+        <% (types || []).forEach(t => { %>
+          <option value="<%= t.toLowerCase() %>" <%= (query && query.type) === t.toLowerCase() ? 'selected' : '' %>><%= t %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label>Server:
+      <input type="text" name="server" value="<%= (query && query.server) || '' %>">
+    </label>
+    <label>Closed By (name or ID):
+      <input type="text" name="closed_by" value="<%= (query && query.closed_by) || '' %>">
+    </label>
+    <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
+    <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
+    <button type="submit" class="btn primary">Filter</button>
+  </form>
+  <table class="with-filter">
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Ticket #</th>
+        <th>Type</th>
+        <th>Server</th>
+        <th>Closed By</th>
+        <th>Close Reason</th>
+        <th>Created</th>
+        <th>Transcript</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% tickets.forEach(t => { %>
+        <tr>
+          <td title="<%= t.userId %>"><%= t.username || t.userId %></td>
+          <td><%= t.ticketId %></td>
+          <td><%= t.ticketType %></td>
+          <td><%= t.server || '' %></td>
+          <td><%= t.closeUser || '' %></td>
+          <td class="wrap pre"><%= t.closeReason || '' %></td>
+          <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
+          <td>
+            <% if (t.transcriptFilename) { %>
+              <a href="/transcripts/<%= t.transcriptFilename %>">Full</a>
+              <% const userFile = t.transcriptFilename.replace(/\.full\.html$/, '.html'); %>
+              <span class="muted">/</span>
+              <a href="/transcripts/<%= userFile %>">User</a>
+              <% const staffFile = t.transcriptFilename.replace(/\.full\.html$/, '.staff.html'); %>
+              <span class="muted">/</span>
+              <a href="/transcripts/<%= staffFile %>">Staff</a>
+            <% } else { %>
+              <em>Not available</em>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </main>
+  <script>
+    const input = document.getElementById('userInput');
+    const list = document.getElementById('userList');
+    let lastQ = '';
+    input && input.addEventListener('input', async () => {
+      const q = input.value.trim();
+      if (q === lastQ) return;
+      lastQ = q;
+      try {
+        const res = await fetch(`/api/users?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        list.innerHTML = '';
+        data.forEach(({userId, username}) => {
+          const opt = document.createElement('option');
+          opt.value = userId;
+          opt.label = username ? `${username} (${userId})` : userId;
+          list.appendChild(opt);
+        });
+      } catch {}
+    });
+  </script>
+</body>
+</html>
+

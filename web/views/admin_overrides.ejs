@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Overrides</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>.hint{color:var(--muted);font-size:.9rem;margin-top:6px}</style>
+  </head>
+<body>
+  <header class="navbar">
+    <div class="nav-left"><a href="/">Tickets</a></div>
+    <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
+  </header>
+  <main class="container">
+    <h1>Permission Overrides</h1>
+
+    <form method="post" action="/admin/overrides/add" class="filters" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
+      <label>Transcript filename
+        <input name="filename" placeholder="e.g., general-0123.html" required>
+      </label>
+      <label>User ID
+        <input name="user_id" placeholder="Discord User ID" required>
+      </label>
+      <label>Can View
+        <select name="can_view">
+          <option value="1">Yes</option>
+          <option value="0">No</option>
+        </select>
+      </label>
+      <button type="submit" class="btn primary">Save</button>
+      <div class="hint">Overrides grant or revoke transcript access for a specific user and filename.</div>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Filename</th>
+          <th>User</th>
+          <th>Can View</th>
+          <th>Delete</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% rows.forEach(r => { %>
+          <tr>
+            <td><%= r.filename %></td>
+            <td><%= r.user_id %></td>
+            <td><%= r.can_view ? 'Yes' : 'No' %></td>
+            <td>
+              <form method="post" action="/admin/overrides/delete" style="display:inline">
+                <input type="hidden" name="filename" value="<%= r.filename %>">
+                <input type="hidden" name="user_id" value="<%= r.user_id %>">
+                <button type="submit" class="btn">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+
