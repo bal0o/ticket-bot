@@ -55,9 +55,15 @@ module.exports = async function (client, message) {
 
                 let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
 
-                if (questionFilesystem.active_ticket_button_content.accept.enabled == false &&
+                // Skip validation for question files that don't have button content structure
+                if (questionFilesystem.active_ticket_button_content && 
+                    questionFilesystem.active_ticket_button_content.accept && 
+                    questionFilesystem.active_ticket_button_content.accept.enabled == false &&
+                    questionFilesystem.active_ticket_button_content.deny && 
                     questionFilesystem.active_ticket_button_content.deny.enabled == false &&
+                    questionFilesystem.active_ticket_button_content.custom_response_message && 
                     questionFilesystem.active_ticket_button_content.custom_response_message.enabled == false &&
+                    questionFilesystem.active_ticket_button_content.make_a_ticket && 
                     questionFilesystem.active_ticket_button_content.make_a_ticket.enabled == false
                     ) {
                         func.handle_errors(null, client, `ready.js`, `You need to enabled at least one of the holding channel buttons in your question file for ${keys[i]}.`)
@@ -102,9 +108,15 @@ module.exports = async function (client, message) {
 
                     let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
 
-                    if (questionFilesystem.active_ticket_button_content.accept.enabled == false &&
+                    // Skip validation for question files that don't have button content structure
+                    if (questionFilesystem.active_ticket_button_content && 
+                        questionFilesystem.active_ticket_button_content.accept && 
+                        questionFilesystem.active_ticket_button_content.accept.enabled == false &&
+                        questionFilesystem.active_ticket_button_content.deny && 
                         questionFilesystem.active_ticket_button_content.deny.enabled == false &&
+                        questionFilesystem.active_ticket_button_content.custom_response_message && 
                         questionFilesystem.active_ticket_button_content.custom_response_message.enabled == false &&
+                        questionFilesystem.active_ticket_button_content.make_a_ticket && 
                         questionFilesystem.active_ticket_button_content.make_a_ticket.enabled == false
                         ) {
                             func.handle_errors(null, client, `ready.js`, `You need to enabled at least one of the holding channel buttons in your question file for ${keys[i]}.`)
