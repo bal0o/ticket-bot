@@ -9,6 +9,7 @@ const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
 const { QuickDB } = require('quick.db');
 const metrics = require('../utils/metrics');
+const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
 const handlerOptions = require('../content/handler/options.json');
@@ -90,6 +91,15 @@ async function getRoleFlags(userId) {
     return { isStaff, isAdmin, roleIds: Array.from(roles) };
 }
 
+function userCanSeeTicketType(roleIds, ticketType) {
+    try {
+        const adminIds = new Set((config.web?.roles?.admin_role_ids || []).filter(Boolean));
+        // Fast path: admin roles
+        for (const rid of roleIds) if (adminIds.has(rid)) return true;
+        return permissions.userHasAccessToTicketType({ userRoleIds: roleIds, ticketType, config, adminRoleIds: Array.from(adminIds) });
+    } catch (_) { return false; }
+}
+
 async function getUsernamesMap(ids = []) {
     const map = {};
     if (!BOT_TOKEN || !Array.isArray(ids) || ids.length === 0) return map;
@@ -164,11 +174,33 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function canViewTranscript(userId, filename) {
-    const { isStaff, isAdmin } = await getRoleFlags(userId);
-    if (isAdmin || isStaff) return true; // staff can see all
+    const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
+    if (isAdmin) return true;
     if (userHasOverride(userId, filename)) return true;
     const ownerId = await findOwnerByFilename(filename);
     if (ownerId && ownerId === userId) return true;
+    // If not owner/admin, see if staff but only with per-type permission; infer type from DB
+    if (isStaff) {
+        try {
+            const all = await db.all();
+            // Search the log which has this filename to infer ticketType
+            const suffix = `/${filename.replace(/\.html$/, '.full.html')}`;
+            let ticketType = null;
+            for (const row of all) {
+                const key = row.id || row.ID || row.key;
+                const val = row.value ?? row.data;
+                if (typeof val === 'string' && val.endsWith(suffix)) {
+                    // derive key prefix to look up .ticketType
+                    const base = key.replace(/\.transcriptURL$/, '');
+                    const typeKey = `${base}.ticketType`;
+                    const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
+                    if (tRow) ticketType = tRow.value ?? tRow.data;
+                    break;
+                }
+            }
+            if (ticketType && userCanSeeTicketType(roleIds, ticketType)) return true;
+        } catch (_) {}
+    }
     return false;
 }
 
@@ -829,7 +861,7 @@ async function getAllUserIds() {
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
+    const { isStaff, roleIds } = await getRoleFlags(req.user.id);
     if (!isStaff) return res.status(403).send('Forbidden');
     req.session.staff_ok = true;
 
@@ -862,6 +894,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
                 const typeLower = (t.ticketType || 'Unknown').toLowerCase();
+                // Enforce per-ticket-type visibility based on Discord roles
+                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
@@ -920,6 +954,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
                 const typeLower = (t.ticketType || 'Unknown').toLowerCase();
+                // Enforce per-ticket-type visibility based on Discord roles
+                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
