@@ -49,4 +49,6 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Image digest
-        run: echo ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "Successfully built and pushed:"
+          echo "${{ steps.meta.outputs.tags }}"
