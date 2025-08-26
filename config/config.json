@@ -64,10 +64,10 @@
     },
 
 	"tokens": {
-		"Linking_System_API_Key_Or_Secret": "skufbnsf8dskfbu74dsfs2",
+		"Linking_System_API_Key_Or_Secret": "",
 		"cheetosToken": "",
-		"steamToken": "B91CB6D2D64F2BF9466CF919F631D22C",
-		"battlemetricsToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbiI6IjIzYWJlNWJhNWRlNjE4ODIiLCJpYXQiOjE3NDczNDI3OTQsIm5iZiI6MTc0NzM0Mjc5NCwiaXNzIjoiaHR0cHM6Ly93d3cuYmF0dGxlbWV0cmljcy5jb20iLCJzdWIiOiJ1cm46dXNlcjo3NTk0MDAifQ.lcCadsXrahdJh-PPnL_OS-D0nQUy964-gUcdqcvweZo"
+		"steamToken": "",
+		"battlemetricsToken": ""
 	},
 
 	"misc": {
@@ -78,10 +78,10 @@
 		"enabled": true,
 		"host": "0.0.0.0",
 		"port": 3050,
-		"session_secret": "adkfb9ZNwnc0%sFDDF!@FSDF",
+		"session_secret": "",
 		"discord_oauth": {
-			"client_id": "1375140750689308762",
-			"client_secret": "rgYJP_evsEEIHSqrnY1IzFO2hVKIaSqc",
+			"client_id": "",
+			"client_secret": "",
 			"callback_url": "https://tickets.britspve.com/auth/callback",
 			"scopes": ["identify"]
 		},
