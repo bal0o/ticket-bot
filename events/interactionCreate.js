@@ -342,7 +342,8 @@ module.exports = async function (client, interaction) {
                     // Update channel name to remove -claimed
                     try {
                         if (interaction.channel.name.endsWith('-claimed')) {
-                            await interaction.channel.setName(interaction.channel.name.replace(/-claimed$/, ''));
+                            // Fire-and-forget to avoid blocking on route-specific rate limits
+                            interaction.channel.setName(interaction.channel.name.replace(/-claimed$/, '')).catch(() => {});
                         }
                     } catch (_) {}
                     // Update button label to Claim Ticket
@@ -389,7 +390,8 @@ module.exports = async function (client, interaction) {
                 // Rename channel to append -claimed
                 try {
                     if (!interaction.channel.name.endsWith('-claimed')) {
-                        await interaction.channel.setName(`${interaction.channel.name}-claimed`);
+                        // Fire-and-forget to avoid blocking on route-specific rate limits
+                        interaction.channel.setName(`${interaction.channel.name}-claimed`).catch(() => {});
                     }
                 } catch (_) {}
                 // Update button label to Unclaim
