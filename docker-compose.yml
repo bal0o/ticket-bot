@@ -35,10 +35,3 @@ services:
 networks:
   ticket-bot-network:
     driver: bridge
-
-volumes:
-  config:
-  content:
-  transcripts:
-  data:
-  logs:
