@@ -182,6 +182,21 @@ async function canViewTranscript(userId, filename) {
     const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
     if (isAdmin) return true;
     if (userHasOverride(userId, filename)) return true;
+    // Fast-path: check the current user's own ticket logs directly
+    try {
+        const candList = [filename];
+        if (/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.full\.html$/i, '.html'));
+        if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.html$/i, '.full.html'));
+        const myLogs = await db.get(`PlayerStats.${userId}.ticketLogs`) || {};
+        for (const tid of Object.keys(myLogs)) {
+            const t = myLogs[tid];
+            const url = t?.transcriptURL;
+            if (typeof url !== 'string') continue;
+            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
+                return true;
+            }
+        }
+    } catch (_) {}
     const ownerId = await findOwnerByFilename(filename);
     if (ownerId && ownerId === userId) return true;
     // If not owner/admin, see if staff but only with per-type permission; infer type from DB
