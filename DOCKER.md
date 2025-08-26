@@ -18,8 +18,11 @@ This document explains how to run the Discord Ticket Bot using Docker.
 
 2. **Set up configuration:**
    ```bash
+   # Copy the example config
    cp config/config.json.example config/config.json
-   # Edit config/config.json with your actual values
+   
+   # Edit config.json with your actual values
+   nano config/config.json
    ```
 
 3. **Create necessary directories:**
@@ -53,8 +56,7 @@ ticket-bot/
 ├── data/            # Database files (json.sqlite)
 ├── logs/            # Application logs
 ├── Dockerfile       # Docker image definition
-├── docker-compose.yml # Docker services configuration
-└── config.json      # Main configuration file
+└── docker-compose.yml # Docker services configuration
 ```
 
 ## Volume Mounts
@@ -67,19 +69,18 @@ ticket-bot/
 
 ## Configuration
 
-All configuration is now centralized in `config/config.json`. The main fields you need to configure:
+**Note: This bot now uses config.json for all configuration. Environment variables are no longer required.**
 
-### Required
-- `bot_token` - Your Discord bot token
-- `web.discord_oauth.client_id` - Discord OAuth client ID
-- `web.discord_oauth.client_secret` - Discord OAuth client secret
+### Required Configuration in config.json
+- `config.tokens.bot_token` - Your Discord bot token
+- `config.web.discord_oauth.client_id` - Discord OAuth client ID  
+- `config.web.discord_oauth.client_secret` - Discord OAuth client secret
+- `config.web.session_secret` - Web session secret
 
-### Optional
-- `web.session_secret` - Web session secret
-- `web.host` - Web server host (default: 0.0.0.0)
-- `web.port` - Web server port (default: 3050)
-- `channel_ids.*` - Your Discord channel IDs
-- `role_ids.*` - Your Discord role IDs
+### Optional Configuration
+- `config.web.enabled` - Enable/disable web interface (default: true)
+- `config.web.host` - Web server host (default: 0.0.0.0)
+- `config.web.port` - Web server port (default: 3050)
 
 ## Docker Commands
 
@@ -127,7 +128,7 @@ The container includes health checks that monitor the web interface:
 
 ### Container won't start
 1. Check logs: `docker-compose logs ticket-bot`
-2. Verify configuration in `config/config.json` is correct
+2. Verify environment variables are set correctly
 3. Ensure required directories exist and have proper permissions
 
 ### Database issues
@@ -147,7 +148,7 @@ The container includes health checks that monitor the web interface:
 
 ## Production Considerations
 
-1. **Secure your config.json** - Never commit it to version control
+1. **Use Docker secrets** for sensitive environment variables
 2. **Set up proper logging** with log rotation
 3. **Configure backups** for the data and transcripts directories
 4. **Use Docker networks** for security isolation
@@ -161,6 +162,8 @@ For development, you can create a `docker-compose.override.yml`:
 version: '3.8'
 services:
   ticket-bot:
+    environment:
+      - NODE_ENV=development
     volumes:
       - ./src:/app/src:ro  # Mount source code for development
     command: ["npm", "run", "dev"]
@@ -168,8 +171,8 @@ services:
 
 ## Security Notes
 
-- Never commit `config/config.json` to version control
-- Keep your bot token and OAuth credentials secure
+- Never commit `.env` files to version control
+- Use Docker secrets in production environments
 - Regularly update the base Node.js image
 - Monitor container logs for suspicious activity
 - Restrict network access using Docker networks

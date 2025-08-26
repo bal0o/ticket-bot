@@ -26,7 +26,7 @@ module.exports = function (client) {
 		console.log(`Initialized ${file} Event`);
 	});
 
-	const restClient = new REST({ version: "9" }).setToken(process.env.BOT_TOKEN)
+	const restClient = new REST({ version: "9" }).setToken(client.config.tokens.bot_token)
 
 		restClient.put(Routes.applicationGuildCommands(client.user.id, client.config.channel_ids.staff_guild_id),
 		{ body: CommandsList })

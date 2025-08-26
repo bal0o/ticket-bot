@@ -1,62 +1,61 @@
 {
-	"bot_token": "your_discord_bot_token_here",
-	"bot_settings": {
-		"prefix": "!",
-		"main_color": "#208cdd",
-		"ownerID": "",
-		"keep_embed_channel_clean": true,
-		"max_tickets_per_user": 3
-	},
+"bot_settings": {
+"prefix": "!",
+"main_color": "#208cdd",
+"ownerID": "",
+"keep_embed_channel_clean": true,
+"max_tickets_per_user": 3
+},
 
-	"activityInfo": { 
-		"cycleTimeinSeconds": 10,
-		"messages": ["{count} tickets"],
-		"type": "WATCHING"
-	},
+"activityInfo": { 
+"cycleTimeinSeconds": 10,
+"messages": ["{count} tickets"],
+"type": "WATCHING"
+},
 
-	"role_ids": {
-		"role_ids_ban_cmd": [],
-		"role_ids_info_cmd": [],
-		"role_ids_stats_cmd": [],
-		"role_ids_wipestats_cmd": [],
-		"role_ids_blacklist_cmd": [],
+"role_ids": {
+"role_ids_ban_cmd": [],
+"role_ids_info_cmd": [],
+"role_ids_stats_cmd": [],
+"role_ids_wipestats_cmd": [],
+"role_ids_blacklist_cmd": [],
         "role_ids_anonymous_cmd": [],
-		"default_admin_role_id": "",
-		"ticket_blacklisted_role_id": ""
-	},
+"default_admin_role_id": "",
+"ticket_blacklisted_role_id": ""
+},
 
-	"channel_ids": {
-		"public_guild_id": "",
-		"staff_guild_id": "",
-		"error_channel": "",
-		"feedback_channel": "",
-		"post_embed_channel_id": ""
-	},
+"channel_ids": {
+"public_guild_id": "",
+"staff_guild_id": "",
+"error_channel": "",
+"feedback_channel": "",
+"post_embed_channel_id": ""
+},
 
-	"linking_settings": {
-		"linkingSystem": 1,
-		"verify_link": "https://example.com/verify"
-	},
+"linking_settings": {
+"linkingSystem": 1,
+"verify_link": "https://example.com/verify"
+},
 
-	"active_ticket_settings": {
-		"replyName": "Support",
-		"ticket_user_embed_color": "#208cdd",
-		"ticket_staff_embed_color": "#89CFF0",
-		"staff_ticket_replies_in_embed": true,
-		"sendUserCloseReason": true
-	},
+"active_ticket_settings": {
+"replyName": "Support",
+"ticket_user_embed_color": "#208cdd",
+"ticket_staff_embed_color": "#89CFF0",
+"staff_ticket_replies_in_embed": true,
+"sendUserCloseReason": true
+},
 
-	"timeouts": {
-		"embed_channel_message_delete_time_in_minutes": 300,
-		"timeout_cooldown_in_seconds": 0,
-		"user_error_message_timeout_in_seconds": 15,
-		"close_command_timeout_in_seconds": 5
-	},
+"timeouts": {
+"embed_channel_message_delete_time_in_minutes": 300,
+"timeout_cooldown_in_seconds": 0,
+"user_error_message_timeout_in_seconds": 15,
+"close_command_timeout_in_seconds": 5
+},
 
-	"file_extensions": {
-		"allowed_file_extensions_enabled": true,
-		"allowed_file_extensions": ["png", "jpeg", "txt", "jpg", "gif", "mp4", "mp3", "vdf"]
-	},
+"file_extensions": {
+"allowed_file_extensions_enabled": true,
+"allowed_file_extensions": ["png", "jpeg", "txt", "jpg", "gif", "mp4", "mp3", "vdf"]
+},
 
     "transcript_settings": {
         "enabled": true,
@@ -64,33 +63,34 @@
         "base_url": "http://localhost:3050/transcripts/"
     },
 
-	"tokens": {
-		"Linking_System_API_Key_Or_Secret": "",
-		"cheetosToken": "",
-		"steamToken": "",
-		"battlemetricsToken": ""
-	},
+"tokens": {
+	"bot_token": "your_discord_bot_token_here",
+	"Linking_System_API_Key_Or_Secret": "",
+	"cheetosToken": "",
+	"steamToken": "",
+	"battlemetricsToken": ""
+},
 
-	"misc": {
-		"bm_org_id": ""
-	},
+"misc": {
+"bm_org_id": ""
+},
 
-	"web": {
-		"enabled": true,
-		"host": "0.0.0.0",
-		"port": 3050,
-		"session_secret": "CHANGEME_SESSION_SECRET",
-		"discord_oauth": {
-			"client_id": "",
-			"client_secret": "",
-			"callback_url": "http://localhost:3050/auth/callback",
-			"scopes": ["identify"]
-		},
-		"staff_guild_id": "",
-		"roles": {
-			"staff_role_ids": [],
-			"admin_role_ids": []
-		}
-	}
+"web": {
+"enabled": true,
+"host": "0.0.0.0",
+"port": 3050,
+"session_secret": "CHANGEME_SESSION_SECRET",
+"discord_oauth": {
+"client_id": "",
+"client_secret": "",
+"callback_url": "http://localhost:3050/auth/callback",
+"scopes": ["identify"]
+},
+"staff_guild_id": "",
+"roles": {
+"staff_role_ids": [],
+"admin_role_ids": []
+}
+}
 
 }
