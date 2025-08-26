@@ -178,6 +178,41 @@ function userHasOverride(_userId, _filename) {
     return false;
 }
 
+async function findTicketContextByFilename(filename) {
+    // Return { ownerId, ticketId, ticketType } if we can resolve it from DB
+    try {
+        // Build candidate filenames we consider equivalent
+        const candidates = new Set([filename]);
+        if (/\.staff\.html$/i.test(filename)) candidates.add(filename.replace(/\.staff\.html$/i, '.full.html'));
+        if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
+        if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
+        const candList = Array.from(candidates);
+        const all = await db.all();
+        for (const row of all) {
+            const key = row.id || row.ID || row.key;
+            if (!key) continue;
+            const m = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.transcriptURL$/);
+            if (!m) continue;
+            const url = row.value ?? row.data;
+            if (typeof url !== 'string') continue;
+            if (!candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) continue;
+            const ownerId = m[1];
+            const ticketId = m[2];
+            // Try to get ticketType fast via get
+            let ticketType = null;
+            try { ticketType = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`); } catch (_) {}
+            if (!ticketType) {
+                // Fallback within cached rows
+                const typeKey = `PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`;
+                const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
+                if (tRow) ticketType = tRow.value ?? tRow.data;
+            }
+            return { ownerId, ticketId, ticketType };
+        }
+    } catch (_) {}
+    return null;
+}
+
 async function canViewTranscript(userId, filename) {
     console.log('[auth] canViewTranscript start', { userId, filename });
     const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
@@ -206,36 +241,10 @@ async function canViewTranscript(userId, filename) {
     // If not owner/admin, see if staff but only with per-type permission; infer type from DB
     if (isStaff) {
         try {
-            const all = await db.all();
-            // Normalize requested filename to canonical full transcript name
-            let canonicalFull = filename;
-            if (/\.staff\.html$/i.test(filename)) {
-                canonicalFull = filename.replace(/\.staff\.html$/i, '.full.html');
-            } else if (/\.full\.html$/i.test(filename)) {
-                canonicalFull = filename;
-            } else if (/\.html$/i.test(filename)) {
-                canonicalFull = filename.replace(/\.html$/i, '.full.html');
-            }
-            const suffix = `/${canonicalFull}`;
-            console.log('[auth] staff mode; canonical', { canonicalFull });
-            let ticketType = null;
-            for (const row of all) {
-                const key = row.id || row.ID || row.key;
-                const val = row.value ?? row.data;
-                if (typeof val === 'string' && (val.endsWith(suffix) || val.endsWith(canonicalFull))) {
-                    // derive key prefix to look up .ticketType
-                    const base = key.replace(/\.transcriptURL$/, '');
-                    const typeKey = `${base}.ticketType`;
-                    const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
-                    if (tRow) {
-                        ticketType = tRow.value ?? tRow.data;
-                        console.log('[auth] inferred ticketType', { ticketType });
-                    }
-                    break;
-                }
-            }
-            if (ticketType) {
-                const can = userCanSeeTicketType(roleIds, ticketType);
+            const ctx = await findTicketContextByFilename(filename);
+            console.log('[auth] staff mode; context', ctx);
+            if (ctx && ctx.ticketType) {
+                const can = userCanSeeTicketType(roleIds, ctx.ticketType);
                 console.log('[auth] staff type permission', { ticketType, can });
                 if (can) return true;
             } else {
