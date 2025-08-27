@@ -7,8 +7,9 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
-const { QuickDB } = require('quick.db');
+const { createDB } = require('../utils/quickdb');
 const metrics = require('../utils/metrics');
+const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
 const handlerOptions = require('../content/handler/options.json');
@@ -41,7 +42,7 @@ if (!BOT_TOKEN) {
 }
 
 // --- Databases ---
-const db = new QuickDB(); // shares ./json.sqlite by default
+const db = createDB(); // persist to ./data/json.sqlite
 // Admin overrides removed per requirements; no external permissions DB
 
 // --- Auth setup ---
@@ -90,6 +91,15 @@ async function getRoleFlags(userId) {
     return { isStaff, isAdmin, roleIds: Array.from(roles) };
 }
 
+function userCanSeeTicketType(roleIds, ticketType) {
+    try {
+        const adminIds = new Set((config.web?.roles?.admin_role_ids || []).filter(Boolean));
+        // Fast path: admin roles
+        for (const rid of roleIds) if (adminIds.has(rid)) return true;
+        return permissions.userHasAccessToTicketType({ userRoleIds: roleIds, ticketType, config, adminRoleIds: Array.from(adminIds) });
+    } catch (_) { return false; }
+}
+
 async function getUsernamesMap(ids = []) {
     const map = {};
     if (!BOT_TOKEN || !Array.isArray(ids) || ids.length === 0) return map;
@@ -126,20 +136,23 @@ function sanitizeFilename(input) {
 }
 
 async function findOwnerByFilename(filename) {
-    // We look up any PlayerStats.<uid>.ticketLogs.<ticketId>.transcriptURL that ends with filename
+    // Accept either user-facing (.html) or staff/full (.full.html) filenames
+    const candidates = new Set([filename]);
+    if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
+    if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
+
     const all = await db.all();
-    const suffix = `/${filename}`;
+    const candList = Array.from(candidates);
     for (const row of all) {
         const key = row.id || row.ID || row.key; // quick.db variants
         if (!key || !key.startsWith('PlayerStats.')) continue;
-        // Load lazily only when key likely contains transcriptURL
-        if (key.includes('.transcriptURL')) {
-            const url = row.value ?? row.data;
-            if (typeof url === 'string' && (url.endsWith(suffix) || url === filename)) {
-                // extract userId from key: PlayerStats.<userId>.ticketLogs.<ticketId>.transcriptURL
-                const parts = key.split('.');
-                return parts[1];
-            }
+        if (!key.includes('.transcriptURL')) continue;
+        const url = row.value ?? row.data;
+        if (typeof url !== 'string') continue;
+        // Match any candidate regardless of preceding slash
+        if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
+            const parts = key.split('.');
+            return parts[1];
         }
     }
     // Fallback: scan each user's ticket logs
@@ -151,7 +164,9 @@ async function findOwnerByFilename(filename) {
         if (!logs || typeof logs !== 'object') continue;
         for (const ticketId of Object.keys(logs)) {
             const t = logs[ticketId];
-            if (t?.transcriptURL && (t.transcriptURL.endsWith(suffix) || t.transcriptURL === filename)) {
+            const url = t?.transcriptURL;
+            if (typeof url !== 'string') continue;
+            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
                 return userId;
             }
         }
@@ -163,12 +178,130 @@ function userHasOverride(_userId, _filename) {
     return false;
 }
 
+async function findTicketContextByFilename(filename) {
+    // Return { ownerId, ticketId, ticketType } if we can resolve it from DB
+    try {
+        // Build candidate filenames we consider equivalent
+        const candidates = new Set([filename]);
+        if (/\.staff\.html$/i.test(filename)) candidates.add(filename.replace(/\.staff\.html$/i, '.full.html'));
+        if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
+        if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
+        const candList = Array.from(candidates).map(c => c.toLowerCase());
+        // Preferred: scan aggregated PlayerStats object for reliability
+        try {
+            const ps = await db.get('PlayerStats');
+            if (ps && typeof ps === 'object') {
+                for (const ownerId of Object.keys(ps)) {
+                    const logs = ps[ownerId]?.ticketLogs || {};
+                    for (const ticketId of Object.keys(logs)) {
+                        const t = logs[ticketId];
+                        const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
+                        const urlLower = url.toLowerCase();
+                        if (candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) {
+                            const ticketType = t.ticketType || null;
+                            return { ownerId, ticketId, ticketType };
+                        }
+                    }
+                }
+            }
+        } catch (_) {}
+        const all = await db.all();
+        for (const row of all) {
+            const key = row.id || row.ID || row.key;
+            if (!key) continue;
+            const m = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.transcriptURL$/);
+            if (!m) continue;
+            const url = (row.value ?? row.data);
+            if (typeof url !== 'string') continue;
+            const urlLower = url.toLowerCase();
+            if (!candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) continue;
+            const ownerId = m[1];
+            const ticketId = m[2];
+            // Try to get ticketType fast via get
+            let ticketType = null;
+            try { ticketType = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`); } catch (_) {}
+            if (!ticketType) {
+                // Fallback within cached rows
+                const typeKey = `PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`;
+                const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
+                if (tRow) ticketType = tRow.value ?? tRow.data;
+            }
+            return { ownerId, ticketId, ticketType };
+        }
+
+        // Secondary fallback: derive ticketId from filename suffix (e.g., ...-0003.*) and look up by id
+        const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+        const idMatch = base.match(/-(\d{1,8})$/);
+        if (idMatch) {
+            const ticketId = idMatch[1];
+            // Try via aggregated object first
+            try {
+                const ps = await db.get('PlayerStats');
+                if (ps && typeof ps === 'object') {
+                    for (const ownerId of Object.keys(ps)) {
+                        const t = ps[ownerId]?.ticketLogs?.[ticketId];
+                        if (t && (t.ticketType || t.transcriptURL)) {
+                            const ticketType = t.ticketType || null;
+                            return { ownerId, ticketId, ticketType };
+                        }
+                    }
+                }
+            } catch (_) {}
+            for (const row of all) {
+                const key = row.id || row.ID || row.key;
+                if (!key) continue;
+                const m2 = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.ticketType$/);
+                if (!m2) continue;
+                if (m2[2] !== ticketId) continue;
+                const ownerId = m2[1];
+                const ticketType = row.value ?? row.data;
+                return { ownerId, ticketId, ticketType };
+            }
+        }
+    } catch (_) {}
+    return null;
+}
+
 async function canViewTranscript(userId, filename) {
-    const { isStaff, isAdmin } = await getRoleFlags(userId);
-    if (isAdmin || isStaff) return true; // staff can see all
-    if (userHasOverride(userId, filename)) return true;
+    console.log('[auth] canViewTranscript start', { userId, filename });
+    const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
+    console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
+    if (isAdmin) { console.log('[auth] allow: admin'); return true; }
+    if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override'); return true; }
+    // Fast-path: check the current user's own ticket logs directly
+    try {
+        const candList = [filename];
+        if (/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.full\.html$/i, '.html'));
+        if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.html$/i, '.full.html'));
+        const myLogs = await db.get(`PlayerStats.${userId}.ticketLogs`) || {};
+        for (const tid of Object.keys(myLogs)) {
+            const t = myLogs[tid];
+            const url = t?.transcriptURL;
+            if (typeof url !== 'string') continue;
+            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
+                console.log('[auth] allow: owner via own logs', { ticketId: tid, url });
+                return true;
+            }
+        }
+    } catch (e) { console.log('[auth] own logs check error', e?.message || e); }
     const ownerId = await findOwnerByFilename(filename);
-    if (ownerId && ownerId === userId) return true;
+    console.log('[auth] owner lookup', { ownerId });
+    if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup'); return true; }
+    // If not owner/admin, see if staff but only with per-type permission; infer type from DB
+    if (isStaff) {
+        try {
+            const ctx = await findTicketContextByFilename(filename);
+            console.log('[auth] staff mode; context', ctx);
+            if (ctx && ctx.ticketType) {
+                const can = userCanSeeTicketType(roleIds, ctx.ticketType);
+                console.log('[auth] staff type permission', { ticketType: ctx.ticketType, can });
+                if (can) return true;
+            } else {
+                console.log('[auth] staff: could not infer ticketType for', { filename });
+            }
+        } catch (e) { console.log('[auth] staff check error', e?.message || e); }
+    }
+    console.log('[auth] deny: no rule matched', { userId, filename, isStaff, isAdmin });
     return false;
 }
 
@@ -196,7 +329,15 @@ app.use(passport.session());
 
 app.use(async (req, res, next) => {
     res.locals.user = req.user || null;
-    res.locals.roleFlags = req.user ? await getRoleFlags(req.user.id) : { isStaff: false, isAdmin: false };
+    res.locals.roleFlags = req.user ? await getRoleFlags(req.user.id) : { isStaff: false, isAdmin: false, roleIds: [] };
+    // Applications visibility: admins or explicit application admin role id
+    try {
+        const appAdminRoleId = config.role_ids?.application_admin_role_id;
+        const rf = res.locals.roleFlags || { isAdmin: false, roleIds: [] };
+        res.locals.canSeeApplications = !!(rf.isAdmin || (appAdminRoleId && rf.roleIds && rf.roleIds.includes(appAdminRoleId)));
+    } catch (_) {
+        res.locals.canSeeApplications = false;
+    }
     next();
 });
 
@@ -829,11 +970,12 @@ async function getAllUserIds() {
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
+    const { isStaff, roleIds } = await getRoleFlags(req.user.id);
     if (!isStaff) return res.status(403).send('Forbidden');
     req.session.staff_ok = true;
 
     const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
+    const qSteam = (req.query.steam || '').replace(/[^0-9]/g, '');
     const qType = (req.query.type || '').toLowerCase();
     const qFrom = req.query.from ? new Date(req.query.from) : null;
     const qTo = req.query.to ? new Date(req.query.to) : null;
@@ -856,12 +998,15 @@ app.get('/staff', ensureAuth, async (req, res) => {
             }
             for (const ticketId of Object.keys(logs)) {
                 const t = logs[ticketId] || {};
+                if (qSteam && String(t.steamId || '').indexOf(qSteam) === -1) continue;
                 // Only closed tickets
                 if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
                 const url = t.transcriptURL || '';
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
                 const typeLower = (t.ticketType || 'Unknown').toLowerCase();
+                // Enforce per-ticket-type visibility based on Discord roles
+                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
@@ -920,6 +1065,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
                 const filename = url ? url.split('/').pop() : null;
                 const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
                 const typeLower = (t.ticketType || 'Unknown').toLowerCase();
+                // Enforce per-ticket-type visibility based on Discord roles
+                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
                 if (qType && typeLower !== qType) continue;
                 if (qFrom && created && created < qFrom) continue;
                 if (qTo && created && created > qTo) continue;
@@ -948,7 +1095,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }
     }
     tickets.sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '' }, types: getKnownTicketTypes() });
+    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes() });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {
@@ -987,17 +1134,38 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
             effectiveFilename = alt;
         }
     }
+    console.log('[web] /transcripts view', { userId: req.user.id, filename, effectiveFilename, isStaff });
     const allowed = await canViewTranscript(req.user.id, effectiveFilename);
-    if (!allowed) return res.status(403).send('Forbidden');
-    res.render('transcript', { filename: effectiveFilename });
+    if (!allowed) {
+        console.log('[web] /transcripts deny', { userId: req.user.id, filename: effectiveFilename });
+        return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    }
+    // Try to resolve owner, ticket and IDs for header display
+    let ownerId = null;
+    let steamId = null;
+    let ticketId = null;
+    try {
+        const ctx = await findTicketContextByFilename(effectiveFilename);
+        if (ctx) {
+            ownerId = ctx.ownerId || null;
+            ticketId = ctx.ticketId || null;
+            const t = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}`) || {};
+            steamId = t.steamId || null;
+        }
+    } catch (_) {}
+    res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
 });
 
 // Raw stream of transcript (iframe src)
 app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
+    console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
     const allowed = await canViewTranscript(req.user.id, filename);
-    if (!allowed) return res.status(403).send('Forbidden');
+    if (!allowed) {
+        console.log('[web] /transcripts/raw deny', { userId: req.user.id, filename });
+        return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
+    }
     const abs = path.join(TRANSCRIPT_DIR, filename);
     if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
     if (!fs.existsSync(abs)) return res.status(404).send('Not found');

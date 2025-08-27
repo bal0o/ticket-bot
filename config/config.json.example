@@ -88,8 +88,12 @@
 },
 "staff_guild_id": "",
 "roles": {
-"staff_role_ids": [],
-"admin_role_ids": []
+"staff_role_ids": [
+        "111111111111111111"
+      ],
+"admin_role_ids": [
+        "222222222222222222"
+      ]
 }
 }
 

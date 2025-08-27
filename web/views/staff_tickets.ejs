@@ -26,6 +26,9 @@
         <% }) %>
       </select>
     </label>
+    <label>SteamID:
+      <input type="text" name="steam" value="<%= (query && query.steam) || '' %>">
+    </label>
     <label>Server:
       <input type="text" name="server" value="<%= (query && query.server) || '' %>">
     </label>

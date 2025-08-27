@@ -1,8 +1,8 @@
 const config = require("../config/config.json");
 const Discord = require("discord.js");
 const func = require("../utils/functions.js");
-const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const { createDB } = require('../utils/quickdb');
+const db = createDB();
 const metrics = require('../utils/metrics');
 const lang = require("../content/handler/lang.json");
 
@@ -307,10 +307,11 @@ module.exports = async function (client, message) {
                     const highestRole = roles.first();
                     const roleName = highestRole ? highestRole.name : 'Staff';
                     
+                    const staffAvatar = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
                     const replyEmbed = new Discord.MessageEmbed()
                         .setAuthor({ 
-                            name: `${message.author.username} (${roleName})`, 
-                            iconURL: message.author.displayAvatarURL()
+                            name: `${message.member.displayName} (${roleName})`, 
+                            iconURL: staffAvatar
                         })
                         .setDescription(replyContent)
                         .setColor(client.config.bot_settings.main_color)
@@ -396,10 +397,11 @@ module.exports = async function (client, message) {
                         const highestRole = roles.first();
                         const roleName = highestRole ? highestRole.name : 'Staff';
                         
+                        const staffAvatar2 = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
                         const replyEmbed = new Discord.MessageEmbed()
                             .setAuthor({ 
-                                name: `${message.author.username} (${roleName})`, 
-                                iconURL: message.author.displayAvatarURL()
+                                name: `${message.member.displayName} (${roleName})`, 
+                                iconURL: staffAvatar2
                             })
                             .setDescription(replyContent)
                             .setColor(client.config.bot_settings.main_color)

@@ -3,8 +3,8 @@ const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
 let unirest = require('unirest');
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
-const {QuickDB} = require("quick.db")
-const db = new QuickDB();
+const { createDB } = require('./quickdb');
+const db = createDB();
 
 
 module.exports = async function (client, interaction, user, ticketType, validOption, questionFilesystem) {
@@ -399,6 +399,9 @@ try {
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketUniqueID`, formattedTicketNumber)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.userID`, user.id)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.username`, user.username)
+	if (SteamID && SteamID.toString().startsWith('7656119')) {
+		await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.steamId`, String(SteamID))
+	}
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.responses`, responses)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, Date.now() / 1000)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketType`, ticketType)

@@ -9,7 +9,12 @@
 <body>
   <header class="navbar">
     <div class="nav-left"><a href="/my">Tickets</a></div>
-    <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
+    <div class="nav-right">
+      <% if (roleFlags && roleFlags.isStaff) { %>
+        <a class="btn" href="/staff">Staff View</a>
+      <% } %>
+      <a class="btn" href="/logout">Logout</a>
+    </div>
   </header>
   <main class="container">
     <h1>Applications</h1>

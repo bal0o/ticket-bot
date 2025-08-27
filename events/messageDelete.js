@@ -1,5 +1,5 @@
-const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const { createDB } = require('../utils/quickdb');
+const db = createDB();
 const func = require("../utils/functions.js");
 
 module.exports = async function (client, message) {

@@ -1,5 +1,8 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const func = require('../../utils/functions.js');
+const perms = require('../../utils/permissions.js');
+const { createDB } = require('../../utils/quickdb');
+const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
 const { Modal, TextInputComponent, MessageActionRow } = require('discord.js');
 
@@ -50,11 +53,16 @@ module.exports = {
             // If not required, drop serverName
             newChannelName = `${ticketType.toLowerCase()}-${ticketNumber}`;
         }
-        // Move and rename
+        // Move, rename, and reapply permissions for target ticket type
         let renameSucceeded = true;
         try {
             await channel.setParent(categoryId);
             await channel.setName(newChannelName);
+            // Rebuild permission overwrites based on new ticket type
+            const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: channel.guild, ticketType });
+            if (Array.isArray(overwrites) && overwrites.length > 0) {
+                await channel.permissionOverwrites.set(overwrites);
+            }
         } catch (error) {
             renameSucceeded = false;
             func.handle_errors(error, client, 'move.js', null);
@@ -80,6 +88,15 @@ module.exports = {
             newFooter = `${userId}-${ticketNum} | ${footerTicketType} | Ticket Opened:`;
             embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
             await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
+
+            // Update stored ticket type in DB for web permission consistency
+            try {
+                const userId = idParts[0];
+                const ticketNum = idParts[1];
+                if (userId && ticketNum) {
+                    await db.set(`PlayerStats.${userId}.ticketLogs.${ticketNum}.ticketType`, ticketType);
+                }
+            } catch (e) { func.handle_errors(e, client, 'move.js', 'Failed to update DB ticketType on move'); }
         }
         // Check for required fields in the new ticket type (e.g., server selection)
         if (questionFilesystem.server_selection && questionFilesystem.server_selection.enabled) {
@@ -109,11 +126,22 @@ module.exports = {
                     channelId: channel.id,
                     ticketType,
                     categoryId,
-                    newName
+                    newName: newChannelName
                 };
                 return;
             }
         }
+        // Notify staff roles for the target ticket type
+        try {
+            const pingRoleIDs = Array.isArray(questionFilesystem['ping-role-id']) ? questionFilesystem['ping-role-id'].filter(Boolean) : [];
+            if (pingRoleIDs.length > 0) {
+                const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
+                await channel.send({
+                    content: `${tags}\nTicket moved to ${ticketType}.`,
+                    allowedMentions: { parse: [], roles: pingRoleIDs }
+                }).catch(() => {});
+            }
+        } catch (_) {}
         await interaction.editReply(`Ticket moved to ${ticketType}${renameSucceeded ? '' : ' (with errors)'}.`);
     }
 }; 
