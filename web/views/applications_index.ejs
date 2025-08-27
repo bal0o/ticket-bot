@@ -29,6 +29,7 @@
         <a class="btn" href="/applications">Show Active Only</a>
       <% } %>
     </form>
+    <div class="table-scroll">
     <table class="with-filter">
       <thead>
         <tr>
@@ -53,6 +54,7 @@
         <% }) %>
       </tbody>
     </table>
+    </div>
     <% if (pagination && pagination.totalPages > 1) { %>
       <nav class="pagination">
         <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
