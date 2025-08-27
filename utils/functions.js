@@ -339,23 +339,24 @@ try {
         console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
         console.log(`[Functions] Thread permissions: ${thread.permissionOverwrites ? 'Available' : 'Not available'}`);
 
-        // Send a role-mention ping so the thread appears in the sidebar immediately
+        // Seed the staff thread without role pings
         try {
-            // Only ping the roles configured in ping-role-id for this ticket type
-            const rolePingIds = Array.isArray(pingRoleIDs) ? pingRoleIDs.filter(Boolean) : [];
-            if (rolePingIds.length > 0) {
-                const rolePingTags = rolePingIds.map(id => `<@&${id}>`).join(' ');
-                await thread.send({
-                    content: `${rolePingTags}\nStaff thread for ticket #${formattedTicketNumber}`,
-                    allowedMentions: { parse: [], roles: rolePingIds }
-                });
-            } else {
-                // Fallback to a plain text seed message if no roles to ping
-                await thread.send({ content: `Staff thread for ticket #${formattedTicketNumber}` });
-            }
+            await thread.send({
+                content: `Staff thread for ticket #${formattedTicketNumber}`,
+                allowedMentions: { parse: [] }
+            });
         } catch (seedErr) {
-            console.error('[Functions] Failed to seed staff thread with role ping:', seedErr);
+            console.error('[Functions] Failed to seed staff thread:', seedErr);
         }
+
+        // Post a quick link to user's web ticket history for staff
+        try {
+            const baseWeb = (client.config?.transcript_settings?.base_url || '').replace(/\/?transcripts\/?$/i, '') || 'http://localhost:3050';
+            await thread.send({
+                content: `View user's ticket history on web: <${baseWeb}/staff?user=${recepientMember.id}>`,
+                allowedMentions: { parse: [] }
+            });
+        } catch (_) {}
 
         if (bmInfo) {
             const staffEmbed = new Discord.MessageEmbed()

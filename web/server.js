@@ -975,6 +975,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
     req.session.staff_ok = true;
 
     const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
+    const qSteam = (req.query.steam || '').replace(/[^0-9]/g, '');
     const qType = (req.query.type || '').toLowerCase();
     const qFrom = req.query.from ? new Date(req.query.from) : null;
     const qTo = req.query.to ? new Date(req.query.to) : null;
@@ -997,6 +998,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
             }
             for (const ticketId of Object.keys(logs)) {
                 const t = logs[ticketId] || {};
+                if (qSteam && String(t.steamId || '').indexOf(qSteam) === -1) continue;
                 // Only closed tickets
                 if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
                 const url = t.transcriptURL || '';
@@ -1093,7 +1095,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }
     }
     tickets.sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '' }, types: getKnownTicketTypes() });
+    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes() });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {
@@ -1138,7 +1140,20 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
         console.log('[web] /transcripts deny', { userId: req.user.id, filename: effectiveFilename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     }
-    res.render('transcript', { filename: effectiveFilename });
+    // Try to resolve owner, ticket and IDs for header display
+    let ownerId = null;
+    let steamId = null;
+    let ticketId = null;
+    try {
+        const ctx = await findTicketContextByFilename(effectiveFilename);
+        if (ctx) {
+            ownerId = ctx.ownerId || null;
+            ticketId = ctx.ticketId || null;
+            const t = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}`) || {};
+            steamId = t.steamId || null;
+        }
+    } catch (_) {}
+    res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
 });
 
 // Raw stream of transcript (iframe src)

@@ -399,6 +399,9 @@ try {
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketUniqueID`, formattedTicketNumber)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.userID`, user.id)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.username`, user.username)
+	if (SteamID && SteamID.toString().startsWith('7656119')) {
+		await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.steamId`, String(SteamID))
+	}
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.responses`, responses)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, Date.now() / 1000)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketType`, ticketType)

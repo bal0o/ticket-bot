@@ -9,7 +9,16 @@
 <body>
   <header class="navbar">
     <div class="nav-left"><a href="/">Tickets</a></div>
-    <div class="nav-center"><strong><%= filename %></strong></div>
+    <div class="nav-center">
+      <strong><%= filename %></strong>
+      <% if (ownerId || steamId || ticketId) { %>
+        <div class="muted" style="font-size:12px; margin-top:4px;">
+          <% if (ticketId) { %>Ticket #<%= ticketId %><% } %>
+          <% if (ownerId) { %> • Discord: <%= ownerId %><% } %>
+          <% if (steamId) { %> • SteamID: <%= steamId %><% } %>
+        </div>
+      <% } %>
+    </div>
     <div class="nav-right">
       <% if (roleFlags && roleFlags.isStaff) { %>
         <a class="btn" href="/staff">Staff View</a>

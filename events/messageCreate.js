@@ -309,7 +309,7 @@ module.exports = async function (client, message) {
                     
                     const replyEmbed = new Discord.MessageEmbed()
                         .setAuthor({ 
-                            name: `${message.author.username} (${roleName})`, 
+                            name: `${message.member.displayName} (${roleName})`, 
                             iconURL: message.author.displayAvatarURL()
                         })
                         .setDescription(replyContent)
@@ -398,7 +398,7 @@ module.exports = async function (client, message) {
                         
                         const replyEmbed = new Discord.MessageEmbed()
                             .setAuthor({ 
-                                name: `${message.author.username} (${roleName})`, 
+                                name: `${message.member.displayName} (${roleName})`, 
                                 iconURL: message.author.displayAvatarURL()
                             })
                             .setDescription(replyContent)
