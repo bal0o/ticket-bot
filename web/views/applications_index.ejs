@@ -22,6 +22,17 @@
       <label>Stage:
         <input type="text" name="stage" value="<%= stage || '' %>">
       </label>
+      <% if (pagination) { %>
+      <label>Page size:
+        <select name="limit">
+          <option value="10" <%= String(pagination.limit) === '10' ? 'selected' : '' %>>10</option>
+          <option value="25" <%= String(pagination.limit) === '25' ? 'selected' : '' %>>25</option>
+          <option value="50" <%= String(pagination.limit) === '50' ? 'selected' : '' %>>50</option>
+          <option value="100" <%= String(pagination.limit) === '100' ? 'selected' : '' %>>100</option>
+        </select>
+      </label>
+      <input type="hidden" name="page" value="1">
+      <% } %>
       <button type="submit" class="btn primary">Filter</button>
       <% if (!request || !request.query || !request.query.all) { %>
         <a class="btn" href="/applications?all=1">Show All (incl. Approved/Denied/Archived)</a>
@@ -60,7 +71,22 @@
         <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
         <% const next = Math.min(pagination.totalPages, (pagination.page || 1) + 1); %>
         <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %><% if (stage) { %>&stage=<%= encodeURIComponent(stage) %><% } %><% if (request && request.query && request.query.all) { %>&all=1<% } %>">Prev</a>
-        <span class="muted">Page <%= pagination.page %> / <%= pagination.totalPages %></span>
+        <% const p = pagination.page || 1; const tp = pagination.totalPages || 1; const start = Math.max(1, p - 2); const end = Math.min(tp, p + 2); %>
+        <% if (start > 1) { %>
+          <a class="btn" href="?page=1&limit=<%= pagination.limit %><% if (stage) { %>&stage=<%= encodeURIComponent(stage) %><% } %><% if (request && request.query && request.query.all) { %>&all=1<% } %>">1</a>
+          <% if (start > 2) { %><span class="muted">…</span><% } %>
+        <% } %>
+        <% for (let i = start; i <= end; i++) { %>
+          <% if (i === p) { %>
+            <span class="btn active"><%= i %></span>
+          <% } else { %>
+            <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %><% if (stage) { %>&stage=<%= encodeURIComponent(stage) %><% } %><% if (request && request.query && request.query.all) { %>&all=1<% } %>"><%= i %></a>
+          <% } %>
+        <% } %>
+        <% if (end < tp) { %>
+          <% if (end < tp - 1) { %><span class="muted">…</span><% } %>
+          <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %><% if (stage) { %>&stage=<%= encodeURIComponent(stage) %><% } %><% if (request && request.query && request.query.all) { %>&all=1<% } %>"><%= tp %></a>
+        <% } %>
         <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %><% if (stage) { %>&stage=<%= encodeURIComponent(stage) %><% } %><% if (request && request.query && request.query.all) { %>&all=1<% } %>">Next</a>
       </nav>
     <% } %>
