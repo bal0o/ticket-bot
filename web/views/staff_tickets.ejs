@@ -37,8 +37,20 @@
     </label>
     <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
     <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
+    <% if (pagination) { %>
+    <label>Page size:
+      <select name="limit">
+        <option value="10" <%= String(pagination.limit) === '10' ? 'selected' : '' %>>10</option>
+        <option value="25" <%= String(pagination.limit) === '25' ? 'selected' : '' %>>25</option>
+        <option value="50" <%= String(pagination.limit) === '50' ? 'selected' : '' %>>50</option>
+        <option value="100" <%= String(pagination.limit) === '100' ? 'selected' : '' %>>100</option>
+      </select>
+    </label>
+    <input type="hidden" name="page" value="1">
+    <% } %>
     <button type="submit" class="btn primary">Filter</button>
   </form>
+  <div class="table-scroll">
   <table class="with-filter">
     <thead>
       <tr>
@@ -79,6 +91,31 @@
       <% }) %>
     </tbody>
   </table>
+  </div>
+  <% if (pagination && pagination.totalPages > 1) { %>
+    <nav class="pagination">
+      <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
+      <% const next = Math.min(pagination.totalPages, (pagination.page || 1) + 1); %>
+      <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %>">Prev</a>
+      <% const p = pagination.page || 1; const tp = pagination.totalPages || 1; const start = Math.max(1, p - 2); const end = Math.min(tp, p + 2); %>
+      <% if (start > 1) { %>
+        <a class="btn" href="?page=1&limit=<%= pagination.limit %>">1</a>
+        <% if (start > 2) { %><span class="muted">…</span><% } %>
+      <% } %>
+      <% for (let i = start; i <= end; i++) { %>
+        <% if (i === p) { %>
+          <span class="btn active"><%= i %></span>
+        <% } else { %>
+          <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %>"><%= i %></a>
+        <% } %>
+      <% } %>
+      <% if (end < tp) { %>
+        <% if (end < tp - 1) { %><span class="muted">…</span><% } %>
+        <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %>"><%= tp %></a>
+      <% } %>
+      <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %>">Next</a>
+    </nav>
+  <% } %>
   </main>
   <script>
     const input = document.getElementById('userInput');

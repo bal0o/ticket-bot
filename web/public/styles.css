@@ -27,12 +27,19 @@ html, body { margin: 0; padding: 0; font-family: var(--font); color: var(--text)
 .muted { color: var(--muted); }
 .actions { display:flex; gap: 12px; margin-top: 12px; }
 
-table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+/* Responsive tables */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; table-layout: fixed; }
 th, td { border-bottom: 1px solid var(--border); padding: 10px 12px; }
 th { background: #19202a; text-align: left; top: var(--nav-h); z-index: 5; }
 /* When a page has a title + filters above the table, increase sticky offset */
 table.with-filter th { top: calc(var(--nav-h) + 80px); }
 tr:hover td { background: #141923; }
+/* Allow long content to wrap inside cells instead of overflowing */
+th, td { word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
+
+/* Pagination controls */
+.pagination { display:flex; gap: 12px; align-items:center; justify-content:center; margin-top: 12px; }
 .grid.two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
 section h3 { margin-top: 0; }
 

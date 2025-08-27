@@ -397,7 +397,13 @@ app.get('/my', ensureAuth, async (req, res) => {
         })
         .filter(x => x.isClosed)
         .sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    res.render('my_tickets', { tickets: list });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const tickets = list.slice(start, start + limit);
+    res.render('my_tickets', { tickets, pagination: { page, limit, total, totalPages }, query: req.query });
 });
 
 // Health check
@@ -414,8 +420,14 @@ app.get('/applications', ensureAuth, async (req, res) => {
         items = items.filter(x => !['Approved','Denied','Archived'].includes(x.stage));
     }
     items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
-    // Pass request query context to template for toggle link
-    res.render('applications_index', { items, stage, request: { query: req.query } });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const paged = items.slice(start, start + limit);
+    // Pass request query and pagination to template
+    res.render('applications_index', { items: paged, stage, request: { query: req.query }, query: req.query, pagination: { page, limit, total, totalPages } });
 });
 
 // Applications - detail
@@ -1095,7 +1107,13 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }
     }
     tickets.sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes() });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const total = tickets.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const paged = tickets.slice(start, start + limit);
+    res.render('staff_tickets', { tickets: paged, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination: { page, limit, total, totalPages } });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {

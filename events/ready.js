@@ -12,6 +12,25 @@ module.exports = async function (client, message) {
     console.log('[Ready] Waiting 15 seconds for guild to fully load...');
     await new Promise(resolve => setTimeout(resolve, 15000));
     
+    // Warm the member cache for the staff guild so role membership is accurate
+    try {
+        const staffGuildId = client.config?.channel_ids?.staff_guild_id;
+        if (staffGuildId) {
+            const staffGuild = client.guilds.cache.get(staffGuildId);
+            if (staffGuild) {
+                console.log('[Ready] Fetching staff guild members to warm cache...');
+                await staffGuild.members.fetch();
+                console.log(`[Ready] Fetched ${staffGuild.members.cache.size} members in staff guild`);
+            } else {
+                console.log('[Ready] Staff guild not found in cache; skipping member fetch');
+            }
+        } else {
+            console.log('[Ready] No staff guild configured; skipping member fetch');
+        }
+    } catch (e) {
+        console.error('[Ready] Failed to fetch staff guild members:', e);
+    }
+    
     // Initialize staff metrics with actual user IDs from roles
     try {
         const metrics = require('../utils/metrics');
