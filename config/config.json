@@ -1,4 +1,5 @@
 {
+    "debug": false,
 	"bot_settings": {
 		"prefix": "!",
 		"main_color": "#208cdd",
