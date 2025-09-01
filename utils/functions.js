@@ -254,9 +254,11 @@ let ticketChannel = await staffGuild.channels.create(channelName, {
     permissionOverwrites: overwrites,
 });
 
-// DM the user with the ticket name/number
+// For public tickets, DM the user with the ticket name/number
 try {
-    await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+    if (!questionFile.internal) {
+        await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+    }
 } catch (e) {}
 
     // Build action buttons. For application tickets, only show application actions.
@@ -326,7 +328,8 @@ try {
 
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
-    try {
+    // Skip creating staff thread for internal tickets
+    if (!questionFile.internal) try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         // Create as public thread first so we can add role permissions
         const thread = await ticketChannel.threads.create({
@@ -777,7 +780,8 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     }
                 });
             } catch (_) {}
-            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID, user?.username || 'unknown');
+            const scope = typeFile && typeFile.internal ? 'internal' : 'public';
+            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID, user?.username || 'unknown', scope);
         } catch (_) {}
         // removed debug
         // DM user

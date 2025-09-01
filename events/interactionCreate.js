@@ -317,7 +317,8 @@ module.exports = async function (client, interaction) {
                 client.claims.set(claimKey, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber });
                 try { await db.set(`Claims.${interaction.channel.id}`, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber }); } catch (_) {}
                 try { 
-					metrics.ticketClaimed(ticketType); 
+					const scopeClaim = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[displayType || ticketType].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+					metrics.ticketClaimed(ticketType, scopeClaim);
 					metrics.staffAction('claim', ticketType, interaction.user.id, interaction.user.username); 
 				} catch (_) {}
 
@@ -1068,8 +1069,9 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Accept Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
-							metrics.ticketClosed(ticketType, user.id); 
-							metrics.staffAction('accept', ticketType, user.id, user.username); 
+							const scopeAccept = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+							metrics.ticketClosed(ticketType, user.id, user.username, scopeAccept); 
+							metrics.staffAction('accept', ticketType, user.id, user.username, scopeAccept); 
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
@@ -1126,8 +1128,9 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Deny Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
-							metrics.ticketClosed(ticketType, user.id); 
-							metrics.staffAction('deny', ticketType, user.id, user.username); 
+							const scopeDeny = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+							metrics.ticketClosed(ticketType, user.id, user.username, scopeDeny); 
+							metrics.staffAction('deny', ticketType, user.id, user.username, scopeDeny); 
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					

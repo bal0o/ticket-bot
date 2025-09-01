@@ -1,0 +1,16 @@
+{
+	"internal": true,
+	"open-as-ticket": true,
+	"ticket-category": "1412006761744826379",
+	"post-channel": "1412006987230744576",
+	"access-role-id": ["1264858598345801740"],
+	"ping-role-id": ["1264858598345801740"],
+	"pre-message": "Please provide details for this escalation.",
+	"post-message": "Thanks. An internal channel has been created.",
+	"questions": [
+		"Brief summary of the issue:",
+		"Relevant context or links:",
+		"Who needs to be involved?"
+	]
+}
+

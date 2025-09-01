@@ -15,81 +15,81 @@ const openTicketsGauge = new client.Gauge({
 const ticketsOpenedCounter = new client.Counter({
 	name: 'ticketbot_tickets_opened_total',
 	help: 'Total tickets opened',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 const userTicketsOpenedCounter = new client.Counter({
 	name: 'ticketbot_user_tickets_opened_total',
 	help: 'Tickets opened per user',
-	labelNames: ['opened_by', 'type', 'server']
+	labelNames: ['opened_by', 'type', 'server', 'scope']
 });
 
 const ticketsClosedCounter = new client.Counter({
 	name: 'ticketbot_tickets_closed_total',
 	help: 'Total tickets closed',
-	labelNames: ['type', 'closed_by', 'closed_by_name']
+	labelNames: ['type', 'closed_by', 'closed_by_name', 'scope']
 });
 
 const staffActionsCounter = new client.Counter({
 	name: 'ticketbot_staff_actions_total',
 	help: 'Total staff actions',
-	labelNames: ['action', 'type', 'staff_id', 'staff_name']
+	labelNames: ['action', 'type', 'staff_id', 'staff_name', 'scope']
 });
 
 const ticketsClaimedCounter = new client.Counter({
 	name: 'ticketbot_tickets_claimed_total',
 	help: 'Total ticket claims',
-	labelNames: ['type']
+	labelNames: ['type', 'scope']
 });
 
 // Aggregates for duration and message counts across tickets (restart-safe via persisted totals)
 const ticketDurationSumCounter = new client.Counter({
 	name: 'ticketbot_ticket_duration_seconds_sum',
 	help: 'Sum of ticket open durations in seconds',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 const ticketDurationCountCounter = new client.Counter({
 	name: 'ticketbot_ticket_duration_tickets_total',
 	help: 'Number of closed tickets contributing to duration sum',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 const ticketMessagesTotalCounter = new client.Counter({
 	name: 'ticketbot_ticket_messages_total',
 	help: 'Total messages counted across tickets',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 const ticketUserMessagesTotalCounter = new client.Counter({
 	name: 'ticketbot_ticket_user_messages_total',
 	help: 'Total end-user messages across tickets',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 const ticketStaffMessagesTotalCounter = new client.Counter({
 	name: 'ticketbot_ticket_staff_messages_total',
 	help: 'Total staff messages across tickets',
-	labelNames: ['type', 'server']
+	labelNames: ['type', 'server', 'scope']
 });
 
 // User-specific metrics counters
 const userTicketDurationSumCounter = new client.Counter({
 	name: 'ticketbot_user_ticket_duration_seconds_sum',
 	help: 'Sum of ticket open durations in seconds per user',
-	labelNames: ['opened_by', 'type', 'server']
+	labelNames: ['opened_by', 'type', 'server', 'scope']
 });
 
 const userTicketDurationCountCounter = new client.Counter({
 	name: 'ticketbot_user_ticket_duration_tickets_total',
 	help: 'Number of closed tickets contributing to duration sum per user',
-	labelNames: ['opened_by', 'type', 'server']
+	labelNames: ['opened_by', 'type', 'server', 'scope']
 });
 
 const userTicketMessagesTotalCounter = new client.Counter({
 	name: 'ticketbot_user_ticket_messages_total',
 	help: 'Total messages counted across tickets per user',
-	labelNames: ['opened_by', 'type', 'server']
+	labelNames: ['opened_by', 'type', 'server', 'scope']
 });
 
 registry.registerMetric(openTicketsGauge);
@@ -111,71 +111,71 @@ module.exports = {
 	registry,
 	setOpenTickets: (count) => openTicketsGauge.set(count || 0),
 	// Increment and persist totals
-	ticketOpened: (type, server, openedBy, openedByUsername) => {
+	ticketOpened: (type, server, openedBy, openedByUsername, scope = 'public') => {
 		const t = type || 'unknown';
 		const s = (server && String(server).trim().toLowerCase() !== 'unknown') ? server : 'none';
 		const ob = String(openedBy || 'unknown');
 		const obu = String(openedByUsername || 'unknown');
-		ticketsOpenedCounter.inc({ type: t, server: s });
-		userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s });
+		ticketsOpenedCounter.inc({ type: t, server: s, scope });
+		userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s, scope });
 		kv.add(`Metrics.total.ticketsOpened.${t}.${s}`, 1).catch(()=>{});
 		kv.add(`Metrics.total.user.ticketsOpened.${ob}.${t}.${s}`, 1).catch(()=>{});
 		// Store username alongside ID
 		kv.set(`Metrics.usernames.${ob}`, obu).catch(()=>{});
 	},
-	ticketClosed: (type, closedBy, closedByUsername) => {
+	ticketClosed: (type, closedBy, closedByUsername, scope = 'public') => {
 		const t = type || 'unknown';
 		const cb = String(closedBy || 'unknown');
 		const cbu = String(closedByUsername || 'unknown');
-		ticketsClosedCounter.inc({ type: t, closed_by: cb, closed_by_name: cbu });
+		ticketsClosedCounter.inc({ type: t, closed_by: cb, closed_by_name: cbu, scope });
 		kv.add(`Metrics.total.ticketsClosed.${t}.${cb}`, 1).catch(()=>{});
 		// Store username alongside ID
 		kv.set(`Metrics.usernames.${cb}`, cbu).catch(()=>{});
 	},
-	staffAction: (action, type, staffId, staffUsername) => {
+	staffAction: (action, type, staffId, staffUsername, scope = 'public') => {
 		const a = action || 'unknown';
 		const t = type || 'unknown';
 		const s = String(staffId || 'unknown');
 		const su = String(staffUsername || 'unknown');
-		staffActionsCounter.inc({ action: a, type: t, staff_id: s, staff_name: su });
+		staffActionsCounter.inc({ action: a, type: t, staff_id: s, staff_name: su, scope });
 		kv.add(`Metrics.total.staffActions.${a}.${t}.${s}`, 1).catch(()=>{});
 		// Store username alongside ID
 		kv.set(`Metrics.usernames.${s}`, su).catch(()=>{});
 	},
-	ticketClaimed: (type) => {
+	ticketClaimed: (type, scope = 'public') => {
 		const t = type || 'unknown';
-		ticketsClaimedCounter.inc({ type: t });
+		ticketsClaimedCounter.inc({ type: t, scope });
 		kv.add(`Metrics.total.ticketsClaimed.${t}`, 1).catch(()=>{});
 	},
 	// Record per-ticket aggregates for duration and message totals
-	recordTicketAggregates: (type, server, durationSeconds, messageCount, userMessages, staffMessages, openedBy, openedByUsername) => {
+	recordTicketAggregates: (type, server, durationSeconds, messageCount, userMessages, staffMessages, openedBy, openedByUsername, scope = 'public') => {
 		const t = type || 'unknown';
 		const s = (server && String(server).trim().toLowerCase() !== 'unknown') ? server : 'none';
 		const ob = String(openedBy || 'unknown');
 		const obu = String(openedByUsername || 'unknown');
 		const dur = Math.max(0, Math.floor(durationSeconds || 0));
 		const msgs = Math.max(0, Math.floor(messageCount || 0));
-		if (dur > 0) ticketDurationSumCounter.inc({ type: t, server: s }, dur);
-		ticketDurationCountCounter.inc({ type: t, server: s }, 1);
-		if (msgs > 0) ticketMessagesTotalCounter.inc({ type: t, server: s }, msgs);
+		if (dur > 0) ticketDurationSumCounter.inc({ type: t, server: s, scope }, dur);
+		ticketDurationCountCounter.inc({ type: t, server: s, scope }, 1);
+		if (msgs > 0) ticketMessagesTotalCounter.inc({ type: t, server: s, scope }, msgs);
 		kv.add(`Metrics.total.duration.sum.${t}.${s}`, dur).catch(()=>{});
 		kv.add(`Metrics.total.duration.count.${t}.${s}`, 1).catch(()=>{});
 		kv.add(`Metrics.total.messages.${t}.${s}`, msgs).catch(()=>{});
 		const um = Math.max(0, Math.floor(userMessages || 0));
 		const sm = Math.max(0, Math.floor(staffMessages || 0));
-		if (um > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: s }, um);
-		if (sm > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: s }, sm);
+		if (um > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: s, scope }, um);
+		if (sm > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: s, scope }, sm);
 		kv.add(`Metrics.total.messages.user.${t}.${s}`, um).catch(()=>{});
 		kv.add(`Metrics.total.messages.staff.${t}.${s}`, sm).catch(()=>{});
 		// Per-user aggregates
 		if (dur > 0) {
-			userTicketDurationSumCounter.inc({ opened_by: ob, type: t, server: s }, dur);
+			userTicketDurationSumCounter.inc({ opened_by: ob, type: t, server: s, scope }, dur);
 			kv.add(`Metrics.total.user.duration.sum.${ob}.${t}.${s}`, dur).catch(()=>{});
 		}
-		userTicketDurationCountCounter.inc({ opened_by: ob, type: t, server: s }, 1);
+		userTicketDurationCountCounter.inc({ opened_by: ob, type: t, server: s, scope }, 1);
 		kv.add(`Metrics.total.user.duration.count.${ob}.${t}.${s}`, 1).catch(()=>{});
 		if (msgs > 0) {
-			userTicketMessagesTotalCounter.inc({ opened_by: ob, type: t, server: s }, msgs);
+			userTicketMessagesTotalCounter.inc({ opened_by: ob, type: t, server: s, scope }, msgs);
 			kv.add(`Metrics.total.user.messages.${ob}.${t}.${s}`, msgs).catch(()=>{});
 		}
 		// Store username alongside ID

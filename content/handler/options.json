@@ -48,6 +48,13 @@
 			"unique_button_identifier": "button4",
 			"button_type": "SUCCESS",
 			"button_emoji": "🗝️"
+		},
+		"Escalations": {
+			"abbreviation": "ESC",
+			"question_file": "escalations.json",
+			"unique_button_identifier": "button_escalations",
+			"button_type": "DANGER",
+			"button_emoji": "⚠️"
 		}
 	}
 }

@@ -29,7 +29,8 @@
 "staff_guild_id": "",
 "error_channel": "",
 "feedback_channel": "",
-"post_embed_channel_id": ""
+"post_embed_channel_id": "",
+"internal_post_embed_channel_id": ""
 },
 
 "linking_settings": {
