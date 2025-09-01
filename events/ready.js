@@ -1,5 +1,17 @@
 const Discord = require("discord.js");
-const messageId = require("../config/messageid.json");
+const path = require("path");
+let messageId = { messageId: "", internalMessageId: "" };
+try {
+    messageId = require("../config/messageid.json");
+    if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
+    if (messageId.messageId === undefined) messageId.messageId = "";
+    if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
+} catch (_) {
+    try {
+        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+        fs.writeFileSync(msgPath, JSON.stringify(messageId));
+    } catch (__) {}
+}
 const fs = require("fs");
 const func = require("../utils/functions.js");
 const { createDB } = require('../utils/quickdb')
@@ -298,10 +310,12 @@ module.exports = async function (client, message) {
                         } else {
                             internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: [rowOne] }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
                         }
-                        messageId.internalMessageId = internalEmbedMessage.id;
-                        fs.writeFileSync('./config/messageid.json', JSON.stringify(messageId), (err) => {
-                            if (err) func.handle_errors(err, client, `ready.js`, null);
-                        });
+                        try {
+                            messageId.internalMessageId = internalEmbedMessage.id;
+                            fs.writeFileSync('./config/messageid.json', JSON.stringify(messageId), (err) => {
+                                if (err) func.handle_errors(err, client, `ready.js`, null);
+                            });
+                        } catch (_) {}
                     }
                 }
             }

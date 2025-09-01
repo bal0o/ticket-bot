@@ -4,7 +4,19 @@ const { createDB } = require('./quickdb')
 const db = createDB();
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
-const messageid = require("../config/messageid.json");
+const path = require("path");
+let messageid = { messageId: "", internalMessageId: "" };
+try {
+    messageid = require("../config/messageid.json");
+    if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
+    if (messageid.messageId === undefined) messageid.messageId = "";
+    if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
+} catch (_) {
+    try {
+        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+        fs.writeFileSync(msgPath, JSON.stringify(messageid));
+    } catch (__) {}
+}
 const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
@@ -473,7 +485,16 @@ try {
     }
 
 
-    if (interaction.message.id != messageid.messageId) await interaction.message.delete().catch(e => {func.handle_errors(e, client, `functions.js`, null)});
+    try {
+        const protectedIds = [];
+        if (messageid && messageid.messageId) protectedIds.push(String(messageid.messageId));
+        if (messageid && messageid.internalMessageId) protectedIds.push(String(messageid.internalMessageId));
+        const triggerId = String(interaction?.message?.id || "");
+        // Never delete the public or internal embed messages
+        if (triggerId && !protectedIds.includes(triggerId)) {
+            await interaction.message.delete().catch(e => { func.handle_errors(e, client, `functions.js`, null) });
+        }
+    } catch (_) {}
     
     if (administratorMember) {
         await func.staffStats(ticketType, `openticket`, administratorMember.id);
