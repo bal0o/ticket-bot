@@ -80,12 +80,12 @@ module.exports = {
 
     async execute(interaction, client) {
         try {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply();
 
             // Channel restriction
             const allowedChannelId = client.config?.channel_ids?.checkcc_channel_id;
             if (allowedChannelId && interaction.channelId !== allowedChannelId) {
-                await interaction.editReply({ content: 'This command can only be used in the designated channel.', ephemeral: true });
+                await interaction.editReply({ content: 'This command can only be used in the designated channel.' });
                 return;
             }
 
@@ -99,19 +99,19 @@ module.exports = {
                 access++;
             }
             if (access === 0) {
-                await interaction.editReply({ content: 'You do not have permission to use this command.', ephemeral: true });
+                await interaction.editReply({ content: 'You do not have permission to use this command.' });
                 return;
             }
 
             const targetId = (interaction.options.getString('userid') || '').trim();
             if (!/^\d{17,19}$/.test(targetId)) {
-                await interaction.editReply({ content: 'Please provide a valid Discord user ID.', ephemeral: true });
+                await interaction.editReply({ content: 'Please provide a valid Discord user ID.' });
                 return;
             }
 
             // Require API token
             if (!client.config?.tokens?.cheetosToken) {
-                await interaction.editReply({ content: 'Cheetos API token not configured.', ephemeral: true });
+                await interaction.editReply({ content: 'Cheetos API token not configured.' });
                 return;
             }
 
@@ -206,7 +206,7 @@ module.exports = {
             }
 
             // Attach full details if overflow or embed too long
-            const payload = { embeds: [embed], ephemeral: true };
+            const payload = { embeds: [embed] };
             if (overflow || detail.length > 4000) {
                 const { Readable } = require('stream');
                 const stream = Readable.from([detail]);
@@ -215,7 +215,7 @@ module.exports = {
             await interaction.editReply(payload);
         } catch (e) {
             func.handle_errors(e, interaction.client || client, 'checkcc.js', 'Error running /checkcc');
-            try { await interaction.editReply({ content: 'Error running check. Please try again later.', ephemeral: true }); } catch (_) {}
+            try { await interaction.editReply({ content: 'Error running check. Please try again later.' }); } catch (_) {}
         }
     }
 }
