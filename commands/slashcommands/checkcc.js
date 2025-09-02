@@ -3,6 +3,7 @@ const { SlashCommandBuilder } = require("@discordjs/builders");
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
 const axios = require('axios');
+const { createDB } = require('../../utils/quickdb');
 
 function parseCheetosResponse(text) {
     const raw = String(text || "").trim();
@@ -82,6 +83,15 @@ function summarizeRecords(records) {
 }
 
 async function resolveSteamId(client, discordId) {
+    // Local DB fallback from previous tickets
+    try {
+        const db = createDB();
+        const logs = await db.get(`PlayerStats.${discordId}.ticketLogs`) || {};
+        for (const tid of Object.keys(logs)) {
+            const s = logs[tid]?.steamId;
+            if (s && String(s).startsWith('7656119')) return String(s);
+        }
+    } catch (_) {}
     try {
         const linking = client.config?.linking_settings?.linkingSystem;
         const secret = client.config?.tokens?.Linking_System_API_Key_Or_Secret;
