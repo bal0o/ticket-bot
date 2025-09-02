@@ -3,12 +3,31 @@ const { SlashCommandBuilder } = require("@discordjs/builders");
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
 
-function parseCheetosPlaintext(text) {
-    const lines = String(text || "").split(/\r?\n/);
+function parseCheetosResponse(text) {
+    const raw = String(text || "").trim();
+    // Try JSON first
+    try {
+        if (raw.startsWith('[') || raw.startsWith('{')) {
+            const json = JSON.parse(raw);
+            const arr = Array.isArray(json) ? json : [json];
+            return arr.map(x => ({
+                ID: x.ID ?? x.id ?? x.Id ?? '',
+                Username: x.Username ?? x.username ?? '',
+                FirstSeen: x.FirstSeen ?? x.firstSeen ?? x.first_seen ?? '',
+                TimestampAdded: x.TimestampAdded ?? x.timestampAdded ?? x.timestamp_added ?? '',
+                LastGuildScan: x.LastGuildScan ?? x.lastGuildScan ?? x.last_guild_scan ?? '',
+                Name: x.Name ?? x.name ?? '',
+                Roles: x.Roles ?? x.roles ?? '',
+                Notes: x.Notes ?? x.notes ?? ''
+            }));
+        }
+    } catch (_) {}
+    // Plaintext fallback
+    const lines = raw.split(/\r?\n/);
     const records = [];
     let current = null;
-    for (const raw of lines) {
-        const line = (raw || '').trimEnd();
+    for (const ln of lines) {
+        const line = (ln || '').trimEnd();
         if (!line) continue;
         const idx = line.indexOf(':');
         if (idx === -1) continue;
@@ -29,7 +48,8 @@ function summarizeRecords(records) {
     const count = records.length;
     let lastEpoch = null;
     for (const r of records) {
-        const lg = r['LastGuildScan'] ? parseInt(r['LastGuildScan'], 10) : null;
+        const lgRaw = r['LastGuildScan'] ?? r.LastGuildScan;
+        const lg = lgRaw !== undefined && lgRaw !== null ? parseInt(String(lgRaw), 10) : null;
         if (Number.isFinite(lg) && lg > 0 && (!lastEpoch || lg > lastEpoch)) lastEpoch = lg;
     }
     let ltsStr = 'N/A';
@@ -120,13 +140,21 @@ module.exports = {
             // Compose summary (same format as ticket)
             const summary = count > 0 ? `Cheetos Check: ${count} CC • LTS: ${ltsStr} • ${wr} WR` : 'Cheetos Check: Clean';
 
-            // Build detailed display for manual analysis
+            // Build detailed display for manual analysis (pretty table-like formatting)
             let detail = '';
             if (records.length) {
                 const chunks = records.map((r, idx) => {
-                    const keys = Object.keys(r);
-                    const lines = keys.map(k => `${k}: ${r[k]}`);
-                    return `#${idx + 1}\n` + lines.join('\n');
+                    const items = [
+                        `ID: ${r.ID ?? ''}`,
+                        `Username: ${r.Username ?? ''}`,
+                        `FirstSeen: ${r.FirstSeen ?? ''}`,
+                        `TimestampAdded: ${r.TimestampAdded ?? ''}`,
+                        `LastGuildScan: ${r.LastGuildScan ?? r['LastGuildScan'] ?? ''}`,
+                        `Name: ${r.Name ?? ''}`,
+                        `Roles: ${r.Roles ?? ''}`,
+                        `Notes: ${Array.isArray(r.Notes) ? (r.Notes.length ? JSON.stringify(r.Notes) : '{}') : (r.Notes || '{}')}`
+                    ];
+                    return `#${idx + 1}\n` + items.join('\n');
                 });
                 detail = chunks.join('\n\n');
             } else {

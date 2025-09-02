@@ -358,31 +358,52 @@ try {
             const raw = (resp && (resp.raw_body || resp.body)) || '';
             const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
             try { if (client.config && client.config.debug) console.log(`[Cheetos] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`); } catch(_) {}
-            const lines = text.split(/\r?\n/);
-            const records = [];
-            let current = null;
-            for (const raw of lines) {
-                const line = (raw || '').trimEnd();
-                if (!line) continue;
-                const idx = line.indexOf(':');
-                if (idx === -1) continue;
-                const key = line.slice(0, idx).trim();
-                const value = line.slice(idx + 1).trim();
-                if (key.toLowerCase() === 'id') {
-                    if (current && Object.keys(current).length) records.push(current);
-                    current = {};
+            // Try JSON first
+            let records = [];
+            try {
+                if (text.trim().startsWith('[') || text.trim().startsWith('{')) {
+                    const json = JSON.parse(text);
+                    const arr = Array.isArray(json) ? json : [json];
+                    records = arr.map(x => ({
+                        ID: x.ID ?? x.id ?? x.Id ?? '',
+                        Username: x.Username ?? x.username ?? '',
+                        FirstSeen: x.FirstSeen ?? x.firstSeen ?? x.first_seen ?? '',
+                        TimestampAdded: x.TimestampAdded ?? x.timestampAdded ?? x.timestamp_added ?? '',
+                        LastGuildScan: x.LastGuildScan ?? x.lastGuildScan ?? x.last_guild_scan ?? '',
+                        Name: x.Name ?? x.name ?? '',
+                        Roles: x.Roles ?? x.roles ?? '',
+                        Notes: x.Notes ?? x.notes ?? ''
+                    }));
                 }
-                if (!current) current = {};
-                current[key] = value;
+            } catch(_) {}
+            if (!Array.isArray(records) || records.length === 0) {
+                const lines = text.split(/\r?\n/);
+                records = [];
+                let current = null;
+                for (const raw of lines) {
+                    const line = (raw || '').trimEnd();
+                    if (!line) continue;
+                    const idx = line.indexOf(':');
+                    if (idx === -1) continue;
+                    const key = line.slice(0, idx).trim();
+                    const value = line.slice(idx + 1).trim();
+                    if (key.toLowerCase() === 'id') {
+                        if (current && Object.keys(current).length) records.push(current);
+                        current = {};
+                    }
+                    if (!current) current = {};
+                    current[key] = value;
+                }
+                if (current && Object.keys(current).length) records.push(current);
             }
-            if (current && Object.keys(current).length) records.push(current);
 
             const count = records.length;
 
             // Compute LTS from LastGuildScan only (epoch seconds)
             let lastEpoch = null;
             for (const r of records) {
-                const lg = r['LastGuildScan'] ? parseInt(r['LastGuildScan'], 10) : null;
+                const lgRaw = r['LastGuildScan'] ?? r.LastGuildScan;
+                const lg = lgRaw !== undefined && lgRaw !== null ? parseInt(String(lgRaw), 10) : null;
                 if (Number.isFinite(lg) && lg > 0 && (!lastEpoch || lg > lastEpoch)) lastEpoch = lg;
             }
             let ltsStr = 'N/A';
