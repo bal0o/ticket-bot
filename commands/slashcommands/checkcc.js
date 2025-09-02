@@ -140,21 +140,40 @@ module.exports = {
             // Compose summary (same format as ticket)
             const summary = count > 0 ? `Cheetos Check: ${count} CC • LTS: ${ltsStr} • ${wr} WR` : 'Cheetos Check: Clean';
 
-            // Build detailed display for manual analysis (pretty table-like formatting)
+            // Helpers for human-readable time
+            const toUnixSeconds = (v) => {
+                if (v === undefined || v === null) return null;
+                const n = Number(String(v));
+                if (!Number.isFinite(n)) return null;
+                if (n > 10_000_000_000) return Math.floor(n / 1000);
+                if (n > 0) return Math.floor(n);
+                return null;
+            };
+            const humanTimePair = (n) => n ? `<t:${n}:R> (<t:${n}:f>)` : 'N/A';
+
+            // Build embed field table per record (limit to first 10 to respect embed limits)
+            const maxFields = 10;
+            const shown = records.slice(0, maxFields);
+            const overflow = records.length > maxFields;
+
+            // Also construct a full pretty text fallback for attachment if needed
             let detail = '';
             if (records.length) {
                 const chunks = records.map((r, idx) => {
-                    const items = [
+                    const fsUnix = toUnixSeconds(r.FirstSeen ?? r['FirstSeen']);
+                    const taUnix = toUnixSeconds(r.TimestampAdded ?? r['TimestampAdded']);
+                    const lgUnix = toUnixSeconds(r.LastGuildScan ?? r['LastGuildScan']);
+                    const pretty = [
                         `ID: ${r.ID ?? ''}`,
                         `Username: ${r.Username ?? ''}`,
-                        `FirstSeen: ${r.FirstSeen ?? ''}`,
-                        `TimestampAdded: ${r.TimestampAdded ?? ''}`,
-                        `LastGuildScan: ${r.LastGuildScan ?? r['LastGuildScan'] ?? ''}`,
+                        `FirstSeen: ${fsUnix ? new Date(fsUnix * 1000).toISOString() : (r.FirstSeen ?? '')}`,
+                        `TimestampAdded: ${taUnix ? new Date(taUnix * 1000).toISOString() : (r.TimestampAdded ?? '')}`,
+                        `LastGuildScan: ${lgUnix ? new Date(lgUnix * 1000).toISOString() : (r.LastGuildScan ?? '')}`,
                         `Name: ${r.Name ?? ''}`,
                         `Roles: ${r.Roles ?? ''}`,
                         `Notes: ${Array.isArray(r.Notes) ? (r.Notes.length ? JSON.stringify(r.Notes) : '{}') : (r.Notes || '{}')}`
                     ];
-                    return `#${idx + 1}\n` + items.join('\n');
+                    return `#${idx + 1}\n` + pretty.join('\n');
                 });
                 detail = chunks.join('\n\n');
             } else {
@@ -167,16 +186,34 @@ module.exports = {
                 .setDescription(summary)
                 .addFields({ name: 'Target', value: `UserID: ${targetId}` });
 
-            if (detail.length <= 4000) {
-                embed.addFields({ name: 'Details', value: `\u200B\n\u200B\n\u200B\n\u200B\n${'```'}\n${detail}\n${'```'}` });
-                await interaction.editReply({ embeds: [embed], ephemeral: true });
-            } else {
-                // Too long for embed; attach as a text file
+            // Add per-record fields
+            for (let i = 0; i < shown.length; i++) {
+                const r = shown[i];
+                const fsUnix = toUnixSeconds(r.FirstSeen ?? r['FirstSeen']);
+                const taUnix = toUnixSeconds(r.TimestampAdded ?? r['TimestampAdded']);
+                const lgUnix = toUnixSeconds(r.LastGuildScan ?? r['LastGuildScan']);
+                const roles = String(r.Roles ?? '').slice(0, 500);
+                const notesText = Array.isArray(r.Notes) ? (r.Notes.length ? JSON.stringify(r.Notes) : '{}') : (r.Notes || '{}');
+                const name = `#${i + 1} ${r.Name || r.Username || 'Record'}`.slice(0, 256);
+                const value = [
+                    `ID: ${r.ID ?? ''}`,
+                    `FirstSeen: ${humanTimePair(fsUnix)}`,
+                    `Added: ${humanTimePair(taUnix)}`,
+                    `Last Scan: ${humanTimePair(lgUnix)}`,
+                    `Roles: ${roles || 'N/A'}`,
+                    `Notes: ${notesText}`
+                ].join('\n').slice(0, 1024);
+                embed.addFields({ name, value, inline: false });
+            }
+
+            // Attach full details if overflow or embed too long
+            const payload = { embeds: [embed], ephemeral: true };
+            if (overflow || detail.length > 4000) {
                 const { Readable } = require('stream');
                 const stream = Readable.from([detail]);
-                const attachment = new Discord.MessageAttachment(stream, `checkcc_${targetId}.txt`);
-                await interaction.editReply({ embeds: [embed], files: [attachment], ephemeral: true });
+                payload.files = [new Discord.MessageAttachment(stream, `checkcc_${targetId}.txt`)];
             }
+            await interaction.editReply(payload);
         } catch (e) {
             func.handle_errors(e, interaction.client || client, 'checkcc.js', 'Error running /checkcc');
             try { await interaction.editReply({ content: 'Error running check. Please try again later.', ephemeral: true }); } catch (_) {}
