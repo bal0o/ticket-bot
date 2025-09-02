@@ -847,10 +847,26 @@ module.exports = async function (client, interaction) {
         } else {
             // Move the cooldown check to only run for new ticket creation
             if (!["moveticket", "selectCategory", "closeTicketModal", "CustomResponseModal"].includes(interaction.customId)) {
-                await interaction.deferReply({ ephemeral: true }).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                // Guard against double-defer to avoid INTERACTION_ALREADY_REPLIED
+                if (!interaction.deferred && !interaction.replied) {
+                    try {
+                        await interaction.deferReply({ ephemeral: true });
+                    } catch (err) {
+                        // Only log unexpected errors
+                        const msg = (err && (err.code || err.message || err.name || "")).toString();
+                        if (!/INTERACTION_ALREADY_REPLIED/i.test(msg)) {
+                            func.handle_errors(err, client, `interactionCreate.js`, null);
+                        }
+                    }
+                }
 
                 if (client.blocked_users.has(interaction.member.user.id) || client.cooldown.has(interaction.member.user.id)) {
-                    await interaction.editReply({content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    const payload = { content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", ephemeral: true };
+                    if (interaction.deferred) {
+                        await interaction.editReply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    } else {
+                        await interaction.reply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    }
                     return;
                 }
             }

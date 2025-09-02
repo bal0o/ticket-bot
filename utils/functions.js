@@ -259,10 +259,25 @@ if (typesRequireServer.includes(ticketType.toLowerCase())) {
     channelName = `${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}`;
 }
 
+// Validate category before creation; fall back to parent of post channel or guild root
+let parentId = null;
+try {
+    const desired = ticketCategory ? staffGuild.channels.cache.get(ticketCategory) : null;
+    if (desired && desired.type === 'GUILD_CATEGORY') {
+        parentId = desired.id;
+    } else if (postchannelCategory) {
+        const p = staffGuild.channels.cache.get(postchannelCategory);
+        if (p && p.type === 'GUILD_CATEGORY') parentId = p.id;
+    }
+    if (!parentId) {
+        func.handle_errors(null, client, 'functions.js', `Configured category invalid or missing for ticket type '${ticketType}'. Creating in guild root.`);
+    }
+} catch (_) { parentId = null; }
+
 let ticketChannel = await staffGuild.channels.create(channelName, {
     type: "text",
     topic: recepientMember.id,
-    parent: (ticketCategory) ? ticketCategory : postchannelCategory ||  null,
+    parent: parentId || null,
     permissionOverwrites: overwrites,
 });
 
