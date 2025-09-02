@@ -346,6 +346,7 @@ try {
         if (shouldCheckCheetos) {
             const req = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')}`); } catch(_) {}
             const resp = await req.get(url).headers({
                 'Auth-Key': client.config.tokens.cheetosToken,
                 'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || ''),
@@ -356,6 +357,7 @@ try {
             // Parse plaintext response into records
             const raw = (resp && (resp.raw_body || resp.body)) || '';
             const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`); } catch(_) {}
             const lines = text.split(/\r?\n/);
             const records = [];
             let current = null;
@@ -403,6 +405,7 @@ try {
                 const rolesVal = (r['Roles'] || '').trim();
                 if (rolesVal && rolesVal.length > 0) wr++;
             }
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Parsed count=${count} LTS=${ltsStr} WR=${wr}`); } catch(_) {}
 
             const cheetosEmbed = new Discord.MessageEmbed()
                 .setColor(client.config.bot_settings.main_color)

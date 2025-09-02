@@ -97,6 +97,9 @@ module.exports = {
 
             const unirest = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(targetId)}`;
+            if (client.config && client.config.debug) {
+                console.log(`[Cheetos:/checkcc] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || interaction.user.id)}`);
+            }
             const resp = await unirest.get(url).headers({
                 'Auth-Key': client.config.tokens.cheetosToken,
                 'DiscordID': String(client.config?.misc?.cheetos_requestor_id || interaction.user.id),
@@ -108,6 +111,9 @@ module.exports = {
             if (typeof raw === 'string') text = raw;
             else if (Buffer.isBuffer(raw)) text = raw.toString('utf8');
             else if (raw && raw.toString) text = raw.toString();
+            if (client.config && client.config.debug) {
+                console.log(`[Cheetos:/checkcc] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`);
+            }
             const records = parseCheetosPlaintext(text);
             const { count, ltsStr, wr } = summarizeRecords(records);
 
