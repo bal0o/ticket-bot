@@ -406,17 +406,25 @@ try {
                 const ts = tsRaw !== undefined && tsRaw !== null ? parseInt(String(tsRaw), 10) : null;
                 if (Number.isFinite(ts) && ts > 0 && (!lastEpoch || ts > lastEpoch)) lastEpoch = ts;
             }
+            // Short age helper: h/d/w/m/y
+            const toShortAge = (sec) => {
+                const s = Math.max(0, sec|0);
+                const h = Math.floor(s / 3600);
+                if (h < 24) return `${h}h`;
+                const d = Math.floor(h / 24);
+                if (d < 7) return `${d}d`;
+                const w = Math.floor(d / 7);
+                if (w < 4) return `${w}w`;
+                const m = Math.floor(d / 30);
+                if (m < 12) return `${m}m`;
+                const y = Math.floor(d / 365);
+                return `${y}y`;
+            };
             let ltsStr = 'N/A';
             if (lastEpoch && Number.isFinite(lastEpoch)) {
                 const nowSec = Math.floor(Date.now() / 1000);
                 const diffSec = Math.max(0, nowSec - lastEpoch);
-                const diffHours = Math.floor(diffSec / 3600);
-                if (diffHours >= 24) {
-                    const d = Math.floor(diffHours / 24);
-                    ltsStr = `${d}d`;
-                } else {
-                    ltsStr = `${diffHours}h`;
-                }
+                ltsStr = toShortAge(diffSec);
             }
 
             // WR = how many distinct discords they have roles in
@@ -431,7 +439,7 @@ try {
             const cheetosEmbed = new Discord.MessageEmbed()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('Cheetos Check')
-                .setDescription(count > 0 ? `Cheetos Check: ${count} CC • LTS: ${ltsStr} • ${wr} WR` : `Cheetos Check: Clean`);
+                .setDescription(count > 0 ? `Result: ${count} CC LTS ${ltsStr} ${wr} WR` : `Cheetos Check: Clean`);
             await ticketChannel.send({ embeds: [cheetosEmbed] });
         }
     } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
