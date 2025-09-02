@@ -136,7 +136,24 @@ async function fetchBattlemetricsInfo(client, steamId) {
                 lastSeen = recent?.meta?.lastSeen || null;
             }
         }
-        return { playerId, name, mostRecentServer, mostRecentServerId, timePlayed, firstSeen, lastSeen };
+        // Fetch bans
+        let banInfo = [];
+        try {
+            const bansUrl = `https://api.battlemetrics.com/bans?filter[player]=${playerId}&include=server`;
+            const bansResponse = await axios.get(bansUrl, { headers, timeout: 10000 });
+            if (bansResponse?.data?.data?.length) {
+                for (const ban of bansResponse.data.data) {
+                    const reason = ban?.attributes?.reason || 'No reason provided';
+                    let serverName = ban?.relationships?.server?.data?.id || '';
+                    if (bansResponse.data.included) {
+                        const serverInc = bansResponse.data.included.find(inc => inc.type === 'server' && inc.id === serverName);
+                        if (serverInc) serverName = serverInc.attributes?.name;
+                    }
+                    banInfo.push(`Ban on ${serverName}: ${reason}`);
+                }
+            }
+        } catch(_) {}
+        return { playerId, name, mostRecentServer, mostRecentServerId, timePlayed, firstSeen, lastSeen, banInfo };
     } catch (_) { return null; }
 }
 
@@ -266,6 +283,45 @@ module.exports = {
                 if (bm.mostRecentServer && bm.mostRecentServerId) {
                     embed.addFields({ name: 'BM Server', value: `[${bm.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bm.mostRecentServerId})`, inline: true });
                 }
+            }
+
+            // Build a staff-style embed mirroring private thread
+            let userObj = null;
+            try { userObj = await client.users.fetch(targetId); } catch(_) {}
+            if (bm || steamId) {
+                const staffEmbed = new Discord.MessageEmbed()
+                    .setColor(client.config.bot_settings.main_color)
+                    .setTitle('User Info');
+                if (userObj) staffEmbed.setAuthor({ name: `${userObj.username} (${userObj.id})`, iconURL: userObj.displayAvatarURL() });
+                if (bm) {
+                    staffEmbed.addFields(
+                        { name: 'BM Name', value: bm.name ? `[${bm.name}](https://www.battlemetrics.com/rcon/players/${bm.playerId})` : `[Player](${`https://www.battlemetrics.com/rcon/players/${bm.playerId}`})`, inline: true },
+                        ...(bm.mostRecentServer && bm.mostRecentServerId ? [{ name: 'BM Most Recent Server', value: `[${bm.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bm.mostRecentServerId})`, inline: true }] : [])
+                    );
+                    const firstUnix = bm.firstSeen ? Math.floor(new Date(bm.firstSeen).getTime() / 1000) : null;
+                    const lastUnix = bm.lastSeen ? Math.floor(new Date(bm.lastSeen).getTime() / 1000) : null;
+                    const playedHours = bm.timePlayed ? Math.floor(bm.timePlayed / 3600) : null;
+                    staffEmbed.addFields(
+                        { name: 'Time Played', value: playedHours !== null ? `${playedHours} hours` : 'N/A', inline: true },
+                        { name: 'First Seen', value: firstUnix ? `<t:${firstUnix}:R>` : 'N/A', inline: true },
+                        { name: 'Last Seen', value: lastUnix ? `<t:${lastUnix}:R>` : 'N/A', inline: true }
+                    );
+                    if (steamId) staffEmbed.addFields({ name: 'Steam Profile', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})` });
+                    if (bm.banInfo && bm.banInfo.length > 0) {
+                        staffEmbed.addField('BM Bans', bm.banInfo.join('\n').substring(0, 1024));
+                    }
+                } else if (steamId) {
+                    staffEmbed.addFields({ name: 'Steam Profile', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})` });
+                }
+                // Edit reply with two embeds
+                const payload = { embeds: [embed, staffEmbed] };
+                if (overflow || detail.length > 4000) {
+                    const { Readable } = require('stream');
+                    const stream = Readable.from([detail]);
+                    payload.files = [new Discord.MessageAttachment(stream, `checkcc_${targetId}.txt`)];
+                }
+                await interaction.editReply(payload);
+                return;
             }
 
             // Add per-record fields (formatted per requirements)
