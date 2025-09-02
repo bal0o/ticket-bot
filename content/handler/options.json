@@ -56,16 +56,21 @@
 			"unique_button_identifier": "admin_escalation",
 			"button_type": "DANGER",
 			"button_emoji": "🛡️"
-		}
-		,
+		},
+		"Unruly User": {
+			"abbreviation": "UNUSR",
+			"question_file": "unrulyuser.json",
+			"unique_button_identifier": "unruly_user",
+			"button_type": "DANGER",
+			"button_emoji": "🚨"
+		},
 		"Map Issue": {
 			"abbreviation": "MAP",
 			"question_file": "mapissue.json",
 			"unique_button_identifier": "map_issue",
 			"button_type": "SECONDARY",
 			"button_emoji": "🗺️"
-		}
-		,
+		},
 		"Bug Report": {
 			"abbreviation": "BUG",
 			"question_file": "bugreport.json",
