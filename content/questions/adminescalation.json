@@ -1,8 +1,11 @@
 {
     "questions": [
-        "Who is the staff member involved?",
-        "Please describe the situation and why it requires admin escalation.",
-        "Provide any relevant message links or evidence."
+        "What is the user(s) SteamID(s)? Include DiscordID(s) if able.",
+        "Describe the issue at hand.",
+        "Are there any relevant tickets? Include links, Discord links are okay for open tickets.",
+        "What evidence have you gathered thus far? Include links, clips, screenshots etc.",
+        "How/why does this fall outside of your scope and why do you need admin/manager assistance?",
+        "What are your recommendations? (optional)"
     ],
     "pre-message": "Admin Escalation ticket. Please provide clear context and evidence.",
     "post-message": "Thanks. An admin will review and respond shortly.",
@@ -19,7 +22,7 @@
     "open-as-ticket": true,
     "internal": true,
     "max-active-tickets": 5,
-    "send_close_dm": false
+    "send_close_dm": true
 }
 
 

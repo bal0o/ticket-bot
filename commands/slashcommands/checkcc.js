@@ -223,7 +223,7 @@ module.exports = {
             const { count, ltsStr, wr } = summarizeRecords(records);
 
             // Compose summary (same format as ticket)
-            const summary = count > 0 ? `Result: ${count} CC LTS ${ltsStr} ${wr} WR` : 'Cheetos Check: Clean';
+            const summary = count > 0 ? `Result: ${count} CC LTS ${ltsStr} ${wr} WR` : 'Result: Clean';
 
             // Helpers for human-readable time
             const toUnixSeconds = (v) => {

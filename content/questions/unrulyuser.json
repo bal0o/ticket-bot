@@ -1,0 +1,23 @@
+{
+    "questions": [
+        "Include below information on where the situation is taking place, link the ticket or the channel or the SteamID/DiscordID of the user in question.",
+        "Describe what happened from your perspective.",
+        "Include any relevant evidence you may have gathered."
+    ],
+    "pre-message": "If the situation is ongoing stop communication with the user. If they are in a public space mute them for 1 hour do not engage further. ",
+    "post-message": "Thanks. An admin will review the situation and take appropriate action.",
+    "transcript-channel": "",
+    "ticket-category": "",
+    "access-role-id": [],
+    "ping-role-id": [],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": false,
+    "display-user-discord-info": true,
+    "needVerified": false,
+    "allow_feedback": false,
+    "open-as-ticket": true,
+    "internal": true,
+    "max-active-tickets": 10,
+    "send_close_dm": true
+}
