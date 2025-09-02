@@ -348,12 +348,14 @@ try {
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
             const resp = await req.get(url).headers({
                 'Auth-Key': client.config.tokens.cheetosToken,
-                // Use configured requester ID if set, else bot ID
-                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')
+                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || ''),
+                'Accept': 'text/plain',
+                'User-Agent': 'ticket-bot (Discord.js)'
             });
 
             // Parse plaintext response into records
-            const text = resp && resp.body ? (typeof resp.body === 'string' ? resp.body : (resp.body.toString ? resp.body.toString() : '')) : '';
+            const raw = (resp && (resp.raw_body || resp.body)) || '';
+            const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
             const lines = text.split(/\r?\n/);
             const records = [];
             let current = null;

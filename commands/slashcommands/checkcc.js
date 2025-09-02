@@ -99,10 +99,15 @@ module.exports = {
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(targetId)}`;
             const resp = await unirest.get(url).headers({
                 'Auth-Key': client.config.tokens.cheetosToken,
-                // Prefer configured requester ID; else the staff invoking the command
-                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || interaction.user.id)
+                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || interaction.user.id),
+                'Accept': 'text/plain',
+                'User-Agent': 'ticket-bot (Discord.js)'
             });
-            const text = resp && resp.body ? (typeof resp.body === 'string' ? resp.body : (resp.body.toString ? resp.body.toString() : '')) : '';
+            const raw = (resp && (resp.raw_body || resp.body)) || '';
+            let text = '';
+            if (typeof raw === 'string') text = raw;
+            else if (Buffer.isBuffer(raw)) text = raw.toString('utf8');
+            else if (raw && raw.toString) text = raw.toString();
             const records = parseCheetosPlaintext(text);
             const { count, ltsStr, wr } = summarizeRecords(records);
 
