@@ -3,7 +3,6 @@ const { SlashCommandBuilder } = require("@discordjs/builders");
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
 const axios = require('axios');
-const { createDB } = require('../../utils/quickdb');
 
 function parseCheetosResponse(text) {
     const raw = String(text || "").trim();
@@ -83,15 +82,6 @@ function summarizeRecords(records) {
 }
 
 async function resolveSteamId(client, discordId) {
-    // Local DB fallback from previous tickets
-    try {
-        const db = createDB();
-        const logs = await db.get(`PlayerStats.${discordId}.ticketLogs`) || {};
-        for (const tid of Object.keys(logs)) {
-            const s = logs[tid]?.steamId;
-            if (s && String(s).startsWith('7656119')) return String(s);
-        }
-    } catch (_) {}
     try {
         const linking = client.config?.linking_settings?.linkingSystem;
         const secret = client.config?.tokens?.Linking_System_API_Key_Or_Secret;
@@ -285,53 +275,31 @@ module.exports = {
                 .setDescription(summary)
                 .addFields({ name: 'Target', value: `UserID: ${targetId}` });
 
+            // Add Steam / BM to main embed once, with fallbacks when missing
             if (steamId) {
                 embed.addFields({ name: 'Steam', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})`, inline: true });
+            } else {
+                embed.addFields({ name: 'Steam', value: 'Not linked', inline: true });
             }
             if (bm) {
                 embed.addFields({ name: 'BM Name', value: bm.name ? `[${bm.name}](https://www.battlemetrics.com/rcon/players/${bm.playerId})` : `[Player](${`https://www.battlemetrics.com/rcon/players/${bm.playerId}`})`, inline: true });
                 if (bm.mostRecentServer && bm.mostRecentServerId) {
                     embed.addFields({ name: 'BM Server', value: `[${bm.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bm.mostRecentServerId})`, inline: true });
                 }
-            }
-
-            // Build a staff-style embed mirroring private thread
-            let userObj = null;
-            try { userObj = await client.users.fetch(targetId); } catch(_) {}
-            if (bm || steamId) {
-                const staffEmbed = new Discord.MessageEmbed()
-                    .setColor(client.config.bot_settings.main_color)
-                    .setTitle('User Info');
-                if (userObj) staffEmbed.setAuthor({ name: `${userObj.username} (${userObj.id})`, iconURL: userObj.displayAvatarURL() });
-                if (bm) {
-                    staffEmbed.addFields(
-                        { name: 'BM Name', value: bm.name ? `[${bm.name}](https://www.battlemetrics.com/rcon/players/${bm.playerId})` : `[Player](${`https://www.battlemetrics.com/rcon/players/${bm.playerId}`})`, inline: true },
-                        ...(bm.mostRecentServer && bm.mostRecentServerId ? [{ name: 'BM Most Recent Server', value: `[${bm.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bm.mostRecentServerId})`, inline: true }] : [])
-                    );
-                    const firstUnix = bm.firstSeen ? Math.floor(new Date(bm.firstSeen).getTime() / 1000) : null;
-                    const lastUnix = bm.lastSeen ? Math.floor(new Date(bm.lastSeen).getTime() / 1000) : null;
-                    const playedHours = bm.timePlayed ? Math.floor(bm.timePlayed / 3600) : null;
-                    staffEmbed.addFields(
-                        { name: 'Time Played', value: playedHours !== null ? `${playedHours} hours` : 'N/A', inline: true },
-                        { name: 'First Seen', value: firstUnix ? `<t:${firstUnix}:R>` : 'N/A', inline: true },
-                        { name: 'Last Seen', value: lastUnix ? `<t:${lastUnix}:R>` : 'N/A', inline: true }
-                    );
-                    if (steamId) staffEmbed.addFields({ name: 'Steam Profile', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})` });
-                    if (bm.banInfo && bm.banInfo.length > 0) {
-                        staffEmbed.addField('BM Bans', bm.banInfo.join('\n').substring(0, 1024));
-                    }
-                } else if (steamId) {
-                    staffEmbed.addFields({ name: 'Steam Profile', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})` });
+                const firstUnix = bm.firstSeen ? Math.floor(new Date(bm.firstSeen).getTime() / 1000) : null;
+                const lastUnix = bm.lastSeen ? Math.floor(new Date(bm.lastSeen).getTime() / 1000) : null;
+                const playedHours = bm.timePlayed ? Math.floor(bm.timePlayed / 3600) : null;
+                embed.addFields(
+                    { name: 'Time Played', value: playedHours !== null ? `${playedHours} hours` : 'N/A', inline: true },
+                    { name: 'First Seen', value: firstUnix ? `<t:${firstUnix}:R>` : 'N/A', inline: true },
+                    { name: 'Last Seen', value: lastUnix ? `<t:${lastUnix}:R>` : 'N/A', inline: true }
+                );
+                if (bm.banInfo && bm.banInfo.length > 0) {
+                    embed.addField('BM Bans', bm.banInfo.join('\n').substring(0, 1024));
                 }
-                // Edit reply with two embeds
-                const payload = { embeds: [embed, staffEmbed] };
-                if (overflow || detail.length > 4000) {
-                    const { Readable } = require('stream');
-                    const stream = Readable.from([detail]);
-                    payload.files = [new Discord.MessageAttachment(stream, `checkcc_${targetId}.txt`)];
-                }
-                await interaction.editReply(payload);
-                return;
+            } else {
+                const bmNote = steamId ? 'No BattleMetrics data' : 'No BattleMetrics data (no Steam link)';
+                embed.addFields({ name: 'BattleMetrics', value: bmNote, inline: true });
             }
 
             // Add per-record fields (formatted per requirements)
