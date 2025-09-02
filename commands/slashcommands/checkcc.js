@@ -48,9 +48,9 @@ function summarizeRecords(records) {
     const count = records.length;
     let lastEpoch = null;
     for (const r of records) {
-        const lgRaw = r['LastGuildScan'] ?? r.LastGuildScan;
-        const lg = lgRaw !== undefined && lgRaw !== null ? parseInt(String(lgRaw), 10) : null;
-        if (Number.isFinite(lg) && lg > 0 && (!lastEpoch || lg > lastEpoch)) lastEpoch = lg;
+        const tsRaw = r['TimestampAdded'] ?? r.TimestampAdded;
+        const ts = tsRaw !== undefined && tsRaw !== null ? parseInt(String(tsRaw), 10) : null;
+        if (Number.isFinite(ts) && ts > 0 && (!lastEpoch || ts > lastEpoch)) lastEpoch = ts;
     }
     let ltsStr = 'N/A';
     if (lastEpoch && Number.isFinite(lastEpoch)) {
@@ -189,18 +189,18 @@ module.exports = {
             // Add per-record fields (formatted per requirements)
             for (let i = 0; i < shown.length; i++) {
                 const r = shown[i];
-                const fsUnix = toUnixSeconds(r.FirstSeen ?? r['FirstSeen']);
-                const taUnix = toUnixSeconds(r.TimestampAdded ?? r['TimestampAdded']);
-                const lgUnix = toUnixSeconds(r.LastGuildScan ?? r['LastGuildScan']);
+                const joinedUnix = toUnixSeconds(r.FirstSeen ?? r['FirstSeen']);
+                const lastSeenUnix = toUnixSeconds(r.TimestampAdded ?? r['TimestampAdded']);
+                const scannedUnix = toUnixSeconds(r.LastGuildScan ?? r['LastGuildScan']);
                 const roles = String(r.Roles ?? '').slice(0, 500);
                 const notesText = Array.isArray(r.Notes) ? (r.Notes.length ? JSON.stringify(r.Notes) : '{}') : (r.Notes || '{}');
                 const name = `${r.Name || r.Username || 'Record'}`.slice(0, 256);
                 const value = [
                     `Roles: ${roles || 'N/A'}`,
                     `Username: ${r.Username ?? ''}`,
-                    `Joined Discord Server: ${humanTimePair(taUnix)}`,
-                    `Last Time Seen In Guild: ${humanTimePair(fsUnix)}`,
-                    `Last Time Guild Scanned: ${humanTimePair(lgUnix)}`
+                    `Joined Discord Server: ${humanTimePair(joinedUnix)}`,
+                    `Last Time Seen In Guild: ${humanTimePair(lastSeenUnix)}`,
+                    `Last Time Guild Scanned: ${humanTimePair(scannedUnix)}`
                 ].join('\n').slice(0, 1024);
                 embed.addFields({ name, value, inline: false });
             }

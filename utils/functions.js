@@ -399,12 +399,12 @@ try {
 
             const count = records.length;
 
-            // Compute LTS from LastGuildScan only (epoch seconds)
+            // Compute LTS from Last Time Seen In Guild (TimestampAdded) per requirements
             let lastEpoch = null;
             for (const r of records) {
-                const lgRaw = r['LastGuildScan'] ?? r.LastGuildScan;
-                const lg = lgRaw !== undefined && lgRaw !== null ? parseInt(String(lgRaw), 10) : null;
-                if (Number.isFinite(lg) && lg > 0 && (!lastEpoch || lg > lastEpoch)) lastEpoch = lg;
+                const tsRaw = r['TimestampAdded'] ?? r.TimestampAdded;
+                const ts = tsRaw !== undefined && tsRaw !== null ? parseInt(String(tsRaw), 10) : null;
+                if (Number.isFinite(ts) && ts > 0 && (!lastEpoch || ts > lastEpoch)) lastEpoch = ts;
             }
             let ltsStr = 'N/A';
             if (lastEpoch && Number.isFinite(lastEpoch)) {
