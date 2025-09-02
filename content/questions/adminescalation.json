@@ -1,0 +1,25 @@
+{
+    "questions": [
+        "Who is the staff member involved?",
+        "Please describe the situation and why it requires admin escalation.",
+        "Provide any relevant message links or evidence."
+    ],
+    "pre-message": "Admin Escalation ticket. Please provide clear context and evidence.",
+    "post-message": "Thanks. An admin will review and respond shortly.",
+    "transcript-channel": "",
+    "ticket-category": "",
+    "access-role-id": [],
+    "ping-role-id": [],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": false,
+    "display-user-discord-info": true,
+    "needVerified": false,
+    "allow_feedback": false,
+    "open-as-ticket": true,
+    "internal": true,
+    "max-active-tickets": 5,
+    "send_close_dm": false
+}
+
+

@@ -340,6 +340,77 @@ try {
 
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
+    // Post Cheetos check in the main ticket channel (not in staff thread)
+    try {
+        const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
+        const isAppealOrApplication = (ticketType || "").toLowerCase().includes('appeal') || (ticketType || "").toLowerCase().includes('application');
+        if (shouldCheckCheetos && isAppealOrApplication) {
+            const req = require('unirest');
+            const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
+            const resp = await req.get(url).headers({
+                'Auth-Key': client.config.tokens.cheetosToken,
+                // Per provider requirement, this should be the private/staff guild ID
+                'DiscordID': String(client.config.channel_ids?.staff_guild_id || '')
+            });
+
+            // Parse plaintext response into records
+            const text = resp && resp.body ? (typeof resp.body === 'string' ? resp.body : (resp.body.toString ? resp.body.toString() : '')) : '';
+            const lines = text.split(/\r?\n/);
+            const records = [];
+            let current = null;
+            for (const raw of lines) {
+                const line = (raw || '').trimEnd();
+                if (!line) continue;
+                const idx = line.indexOf(':');
+                if (idx === -1) continue;
+                const key = line.slice(0, idx).trim();
+                const value = line.slice(idx + 1).trim();
+                if (key.toLowerCase() === 'id') {
+                    if (current && Object.keys(current).length) records.push(current);
+                    current = {};
+                }
+                if (!current) current = {};
+                current[key] = value;
+            }
+            if (current && Object.keys(current).length) records.push(current);
+
+            const count = records.length;
+
+            // Compute LTS from LastGuildScan only (epoch seconds)
+            let lastEpoch = null;
+            for (const r of records) {
+                const lg = r['LastGuildScan'] ? parseInt(r['LastGuildScan'], 10) : null;
+                if (Number.isFinite(lg) && lg > 0 && (!lastEpoch || lg > lastEpoch)) lastEpoch = lg;
+            }
+            let ltsStr = 'N/A';
+            if (lastEpoch && Number.isFinite(lastEpoch)) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const diffSec = Math.max(0, nowSec - lastEpoch);
+                const diffHours = Math.floor(diffSec / 3600);
+                if (diffHours >= 24) {
+                    const d = Math.floor(diffHours / 24);
+                    ltsStr = `${d}d`;
+                } else {
+                    ltsStr = `${diffHours}h`;
+                }
+            }
+
+            // WR = how many distinct discords they have roles in
+            // Approximate by counting records where Roles is non-empty
+            let wr = 0;
+            for (const r of records) {
+                const rolesVal = (r['Roles'] || '').trim();
+                if (rolesVal && rolesVal.length > 0) wr++;
+            }
+
+            const cheetosEmbed = new Discord.MessageEmbed()
+                .setColor(client.config.bot_settings.main_color)
+                .setTitle('Cheetos Check')
+                .setDescription(count > 0 ? `Cheetos Check: ${count} CC • LTS: ${ltsStr} • ${wr} WR` : `Cheetos Check: Clean`);
+            await ticketChannel.send({ embeds: [cheetosEmbed] });
+        }
+    } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
+
     // Skip creating staff thread for internal tickets
     if (!questionFile.internal) try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);

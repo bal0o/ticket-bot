@@ -981,15 +981,18 @@ module.exports = async function (client, interaction) {
                 }
             }
 
-            // Get all channels from the staff guild
-            const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
-            const allChannels = staffGuild.channels.cache;
+            // Enforce per-user ticket limit only for public tickets
+            if (!questionFilesystem.internal) {
+			// Get all channels from the staff guild
+			const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+			const allChannels = staffGuild.channels.cache;
 
-            let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
-            if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
-                let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+			let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
+			if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
+				let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 				return;
 		}
+            }
 
 			client.cooldown.add(interaction.member.user.id);
 			client.blocked_users.add(interaction.member.user.id);

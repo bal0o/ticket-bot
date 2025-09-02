@@ -22,6 +22,7 @@
         "role_ids_anonymous_cmd": [],
 "default_admin_role_id": "",
 "ticket_blacklisted_role_id": ""
+    ,"role_ids_checkcc_cmd": []
 },
 
 "channel_ids": {
@@ -31,6 +32,7 @@
 "feedback_channel": "",
 "post_embed_channel_id": "",
 "internal_post_embed_channel_id": ""
+    ,"checkcc_channel_id": ""
 },
 
 "linking_settings": {
