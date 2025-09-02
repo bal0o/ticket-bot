@@ -2,6 +2,7 @@ const Discord = require("discord.js");
 const { SlashCommandBuilder } = require("@discordjs/builders");
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
+const axios = require('axios');
 
 function parseCheetosResponse(text) {
     const raw = String(text || "").trim();
@@ -78,6 +79,65 @@ function summarizeRecords(records) {
         if (rolesVal && rolesVal.length > 0) wr++;
     }
     return { count, ltsStr, wr };
+}
+
+async function resolveSteamId(client, discordId) {
+    try {
+        const linking = client.config?.linking_settings?.linkingSystem;
+        const secret = client.config?.tokens?.Linking_System_API_Key_Or_Secret;
+        if (!linking) return null;
+        const unirest = require('unirest');
+        if (linking === 1) {
+            const base = client.config?.linking_settings?.verify_link;
+            if (!base || !secret) return null;
+            const r = await unirest.get(`${base}/api.php?action=findByDiscord&id=${discordId}&secret=${secret}`);
+            const b = r && r.body ? (r.body.toString ? r.body.toString() : String(r.body)) : '';
+            if (b && /^7656119/.test(b)) return b.trim();
+        } else if (linking === 2) {
+            if (!secret) return null;
+            const r = await unirest.get(`https://api.steamcord.io/players?discordId=${discordId}`).headers({ 'Authorization': `Bearer ${secret}`, 'Content-Type': 'application/json' });
+            const id = r?.body?.[0]?.steamAccounts?.[0]?.steamId;
+            if (id && String(id).startsWith('7656119')) return String(id);
+        } else if (linking === 3) {
+            if (!secret) return null;
+            const r = await unirest.get(`https://link.platformsync.io/api.php?id=${discordId}&token=${secret}`);
+            if (r?.body?.linked === true && r?.body?.steam_id && String(r.body.steam_id).startsWith('7656119')) return String(r.body.steam_id);
+        }
+    } catch (_) {}
+    return null;
+}
+
+async function fetchBattlemetricsInfo(client, steamId) {
+    try {
+        const bmToken = client.config?.tokens?.battlemetricsToken;
+        if (!bmToken || !steamId) return null;
+        const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
+        const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${steamId}&include=identifier,server`;
+        const res = await axios.get(playerUrl, { headers, timeout: 10000 });
+        if (!res?.data?.data?.length) return null;
+        const player = res.data.data[0];
+        const playerId = player.id;
+        let name = null, mostRecentServer = null, mostRecentServerId = null, timePlayed = null, firstSeen = null, lastSeen = null;
+        if (res.data.included) {
+            for (const inc of res.data.included) {
+                if (inc.type === 'identifier' && inc.attributes?.type === 'name' && !name) {
+                    name = inc.attributes.identifier;
+                }
+            }
+            if (player.relationships?.servers?.data?.length) {
+                const servers = player.relationships.servers.data.slice().sort((a, b) => String(b.meta?.lastSeen || '').localeCompare(String(a.meta?.lastSeen || '')));
+                const recent = servers[0];
+                const sid = recent?.id;
+                const sinfo = res.data.included.find(inc => inc.type === 'server' && inc.id === sid);
+                mostRecentServer = sinfo?.attributes?.name || null;
+                mostRecentServerId = sid || null;
+                timePlayed = recent?.meta?.timePlayed || null;
+                firstSeen = recent?.meta?.firstSeen || null;
+                lastSeen = recent?.meta?.lastSeen || null;
+            }
+        }
+        return { playerId, name, mostRecentServer, mostRecentServerId, timePlayed, firstSeen, lastSeen };
+    } catch (_) { return null; }
 }
 
 module.exports = {
@@ -188,11 +248,25 @@ module.exports = {
                 detail = 'No records found.';
             }
 
+            // Enrich with SteamID and BattleMetrics
+            const steamId = await resolveSteamId(client, targetId);
+            const bm = steamId ? await fetchBattlemetricsInfo(client, steamId) : null;
+
             const embed = new Discord.MessageEmbed()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('Cheetos Scan')
                 .setDescription(summary)
                 .addFields({ name: 'Target', value: `UserID: ${targetId}` });
+
+            if (steamId) {
+                embed.addFields({ name: 'Steam', value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})`, inline: true });
+            }
+            if (bm) {
+                embed.addFields({ name: 'BM Name', value: bm.name ? `[${bm.name}](https://www.battlemetrics.com/rcon/players/${bm.playerId})` : `[Player](${`https://www.battlemetrics.com/rcon/players/${bm.playerId}`})`, inline: true });
+                if (bm.mostRecentServer && bm.mostRecentServerId) {
+                    embed.addFields({ name: 'BM Server', value: `[${bm.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bm.mostRecentServerId})`, inline: true });
+                }
+            }
 
             // Add per-record fields (formatted per requirements)
             for (let i = 0; i < shown.length; i++) {
