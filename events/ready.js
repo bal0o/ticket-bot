@@ -20,9 +20,7 @@ module.exports = async function (client, message) {
     // Initialize the ticket status
     await func.updateTicketStatus(client);
     
-    // Wait a bit for the guild to fully load before initializing metrics
-    console.log('[Ready] Waiting 15 seconds for guild to fully load...');
-    await new Promise(resolve => setTimeout(resolve, 15000));
+    // Remove startup delay; proceed immediately
     
     // Warm the member cache for the staff guild so role membership is accurate
     try {

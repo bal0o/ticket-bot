@@ -343,14 +343,13 @@ try {
     // Post Cheetos check in the main ticket channel (not in staff thread)
     try {
         const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
-        const isAppealOrApplication = (ticketType || "").toLowerCase().includes('appeal') || (ticketType || "").toLowerCase().includes('application');
-        if (shouldCheckCheetos && isAppealOrApplication) {
+        if (shouldCheckCheetos) {
             const req = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
             const resp = await req.get(url).headers({
                 'Auth-Key': client.config.tokens.cheetosToken,
-                // Per provider requirement, this should be the private/staff guild ID
-                'DiscordID': String(client.config.channel_ids?.staff_guild_id || '')
+                // Use configured requester ID if set, else bot ID
+                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')
             });
 
             // Parse plaintext response into records

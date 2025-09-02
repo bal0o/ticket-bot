@@ -9,7 +9,8 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    sqlite
+    sqlite \
+    curl
 
 # Copy package files
 COPY package*.json ./
@@ -31,8 +32,8 @@ USER node
 EXPOSE 3050
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3050/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
+    CMD curl -fsS http://localhost:3050/health || exit 1
 
 # Start the application
 CMD ["node", "index.js"]
