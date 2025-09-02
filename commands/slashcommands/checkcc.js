@@ -149,7 +149,7 @@ module.exports = {
                 if (n > 0) return Math.floor(n);
                 return null;
             };
-            const humanTimePair = (n) => n ? `<t:${n}:R> (<t:${n}:f>)` : 'N/A';
+            const humanTimePair = (n) => n ? `<t:${n}:F> / <t:${n}:R>` : 'N/A';
 
             // Build embed field table per record (limit to first 10 to respect embed limits)
             const maxFields = 10;
@@ -186,7 +186,7 @@ module.exports = {
                 .setDescription(summary)
                 .addFields({ name: 'Target', value: `UserID: ${targetId}` });
 
-            // Add per-record fields
+            // Add per-record fields (formatted per requirements)
             for (let i = 0; i < shown.length; i++) {
                 const r = shown[i];
                 const fsUnix = toUnixSeconds(r.FirstSeen ?? r['FirstSeen']);
@@ -194,14 +194,13 @@ module.exports = {
                 const lgUnix = toUnixSeconds(r.LastGuildScan ?? r['LastGuildScan']);
                 const roles = String(r.Roles ?? '').slice(0, 500);
                 const notesText = Array.isArray(r.Notes) ? (r.Notes.length ? JSON.stringify(r.Notes) : '{}') : (r.Notes || '{}');
-                const name = `#${i + 1} ${r.Name || r.Username || 'Record'}`.slice(0, 256);
+                const name = `${r.Name || r.Username || 'Record'}`.slice(0, 256);
                 const value = [
-                    `ID: ${r.ID ?? ''}`,
-                    `FirstSeen: ${humanTimePair(fsUnix)}`,
-                    `Added: ${humanTimePair(taUnix)}`,
-                    `Last Scan: ${humanTimePair(lgUnix)}`,
                     `Roles: ${roles || 'N/A'}`,
-                    `Notes: ${notesText}`
+                    `Username: ${r.Username ?? ''}`,
+                    `Joined Discord Server: ${humanTimePair(taUnix)}`,
+                    `Last Time Seen In Guild: ${humanTimePair(fsUnix)}`,
+                    `Last Time Guild Scanned: ${humanTimePair(lgUnix)}`
                 ].join('\n').slice(0, 1024);
                 embed.addFields({ name, value, inline: false });
             }
