@@ -134,7 +134,7 @@ module.exports = {
             if (client.config && client.config.debug) {
                 console.log(`[Cheetos:/checkcc] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`);
             }
-            const records = parseCheetosPlaintext(text);
+            const records = parseCheetosResponse(text);
             const { count, ltsStr, wr } = summarizeRecords(records);
 
             // Compose summary (same format as ticket)
