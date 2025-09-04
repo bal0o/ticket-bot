@@ -1,0 +1,27 @@
+{
+    "questions": [
+        "Summarize the bug.",
+        "Detailed steps to reproduce.",
+        "What did you expect to happen?",
+        "What actually happened?",
+        "Any additional logs, screenshots, or context?"
+    ],
+    "pre-message": "Bug Report ticket. Please include steps to reproduce and expected/actual results.",
+    "post-message": "Thanks. We will triage this bug and log for the dev team to investigate.",
+    "transcript-channel": "",
+    "ticket-category": "",
+    "access-role-id": [],
+    "ping-role-id": [],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": false,
+    "display-user-discord-info": true,
+    "needVerified": false,
+    "allow_feedback": false,
+    "open-as-ticket": true,
+    "internal": true,
+    "max-active-tickets": 10,
+    "send_close_dm": true
+}
+
+

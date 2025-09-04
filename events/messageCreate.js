@@ -9,6 +9,28 @@ const lang = require("../content/handler/lang.json");
 // Track users who are in the ticket selection process
 const usersSelectingTicket = new Set();
 
+// Cache for webhooks to avoid repeated creation attempts
+const webhookCache = new Map();
+
+// Helper function to clean up invalid webhooks from cache
+function clearWebhookCache(channelId) {
+    webhookCache.delete(channelId);
+    console.log(`Cleared webhook cache for channel ${channelId}`);
+}
+
+// Helper function to validate webhook before use
+async function validateWebhook(webhook, channel) {
+    try {
+        // Try to fetch the webhook to see if it's still valid
+        await webhook.fetch();
+        return true;
+    } catch (error) {
+        console.log(`Webhook validation failed for channel ${channel.id}, clearing cache`);
+        clearWebhookCache(channel.id);
+        return false;
+    }
+}
+
 module.exports = async function (client, message) {
     try {
         // Ignore messages from users who are in the selection process
@@ -266,19 +288,83 @@ module.exports = async function (client, message) {
                         }
                     }
 
-                    // Send all files inline in a single DM
+                    // Check total file size and chunk if necessary
                     const filesToSend = [];
+                    let totalSize = 0;
+                    const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25MB total limit (Discord's limit is 25MB per message)
+                    
                     for (let attachment of message.attachments) {
+                        const fileSize = attachment[1].size || 0;
+                        if (totalSize + fileSize > MAX_TOTAL_SIZE) {
+                            // Send current batch first
+                            if (filesToSend.length > 0) {
+                                try {
+                                    const filesSent = await user.send({ files: filesToSend });
+                                    if (filesSent && filesSent.id) {
+                                        staffForward.filesMessageId = filesSent.id;
+                                        staffForward.dmChannelId = filesSent.channel?.id || staffForward.dmChannelId;
+                                    }
+                                } catch (err) {
+                                    console.error('Error sending file batch:', err);
+                                    await message.reply("Some files were too large to send. Please try sending them individually.").catch(() => {});
+                                }
+                            }
+                            
+                            // Start new batch
+                            filesToSend.length = 0;
+                            totalSize = 0;
+                        }
+                        
                         filesToSend.push({ attachment: attachment[1].attachment, name: attachment[1].name });
+                        totalSize += fileSize;
                     }
-                    const filesSent = await user.send({ files: filesToSend });
-                    if (filesSent && filesSent.id) {
-                        staffForward.filesMessageId = filesSent.id;
-                        staffForward.dmChannelId = filesSent.channel?.id || staffForward.dmChannelId;
+                    
+                    // Send remaining files
+                    if (filesToSend.length > 0) {
+                        try {
+                            const filesSent = await user.send({ files: filesToSend });
+                            if (filesSent && filesSent.id) {
+                                staffForward.filesMessageId = filesSent.id;
+                                staffForward.dmChannelId = filesSent.channel?.id || staffForward.dmChannelId;
+                            }
+                        } catch (err) {
+                            if (err.code === 40005) {
+                                // Request entity too large - try sending files individually
+                                console.log(`Request entity too large, attempting to send files individually for user ${user.id}`);
+                                
+                                let successCount = 0;
+                                for (const file of filesToSend) {
+                                    try {
+                                        const individualSent = await user.send({ files: [file] });
+                                        if (individualSent && individualSent.id) {
+                                            successCount++;
+                                            staffForward.dmChannelId = individualSent.channel?.id || staffForward.dmChannelId;
+                                        }
+                                    } catch (individualErr) {
+                                        console.error(`Failed to send individual file ${file.name}:`, individualErr);
+                                        if (individualErr.code === 40005) {
+                                            await message.reply(`File \`${file.name}\` is too large to send. Discord has a 25MB file size limit.`).catch(() => {});
+                                        }
+                                    }
+                                }
+                                
+                                if (successCount > 0) {
+                                    await message.reply(`Sent ${successCount} out of ${filesToSend.length} files. Some files were too large.`).catch(() => {});
+                                } else {
+                                    await message.reply("All files were too large to send. Discord has a 25MB file size limit.").catch(() => {});
+                                }
+                            } else {
+                                throw err; // Re-throw non-size-related errors
+                            }
+                        }
                     }
                 } catch (err) {
-                    func.handle_errors(err, client, `messageCreate.js`, null);
-                    await message.reply("There was an error sending your attachment. Please try again.").catch(() => {});
+                    if (err.code === 40005) {
+                        await message.reply("The files you're trying to send are too large. Discord has a 25MB file size limit per file and 25MB total per message.").catch(() => {});
+                    } else {
+                        func.handle_errors(err, client, `messageCreate.js`, null);
+                        await message.reply("There was an error sending your attachment. Please try again.").catch(() => {});
+                    }
                 }
             }
             
@@ -460,12 +546,50 @@ async function processTicketMessage(message, channel, client) {
         return replyNoHere.replace(`<@`, `<@ `)
     }
 
-    const webhooks = await channel.fetchWebhooks();
-    let webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
+    // Try to get cached webhook first
+    let webhook = webhookCache.get(channel.id);
+    
     if (!webhook) {
-        webhook = await channel.createWebhook("Ticket Webhook", {
-            avatar: message.author.displayAvatarURL()
-        });
+        try {
+            // Check if bot can manage webhooks
+            if (!channel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+                throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
+            }
+            
+            const webhooks = await channel.fetchWebhooks();
+            webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
+            
+            if (!webhook) {
+                webhook = await channel.createWebhook("Ticket Webhook", {
+                    avatar: message.author.displayAvatarURL()
+                });
+            }
+            
+            // Cache the webhook for future use
+            webhookCache.set(channel.id, webhook);
+            
+        } catch (webhookError) {
+            console.error(`Failed to create/fetch webhook in channel ${channel.id}:`, webhookError);
+            
+            // Fallback: send message directly to channel
+            if (message.content) {
+                await channel.send({
+                    content: `**${message.author.username}:** ${message.content}`,
+                    files: filesToSend
+                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+            } else if (filesToSend.length > 0) {
+                await channel.send({
+                    content: `**${message.author.username}** sent an attachment:`,
+                    files: filesToSend
+                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+            }
+            return; // Exit early since we handled the message
+        }
+    } else {
+        // Validate cached webhook before use
+        if (!(await validateWebhook(webhook, channel))) {
+            webhook = null; // This will trigger webhook recreation
+        }
     }
     
     // For application channels, use plain username (no prefix needed)
@@ -480,29 +604,67 @@ async function processTicketMessage(message, channel, client) {
     const textMessageIds = [];
 
     if (hasContent && message.content.length <= 1900) {
-        combinedMessage = await webhook.send({
-            content: sanitize(messageContent),
-            username: username,
-            avatarURL: message.author.displayAvatarURL(),
-            files: filesToSend
-        }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
-    } else {
-        if (filesToSend.length > 0) {
-            filesMessage = await webhook.send({
+        try {
+            combinedMessage = await webhook.send({
+                content: sanitize(messageContent),
                 username: username,
                 avatarURL: message.author.displayAvatarURL(),
                 files: filesToSend
-            }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
+            });
+        } catch (webhookSendError) {
+            console.error(`Failed to send webhook message in channel ${channel.id}:`, webhookSendError);
+            
+            // Fallback to direct channel message
+            await channel.send({
+                content: `**${message.author.username}:** ${message.content}`,
+                files: filesToSend
+            }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+            
+            // Clear the cached webhook as it might be invalid
+            clearWebhookCache(channel.id);
+        }
+    } else {
+        if (filesToSend.length > 0) {
+            try {
+                filesMessage = await webhook.send({
+                    username: username,
+                    avatarURL: message.author.displayAvatarURL(),
+                    files: filesToSend
+                });
+            } catch (webhookSendError) {
+                console.error(`Failed to send webhook files in channel ${channel.id}:`, webhookSendError);
+                
+                // Fallback to direct channel message
+                await channel.send({
+                    content: `**${message.author.username}** sent an attachment:`,
+                    files: filesToSend
+                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+                
+                // Clear the cached webhook as it might be invalid
+                clearWebhookCache(channel.id);
+            }
         }
         if (hasContent) {
             for (let i = 0; i < messageContent.length; i += 1900) {
                 const toSend = messageContent.substring(i, Math.min(messageContent.length, i + 1900));
-                const sent = await webhook.send({
-                    content: sanitize(toSend),
-                    username: username,
-                    avatarURL: message.author.displayAvatarURL()
-                }).catch((err) => func.handle_errors(err, client, `messageCreate.js`, null));
-                if (sent && sent.id) textMessageIds.push(sent.id);
+                try {
+                    const sent = await webhook.send({
+                        content: sanitize(toSend),
+                        username: username,
+                        avatarURL: message.author.displayAvatarURL()
+                    });
+                    if (sent && sent.id) textMessageIds.push(sent.id);
+                } catch (webhookSendError) {
+                    console.error(`Failed to send webhook text chunk in channel ${channel.id}:`, webhookSendError);
+                    
+                    // Fallback to direct channel message for this chunk
+                    await channel.send({
+                        content: `**${message.author.username}:** ${toSend}`
+                    }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+                    
+                    // Clear the cached webhook as it might be invalid
+                    clearWebhookCache(channel.id);
+                }
             }
         }
     }

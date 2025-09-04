@@ -48,6 +48,35 @@
 			"unique_button_identifier": "button4",
 			"button_type": "SUCCESS",
 			"button_emoji": "🗝️"
+		},
+
+		"Admin Escalation": {
+			"abbreviation": "ADMESC",
+			"question_file": "adminescalation.json",
+			"unique_button_identifier": "admin_escalation",
+			"button_type": "DANGER",
+			"button_emoji": "🛡️"
+		},
+		"Unruly User": {
+			"abbreviation": "UNUSR",
+			"question_file": "unrulyuser.json",
+			"unique_button_identifier": "unruly_user",
+			"button_type": "DANGER",
+			"button_emoji": "🚨"
+		},
+		"Map Issue": {
+			"abbreviation": "MAP",
+			"question_file": "mapissue.json",
+			"unique_button_identifier": "map_issue",
+			"button_type": "SECONDARY",
+			"button_emoji": "🗺️"
+		},
+		"Bug Report": {
+			"abbreviation": "BUG",
+			"question_file": "bugreport.json",
+			"unique_button_identifier": "bug_report",
+			"button_type": "PRIMARY",
+			"button_emoji": "🐞"
 		}
 	}
 }

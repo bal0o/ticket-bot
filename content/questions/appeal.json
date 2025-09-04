@@ -16,7 +16,7 @@
 	"access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745"],
 	"ping-role-id": ["1368696874177134745"],
     "anonymous-only-replies": true,
-	"check-cheetos": false,
+	"check-cheetos": true,
 	"check-steamid": true,
 	"display-user-discord-info": true,
 	"needVerified": true,

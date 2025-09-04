@@ -1,5 +1,17 @@
 const Discord = require("discord.js");
-const messageId = require("../config/messageid.json");
+const path = require("path");
+let messageId = { messageId: "", internalMessageId: "" };
+try {
+    messageId = require("../config/messageid.json");
+    if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
+    if (messageId.messageId === undefined) messageId.messageId = "";
+    if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
+} catch (_) {
+    try {
+        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+        fs.writeFileSync(msgPath, JSON.stringify(messageId));
+    } catch (__) {}
+}
 const fs = require("fs");
 const func = require("../utils/functions.js");
 const { createDB } = require('../utils/quickdb')
@@ -8,9 +20,7 @@ module.exports = async function (client, message) {
     // Initialize the ticket status
     await func.updateTicketStatus(client);
     
-    // Wait a bit for the guild to fully load before initializing metrics
-    console.log('[Ready] Waiting 15 seconds for guild to fully load...');
-    await new Promise(resolve => setTimeout(resolve, 15000));
+    // Remove startup delay; proceed immediately
     
     // Warm the member cache for the staff guild so role membership is accurate
     try {
@@ -73,6 +83,7 @@ module.exports = async function (client, message) {
                 if (!handlerData.options[`${keys[i]}`]) continue;
 
                 let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
+                if (questionFilesystem.internal) continue;
 
                 // Skip validation for question files that don't have button content structure
                 if (questionFilesystem.active_ticket_button_content && 
@@ -126,6 +137,7 @@ module.exports = async function (client, message) {
                     if (!handlerData.options[`${keys[i]}`]) continue;
 
                     let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
+                    if (questionFilesystem.internal) continue;
 
                     // Skip validation for question files that don't have button content structure
                     if (questionFilesystem.active_ticket_button_content && 
@@ -232,4 +244,81 @@ module.exports = async function (client, message) {
     if (client.config.bot_settings.keep_embed_channel_clean === true) {
     deleteMessagesInTicketEmbedChannel()
     };
+    
+    // Post Internal Ticket Embed (question files marked internal=true)
+    try {
+        const internalChannelId = client.config.channel_ids.internal_post_embed_channel_id;
+        if (internalChannelId) {
+            const internalChannel = client.channels.cache.get(internalChannelId);
+            if (!internalChannel) {
+                func.handle_errors(null, client, `ready.js`, `Could not find the 'internal_post_embed_channel_id' for internal ticket creation.`)
+            } else {
+                let internalEmbedMessage = await internalChannel.messages.fetch(messageId.internalMessageId).catch((e) => {
+                    if (e.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;
+                });
+                if (internalEmbedMessage == undefined) {
+                    const handlerRaw = require("../content/handler/handler.json");
+                    const handlerData = require("../content/handler/options.json");
+                    const keys = Object.keys(handlerData.options || {});
+                    const internalKeys = keys.filter(k => {
+                        try { const qf = require(`../content/questions/${handlerData.options[k]?.question_file}`); return !!qf.internal; } catch(_) { return false; }
+                    });
+                    if (internalKeys.length > 0) {
+                        const rowOne = new Discord.MessageActionRow();
+                        const rowTwo = new Discord.MessageActionRow();
+                        let TwoRow = internalKeys.length > 5 ? 1 : 0;
+                        let usedCustoms = "";
+                        for (let i = 0; i < Math.min(5, internalKeys.length); i++) {
+                            const key = internalKeys[i];
+                            const opt = handlerData.options[key];
+                            if (!opt || !opt.unique_button_identifier) continue;
+                            const customId = opt.unique_button_identifier.toLowerCase().replace(/ /g, '');
+                            if (usedCustoms.includes(customId)) continue;
+                            usedCustoms = usedCustoms + ` - ` + customId;
+                            const btn = new Discord.MessageButton()
+                                .setCustomId(customId)
+                                .setLabel(key)
+                                .setStyle((opt.button_type || 'PRIMARY').toUpperCase());
+                            if (opt.button_emoji) btn.setEmoji(opt.button_emoji);
+                            rowOne.addComponents(btn);
+                        }
+                        if (TwoRow) {
+                            for (let i = 5; i < Math.min(10, internalKeys.length); i++) {
+                                const key = internalKeys[i];
+                                const opt = handlerData.options[key];
+                                if (!opt || !opt.unique_button_identifier) continue;
+                                const customId = opt.unique_button_identifier.toLowerCase().replace(/ /g, '');
+                                if (usedCustoms.includes(customId)) continue;
+                                usedCustoms = usedCustoms + ` - ` + customId;
+                                const btn = new Discord.MessageButton()
+                                    .setCustomId(customId)
+                                    .setLabel(key)
+                                    .setStyle((opt.button_type || 'PRIMARY').toUpperCase());
+                                if (opt.button_emoji) btn.setEmoji(opt.button_emoji);
+                                rowTwo.addComponents(btn);
+                            }
+                        }
+                        const embed = new Discord.MessageEmbed()
+                            .setTitle('Internal Tickets')
+                            .setColor(client.config.bot_settings.main_color)
+                            .setDescription(require("../content/handler/handler.json").description)
+                            .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()});
+                        if (TwoRow) {
+                            internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: [rowOne, rowTwo] }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
+                        } else {
+                            internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: [rowOne] }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
+                        }
+                        try {
+                            messageId.internalMessageId = internalEmbedMessage.id;
+                            fs.writeFileSync('./config/messageid.json', JSON.stringify(messageId), (err) => {
+                                if (err) func.handle_errors(err, client, `ready.js`, null);
+                            });
+                        } catch (_) {}
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        func.handle_errors(e, client, `ready.js`, `Failed to post internal embed`)
+    }
 };

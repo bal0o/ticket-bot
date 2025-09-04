@@ -1,0 +1,26 @@
+{
+    "questions": [
+        "Which server/map is affected?",
+        "Describe the map issue in detail.",
+        "Steps to reproduce (if applicable).",
+        "Please attach screenshots or coordinates if available."
+    ],
+    "pre-message": "Map Issue ticket. Provide steps and screenshots where possible.",
+    "post-message": "Thanks. The team will investigate.",
+    "transcript-channel": "",
+    "ticket-category": "",
+    "access-role-id": [],
+    "ping-role-id": [],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": false,
+    "display-user-discord-info": true,
+    "needVerified": false,
+    "allow_feedback": false,
+    "open-as-ticket": true,
+    "internal": true,
+    "max-active-tickets": 10,
+    "send_close_dm": false
+}
+
+

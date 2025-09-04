@@ -317,7 +317,8 @@ module.exports = async function (client, interaction) {
                 client.claims.set(claimKey, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber });
                 try { await db.set(`Claims.${interaction.channel.id}`, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber }); } catch (_) {}
                 try { 
-					metrics.ticketClaimed(ticketType); 
+					const scopeClaim = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[displayType || ticketType].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+					metrics.ticketClaimed(ticketType, scopeClaim);
 					metrics.staffAction('claim', ticketType, interaction.user.id, interaction.user.username); 
 				} catch (_) {}
 
@@ -846,10 +847,26 @@ module.exports = async function (client, interaction) {
         } else {
             // Move the cooldown check to only run for new ticket creation
             if (!["moveticket", "selectCategory", "closeTicketModal", "CustomResponseModal"].includes(interaction.customId)) {
-                await interaction.deferReply({ ephemeral: true }).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                // Guard against double-defer to avoid INTERACTION_ALREADY_REPLIED
+                if (!interaction.deferred && !interaction.replied) {
+                    try {
+                        await interaction.deferReply({ ephemeral: true });
+                    } catch (err) {
+                        // Only log unexpected errors
+                        const msg = (err && (err.code || err.message || err.name || "")).toString();
+                        if (!/INTERACTION_ALREADY_REPLIED/i.test(msg)) {
+                            func.handle_errors(err, client, `interactionCreate.js`, null);
+                        }
+                    }
+                }
 
                 if (client.blocked_users.has(interaction.member.user.id) || client.cooldown.has(interaction.member.user.id)) {
-                    await interaction.editReply({content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    const payload = { content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", ephemeral: true };
+                    if (interaction.deferred) {
+                        await interaction.editReply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    } else {
+                        await interaction.reply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    }
                     return;
                 }
             }
@@ -980,15 +997,18 @@ module.exports = async function (client, interaction) {
                 }
             }
 
-            // Get all channels from the staff guild
-            const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
-            const allChannels = staffGuild.channels.cache;
+            // Enforce per-user ticket limit only for public tickets
+            if (!questionFilesystem.internal) {
+			// Get all channels from the staff guild
+			const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+			const allChannels = staffGuild.channels.cache;
 
-            let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
-            if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
-                let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+			let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
+			if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
+				let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 				return;
 		}
+            }
 
 			client.cooldown.add(interaction.member.user.id);
 			client.blocked_users.add(interaction.member.user.id);
@@ -1068,8 +1088,9 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Accept Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
-							metrics.ticketClosed(ticketType, user.id); 
-							metrics.staffAction('accept', ticketType, user.id, user.username); 
+							const scopeAccept = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+							metrics.ticketClosed(ticketType, user.id, user.username, scopeAccept); 
+							metrics.staffAction('accept', ticketType, user.id, user.username, scopeAccept); 
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
@@ -1126,8 +1147,9 @@ module.exports = async function (client, interaction) {
                         await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Deny Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
-							metrics.ticketClosed(ticketType, user.id); 
-							metrics.staffAction('deny', ticketType, user.id, user.username); 
+							const scopeDeny = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
+							metrics.ticketClosed(ticketType, user.id, user.username, scopeDeny); 
+							metrics.staffAction('deny', ticketType, user.id, user.username, scopeDeny); 
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					

@@ -4,7 +4,19 @@ const { createDB } = require('./quickdb')
 const db = createDB();
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
-const messageid = require("../config/messageid.json");
+const path = require("path");
+let messageid = { messageId: "", internalMessageId: "" };
+try {
+    messageid = require("../config/messageid.json");
+    if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
+    if (messageid.messageId === undefined) messageid.messageId = "";
+    if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
+} catch (_) {
+    try {
+        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+        fs.writeFileSync(msgPath, JSON.stringify(messageid));
+    } catch (__) {}
+}
 const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
@@ -247,16 +259,33 @@ if (typesRequireServer.includes(ticketType.toLowerCase())) {
     channelName = `${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}`;
 }
 
+// Validate category before creation; fall back to parent of post channel or guild root
+let parentId = null;
+try {
+    const desired = ticketCategory ? staffGuild.channels.cache.get(ticketCategory) : null;
+    if (desired && desired.type === 'GUILD_CATEGORY') {
+        parentId = desired.id;
+    } else if (postchannelCategory) {
+        const p = staffGuild.channels.cache.get(postchannelCategory);
+        if (p && p.type === 'GUILD_CATEGORY') parentId = p.id;
+    }
+    if (!parentId) {
+        func.handle_errors(null, client, 'functions.js', `Configured category invalid or missing for ticket type '${ticketType}'. Creating in guild root.`);
+    }
+} catch (_) { parentId = null; }
+
 let ticketChannel = await staffGuild.channels.create(channelName, {
     type: "text",
     topic: recepientMember.id,
-    parent: (ticketCategory) ? ticketCategory : postchannelCategory ||  null,
+    parent: parentId || null,
     permissionOverwrites: overwrites,
 });
 
-// DM the user with the ticket name/number
+// For public tickets, DM the user with the ticket name/number
 try {
-    await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+    if (!questionFile.internal) {
+        await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+    }
 } catch (e) {}
 
     // Build action buttons. For application tickets, only show application actions.
@@ -326,7 +355,112 @@ try {
 
     await ticketChannel.send({ embeds: [instructionEmbed] });
 
+    // Post Cheetos check in the main ticket channel (not in staff thread)
     try {
+        const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
+        if (shouldCheckCheetos) {
+            const req = require('unirest');
+            const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')}`); } catch(_) {}
+            const resp = await req.get(url).headers({
+                'Auth-Key': client.config.tokens.cheetosToken,
+                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || ''),
+                'Accept': 'text/plain',
+                'User-Agent': 'ticket-bot (Discord.js)'
+            });
+
+            // Parse plaintext response into records
+            const raw = (resp && (resp.raw_body || resp.body)) || '';
+            const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`); } catch(_) {}
+            // Try JSON first
+            let records = [];
+            try {
+                if (text.trim().startsWith('[') || text.trim().startsWith('{')) {
+                    const json = JSON.parse(text);
+                    const arr = Array.isArray(json) ? json : [json];
+                    records = arr.map(x => ({
+                        ID: x.ID ?? x.id ?? x.Id ?? '',
+                        Username: x.Username ?? x.username ?? '',
+                        FirstSeen: x.FirstSeen ?? x.firstSeen ?? x.first_seen ?? '',
+                        TimestampAdded: x.TimestampAdded ?? x.timestampAdded ?? x.timestamp_added ?? '',
+                        LastGuildScan: x.LastGuildScan ?? x.lastGuildScan ?? x.last_guild_scan ?? '',
+                        Name: x.Name ?? x.name ?? '',
+                        Roles: x.Roles ?? x.roles ?? '',
+                        Notes: x.Notes ?? x.notes ?? ''
+                    }));
+                }
+            } catch(_) {}
+            if (!Array.isArray(records) || records.length === 0) {
+                const lines = text.split(/\r?\n/);
+                records = [];
+                let current = null;
+                for (const raw of lines) {
+                    const line = (raw || '').trimEnd();
+                    if (!line) continue;
+                    const idx = line.indexOf(':');
+                    if (idx === -1) continue;
+                    const key = line.slice(0, idx).trim();
+                    const value = line.slice(idx + 1).trim();
+                    if (key.toLowerCase() === 'id') {
+                        if (current && Object.keys(current).length) records.push(current);
+                        current = {};
+                    }
+                    if (!current) current = {};
+                    current[key] = value;
+                }
+                if (current && Object.keys(current).length) records.push(current);
+            }
+
+            const count = records.length;
+
+            // Compute LTS from Last Time Seen In Guild (TimestampAdded) per requirements
+            let lastEpoch = null;
+            for (const r of records) {
+                const tsRaw = r['TimestampAdded'] ?? r.TimestampAdded;
+                const ts = tsRaw !== undefined && tsRaw !== null ? parseInt(String(tsRaw), 10) : null;
+                if (Number.isFinite(ts) && ts > 0 && (!lastEpoch || ts > lastEpoch)) lastEpoch = ts;
+            }
+            // Short age helper: h/d/w/m/y
+            const toShortAge = (sec) => {
+                const s = Math.max(0, sec|0);
+                const h = Math.floor(s / 3600);
+                if (h < 24) return `${h}h`;
+                const d = Math.floor(h / 24);
+                if (d < 7) return `${d}d`;
+                const w = Math.floor(d / 7);
+                if (w < 4) return `${w}w`;
+                const m = Math.floor(d / 30);
+                if (m < 12) return `${m}m`;
+                const y = Math.floor(d / 365);
+                return `${y}y`;
+            };
+            let ltsStr = 'N/A';
+            if (lastEpoch && Number.isFinite(lastEpoch)) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const diffSec = Math.max(0, nowSec - lastEpoch);
+                ltsStr = toShortAge(diffSec);
+            }
+
+            // WR = how many distinct discords they have roles in
+            // Approximate by counting records where Roles is non-empty
+            let wr = 0;
+            for (const r of records) {
+                const rolesVal = (r['Roles'] || '').trim();
+                if (rolesVal && rolesVal.length > 0) wr++;
+            }
+            try { if (client.config && client.config.debug) console.log(`[Cheetos] Parsed count=${count} LTS=${ltsStr} WR=${wr}`); } catch(_) {}
+
+            const cheetosEmbed = new Discord.MessageEmbed()
+                .setColor(client.config.bot_settings.main_color)
+                .setTitle('Cheetos Check')
+                .setDescription(count > 0 ? `Result: ${count} CC LTS ${ltsStr} ${wr} WR` : `Cheetos Check: Clean`);
+            await ticketChannel.send({ embeds: [cheetosEmbed] });
+        }
+    } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
+
+    // Skip creating staff thread for internal tickets
+    if (!questionFile.internal) try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         // Create as public thread first so we can add role permissions
         const thread = await ticketChannel.threads.create({
@@ -470,7 +604,16 @@ try {
     }
 
 
-    if (interaction.message.id != messageid.messageId) await interaction.message.delete().catch(e => {func.handle_errors(e, client, `functions.js`, null)});
+    try {
+        const protectedIds = [];
+        if (messageid && messageid.messageId) protectedIds.push(String(messageid.messageId));
+        if (messageid && messageid.internalMessageId) protectedIds.push(String(messageid.internalMessageId));
+        const triggerId = String(interaction?.message?.id || "");
+        // Never delete the public or internal embed messages
+        if (triggerId && !protectedIds.includes(triggerId)) {
+            await interaction.message.delete().catch(e => { func.handle_errors(e, client, `functions.js`, null) });
+        }
+    } catch (_) {}
     
     if (administratorMember) {
         await func.staffStats(ticketType, `openticket`, administratorMember.id);
@@ -777,7 +920,8 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     }
                 });
             } catch (_) {}
-            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID, user?.username || 'unknown');
+            const scope = typeFile && typeFile.internal ? 'internal' : 'public';
+            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID, user?.username || 'unknown', scope);
         } catch (_) {}
         // removed debug
         // DM user

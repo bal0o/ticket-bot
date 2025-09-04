@@ -55,11 +55,13 @@ module.exports.fetch = async (channel, options) => {
     if (opts.mode === 'user') {
         filtered = allMessages.filter(msg => {
             if (pinnedIds.has(msg.id)) return true; // include initial info embed
-            // Exclude the help/instruction embed and thread creation notice
-            const helpEmbed = (msg.embeds && msg.embeds[0] && (msg.embeds[0].title === 'How to Reply'));
+            // Exclude the help/instruction embed, Cheetos embed, and thread creation notice
+            const firstEmbed = (msg.embeds && msg.embeds[0]) ? msg.embeds[0] : null;
+            const helpEmbed = !!(firstEmbed && firstEmbed.title === 'How to Reply');
+            const cheetosEmbed = !!(firstEmbed && firstEmbed.title === 'Cheetos Check');
             const isThreadNotice = (typeof msg.type === 'string') && /thread/i.test(msg.type);
             const mentionsStaffChat = (typeof msg.content === 'string') && /staff-chat/i.test(msg.content);
-            return !(helpEmbed || isThreadNotice || mentionsStaffChat);
+            return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat);
         });
     } else {
         filtered = allMessages; // full/staff
