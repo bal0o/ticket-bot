@@ -605,23 +605,7 @@ async function processTicketMessage(message, channel, client) {
             }
         }
     } else {
-        // Validate cached webhook before use
-        if (!(await validateWebhook(webhook, webhookChannel))) {
-            webhook = null; // This will trigger webhook recreation
-            try {
-                const webhooks = await webhookChannel.fetchWebhooks();
-                webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
-                if (!webhook) {
-                    webhook = await webhookChannel.createWebhook("Ticket Webhook", {
-                        avatar: message.author.displayAvatarURL()
-                    });
-                }
-                webhookCache.set(webhookChannel.id, webhook);
-            } catch (recreateErr) {
-                console.error(`Failed to recreate webhook after validation in channel ${webhookChannel?.id || 'unknown'}:`, recreateErr);
-                // leave webhook as null so send attempts will retry below and fallback if needed
-            }
-        }
+        // Use cached webhook; on send failure we will clear cache and recreate
     }
     
     // For application channels, use plain username (no prefix needed)
