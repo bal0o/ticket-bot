@@ -29,26 +29,6 @@ async function validateWebhook(webhook, channel) {
         clearWebhookCache(channel.id);
         return false;
     }
-    
-    // If after validation/recreation we still don't have a webhook, fallback and exit safely
-    if (!webhook) {
-        try {
-            if (message.content) {
-                await channel.send({
-                    content: `**${message.author.username}:** ${message.content}`,
-                    files: filesToSend
-                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
-            } else if (filesToSend.length > 0) {
-                await channel.send({
-                    content: `**${message.author.username}** sent an attachment:`,
-                    files: filesToSend
-                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
-            }
-        } catch (fallbackErr) {
-            func.handle_errors(fallbackErr, client, `messageCreate.js`, null);
-        }
-        return;
-    }
 }
 
 module.exports = async function (client, message) {
@@ -566,43 +546,48 @@ async function processTicketMessage(message, channel, client) {
         return replyNoHere.replace(`<@`, `<@ `)
     }
 
-    // Try to get cached webhook first
-    let webhook = webhookCache.get(channel.id);
+    // Determine correct channel for webhooks (use parent for threads)
+    const isThread = typeof channel.isThread === 'function' ? channel.isThread() : false;
+    const webhookChannel = isThread ? channel.parent : channel;
+    const threadId = isThread ? channel.id : null;
+
+    // Try to get cached webhook first (cache by parent id if thread)
+    let webhook = webhookCache.get(webhookChannel.id);
     
     if (!webhook) {
         try {
             // Check if bot can manage webhooks
-            if (!channel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+            if (!webhookChannel || !webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
                 throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
             }
             
-            const webhooks = await channel.fetchWebhooks();
+            const webhooks = await webhookChannel.fetchWebhooks();
             webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
             
             if (!webhook) {
-                webhook = await channel.createWebhook("Ticket Webhook", {
+                webhook = await webhookChannel.createWebhook("Ticket Webhook", {
                     avatar: message.author.displayAvatarURL()
                 });
             }
             
             // Cache the webhook for future use
-            webhookCache.set(channel.id, webhook);
+            webhookCache.set(webhookChannel.id, webhook);
             
         } catch (webhookError) {
-            console.error(`Failed to create/fetch webhook in channel ${channel.id}:`, webhookError);
+            console.error(`Failed to create/fetch webhook in channel ${webhookChannel?.id || 'unknown'}:`, webhookError);
             
             // Attempt a single immediate retry to create/fetch the webhook before fallback
             try {
-                const webhooksRetry = await channel.fetchWebhooks();
+                const webhooksRetry = await webhookChannel.fetchWebhooks();
                 webhook = webhooksRetry.find(wh => wh.name === "Ticket Webhook");
                 if (!webhook) {
-                    webhook = await channel.createWebhook("Ticket Webhook", {
+                    webhook = await webhookChannel.createWebhook("Ticket Webhook", {
                         avatar: message.author.displayAvatarURL()
                     });
                 }
-                webhookCache.set(channel.id, webhook);
+                webhookCache.set(webhookChannel.id, webhook);
             } catch (retryError) {
-                console.error(`Retry failed to create/fetch webhook in channel ${channel.id}:`, retryError);
+                console.error(`Retry failed to create/fetch webhook in channel ${webhookChannel?.id || 'unknown'}:`, retryError);
                 
                 // Fallback: send message directly to channel
                 if (message.content) {
@@ -621,19 +606,19 @@ async function processTicketMessage(message, channel, client) {
         }
     } else {
         // Validate cached webhook before use
-        if (!(await validateWebhook(webhook, channel))) {
+        if (!(await validateWebhook(webhook, webhookChannel))) {
             webhook = null; // This will trigger webhook recreation
             try {
-                const webhooks = await channel.fetchWebhooks();
+                const webhooks = await webhookChannel.fetchWebhooks();
                 webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
                 if (!webhook) {
-                    webhook = await channel.createWebhook("Ticket Webhook", {
+                    webhook = await webhookChannel.createWebhook("Ticket Webhook", {
                         avatar: message.author.displayAvatarURL()
                     });
                 }
-                webhookCache.set(channel.id, webhook);
+                webhookCache.set(webhookChannel.id, webhook);
             } catch (recreateErr) {
-                console.error(`Failed to recreate webhook after validation in channel ${channel.id}:`, recreateErr);
+                console.error(`Failed to recreate webhook after validation in channel ${webhookChannel?.id || 'unknown'}:`, recreateErr);
                 // leave webhook as null so send attempts will retry below and fallback if needed
             }
         }
@@ -656,30 +641,32 @@ async function processTicketMessage(message, channel, client) {
                 content: sanitize(messageContent),
                 username: username,
                 avatarURL: message.author.displayAvatarURL(),
-                files: filesToSend
+                files: filesToSend,
+                threadId: threadId || undefined
             });
         } catch (webhookSendError) {
-            console.error(`Failed to send webhook message in channel ${channel.id}:`, webhookSendError);
+            console.error(`Failed to send webhook message in channel ${webhookChannel.id}:`, webhookSendError);
             
             // Clear the cached webhook as it might be invalid and retry once via a fresh webhook
-            clearWebhookCache(channel.id);
+            clearWebhookCache(webhookChannel.id);
             try {
-                const webhooksRetry = await channel.fetchWebhooks();
+                const webhooksRetry = await webhookChannel.fetchWebhooks();
                 let webhookRetry = webhooksRetry.find(wh => wh.name === "Ticket Webhook");
                 if (!webhookRetry) {
-                    webhookRetry = await channel.createWebhook("Ticket Webhook", {
+                    webhookRetry = await webhookChannel.createWebhook("Ticket Webhook", {
                         avatar: message.author.displayAvatarURL()
                     });
                 }
-                webhookCache.set(channel.id, webhookRetry);
+                webhookCache.set(webhookChannel.id, webhookRetry);
                 combinedMessage = await webhookRetry.send({
                     content: sanitize(messageContent),
                     username: username,
                     avatarURL: message.author.displayAvatarURL(),
-                    files: filesToSend
+                    files: filesToSend,
+                    threadId: threadId || undefined
                 });
             } catch (retryErr) {
-                console.error(`Retry failed to send webhook message in channel ${channel.id}:`, retryErr);
+                console.error(`Retry failed to send webhook message in channel ${webhookChannel.id}:`, retryErr);
                 // Final fallback to direct channel message
                 await channel.send({
                     content: `**${message.author.username}:** ${message.content}`,
@@ -693,29 +680,31 @@ async function processTicketMessage(message, channel, client) {
                 filesMessage = await webhook.send({
                     username: username,
                     avatarURL: message.author.displayAvatarURL(),
-                    files: filesToSend
+                    files: filesToSend,
+                    threadId: threadId || undefined
                 });
             } catch (webhookSendError) {
-                console.error(`Failed to send webhook files in channel ${channel.id}:`, webhookSendError);
+                console.error(`Failed to send webhook files in channel ${webhookChannel.id}:`, webhookSendError);
                 
                 // Clear cache and retry once via a fresh webhook
-                clearWebhookCache(channel.id);
+                clearWebhookCache(webhookChannel.id);
                 try {
-                    const webhooksRetry = await channel.fetchWebhooks();
+                    const webhooksRetry = await webhookChannel.fetchWebhooks();
                     let webhookRetry = webhooksRetry.find(wh => wh.name === "Ticket Webhook");
                     if (!webhookRetry) {
-                        webhookRetry = await channel.createWebhook("Ticket Webhook", {
+                        webhookRetry = await webhookChannel.createWebhook("Ticket Webhook", {
                             avatar: message.author.displayAvatarURL()
                         });
                     }
-                    webhookCache.set(channel.id, webhookRetry);
+                    webhookCache.set(webhookChannel.id, webhookRetry);
                     filesMessage = await webhookRetry.send({
                         username: username,
                         avatarURL: message.author.displayAvatarURL(),
-                        files: filesToSend
+                        files: filesToSend,
+                        threadId: threadId || undefined
                     });
                 } catch (retryErr) {
-                    console.error(`Retry failed to send webhook files in channel ${channel.id}:`, retryErr);
+                    console.error(`Retry failed to send webhook files in channel ${webhookChannel.id}:`, retryErr);
                     // Final fallback to direct channel message
                     await channel.send({
                         content: `**${message.author.username}** sent an attachment:`,
@@ -731,31 +720,33 @@ async function processTicketMessage(message, channel, client) {
                     const sent = await webhook.send({
                         content: sanitize(toSend),
                         username: username,
-                        avatarURL: message.author.displayAvatarURL()
+                        avatarURL: message.author.displayAvatarURL(),
+                        threadId: threadId || undefined
                     });
                     if (sent && sent.id) textMessageIds.push(sent.id);
                 } catch (webhookSendError) {
-                    console.error(`Failed to send webhook text chunk in channel ${channel.id}:`, webhookSendError);
+                    console.error(`Failed to send webhook text chunk in channel ${webhookChannel.id}:`, webhookSendError);
                     
                     // Clear cache and retry once via a fresh webhook for this chunk
-                    clearWebhookCache(channel.id);
+                    clearWebhookCache(webhookChannel.id);
                     try {
-                        const webhooksRetry = await channel.fetchWebhooks();
+                        const webhooksRetry = await webhookChannel.fetchWebhooks();
                         let webhookRetry = webhooksRetry.find(wh => wh.name === "Ticket Webhook");
                         if (!webhookRetry) {
-                            webhookRetry = await channel.createWebhook("Ticket Webhook", {
+                            webhookRetry = await webhookChannel.createWebhook("Ticket Webhook", {
                                 avatar: message.author.displayAvatarURL()
                             });
                         }
-                        webhookCache.set(channel.id, webhookRetry);
+                        webhookCache.set(webhookChannel.id, webhookRetry);
                         const sent = await webhookRetry.send({
                             content: sanitize(toSend),
                             username: username,
-                            avatarURL: message.author.displayAvatarURL()
+                            avatarURL: message.author.displayAvatarURL(),
+                            threadId: threadId || undefined
                         });
                         if (sent && sent.id) textMessageIds.push(sent.id);
                     } catch (retryErr) {
-                        console.error(`Retry failed for webhook text chunk in channel ${channel.id}:`, retryErr);
+                        console.error(`Retry failed for webhook text chunk in channel ${webhookChannel.id}:`, retryErr);
                         // Final fallback to direct channel message for this chunk
                         await channel.send({
                             content: `**${message.author.username}:** ${toSend}`
