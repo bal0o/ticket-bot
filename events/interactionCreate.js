@@ -400,8 +400,11 @@ module.exports = async function (client, interaction) {
                     try {
                         await interaction.editReply({ content: `Advanced to ${nextStage} and ticket closed.` });
                     } catch (e) {
-                        // Ignore unknown message errors (interaction already gone)
-                        if (!e || e.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', null);
+                        if (e && e.code === 10008) {
+                            func.handle_errors(null, client, 'interactionCreate.js', 'Edit reply skipped: Unknown Message (10008). The interaction response was likely cleaned up or expired.');
+                        } else {
+                            func.handle_errors(e, client, 'interactionCreate.js', null);
+                        }
                     }
                 } else {
                     await applications.deny(appId, interaction.user.id, 'Denied via ticket');
@@ -415,7 +418,11 @@ module.exports = async function (client, interaction) {
                     try {
                         await interaction.editReply({ content: `Application denied and ticket closed.` });
                     } catch (e) {
-                        if (!e || e.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', null);
+                        if (e && e.code === 10008) {
+                            func.handle_errors(null, client, 'interactionCreate.js', 'Edit reply skipped: Unknown Message (10008). The interaction response was likely cleaned up or expired.');
+                        } else {
+                            func.handle_errors(e, client, 'interactionCreate.js', null);
+                        }
                     }
                 }
             } catch (e) {
