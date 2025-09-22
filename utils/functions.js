@@ -939,9 +939,14 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Update ticket count
         await module.exports.updateTicketStatus(client);
         
-        const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-        if (thread) {
-            await thread.setArchived(true, 'Ticket closed.');
+        try {
+            const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+            if (thread) {
+                await thread.setArchived(true, 'Ticket closed.');
+            }
+        } catch (e) {
+            // Ignore unknown channel/thread; it may already be gone
+            if (e && e.code !== 10003) module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
         }
 
         // Delete channel after a short delay
@@ -949,7 +954,10 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             try {
                 await channel.delete();
             } catch (err) {
-                module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
+                // Ignore unknown channel (already deleted)
+                if (!err || err.code !== 10003) {
+                    module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
+                }
             }
         }, 1000);
     } catch (err) {

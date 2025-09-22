@@ -181,11 +181,13 @@ module.exports = async function (client, message) {
                 .setColor(client.config.bot_settings.main_color);
 
             let ticketList = "";
-            activeTickets.forEach((ticket, index) => {
-                const ticketType = ticket.ticketInfo.title.split(" | ")[0];
-                const ticketNumber = ticket.ticketInfo.title.split("#")[1].trim();
-                ticketList += `${index + 1}) ${ticketType} #${ticketNumber}\n`;
-            });
+			activeTickets.forEach((ticket, index) => {
+				const rawTitle = (ticket && ticket.ticketInfo && ticket.ticketInfo.title) ? ticket.ticketInfo.title : "";
+				const ticketType = rawTitle.includes(" | ") ? rawTitle.split(" | ")[0] : (rawTitle || "Ticket");
+				const parts = rawTitle.split("#");
+				const ticketNumber = parts.length > 1 ? (parts[1] || "").trim() : "unknown";
+				ticketList += `${index + 1}) ${ticketType} #${ticketNumber}\n`;
+			});
             selectionEmbed.addFields({ name: "Your Active Tickets", value: ticketList });
 
             const selectionMessage = await message.channel.send({embeds: [selectionEmbed]});
@@ -652,10 +654,17 @@ async function processTicketMessage(message, channel, client) {
             } catch (retryErr) {
                 console.error(`Retry failed to send webhook message in channel ${webhookChannel.id}:`, retryErr);
                 // Final fallback to direct channel message
-                await channel.send({
-                    content: `**${message.author.username}:** ${message.content}`,
-                    files: filesToSend
-                }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+                try {
+                    await channel.send({
+                        content: `**${message.author.username}:** ${message.content}`,
+                        files: filesToSend
+                    });
+                } catch (err) {
+                    // Ignore AbortError (user aborted/canceled); handle others normally
+                    if (!err || err.name !== 'AbortError') {
+                        func.handle_errors(err, client, `messageCreate.js`, null);
+                    }
+                }
             }
         }
     } else {
@@ -690,10 +699,16 @@ async function processTicketMessage(message, channel, client) {
                 } catch (retryErr) {
                     console.error(`Retry failed to send webhook files in channel ${webhookChannel.id}:`, retryErr);
                     // Final fallback to direct channel message
-                    await channel.send({
-                        content: `**${message.author.username}** sent an attachment:`,
-                        files: filesToSend
-                    }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+                    try {
+                        await channel.send({
+                            content: `**${message.author.username}** sent an attachment:`,
+                            files: filesToSend
+                        });
+                    } catch (err) {
+                        if (!err || err.name !== 'AbortError') {
+                            func.handle_errors(err, client, `messageCreate.js`, null);
+                        }
+                    }
                 }
             }
         }
@@ -732,9 +747,15 @@ async function processTicketMessage(message, channel, client) {
                     } catch (retryErr) {
                         console.error(`Retry failed for webhook text chunk in channel ${webhookChannel.id}:`, retryErr);
                         // Final fallback to direct channel message for this chunk
-                        await channel.send({
-                            content: `**${message.author.username}:** ${toSend}`
-                        }).catch(err => func.handle_errors(err, client, `messageCreate.js`, null));
+                        try {
+                            await channel.send({
+                                content: `**${message.author.username}:** ${toSend}`
+                            });
+                        } catch (err) {
+                            if (!err || err.name !== 'AbortError') {
+                                func.handle_errors(err, client, `messageCreate.js`, null);
+                            }
+                        }
                     }
                 }
             }
