@@ -451,3 +451,11 @@ button.btn.primary, .btn.primary { box-shadow: 0 8px 24px rgba(58,113,255,.25); 
   margin-bottom: 4px;
 }
 
+/* Global pre styling to prevent horizontal overflow */
+.pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+

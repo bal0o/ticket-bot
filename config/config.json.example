@@ -97,6 +97,9 @@
       ],
 "admin_role_ids": [
         "222222222222222222"
+      ],
+"application_channel_viewer_role_ids": [
+        "333333333333333333"
       ]
 }
 }

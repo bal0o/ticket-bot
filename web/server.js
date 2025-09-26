@@ -600,10 +600,20 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
         const adminRoleId = config.role_ids.application_admin_role_id || config.role_ids.default_admin_role_id;
+
+        // Viewer roles mirror application visibility: admin + staff roles from web.roles
+        const viewerRoles = new Set();
+        if (adminRoleId) viewerRoles.add(adminRoleId);
+        if (config.web && config.web.roles && Array.isArray(config.web.roles.admin_role_ids)) {
+            for (const rid of config.web.roles.admin_role_ids) if (rid) viewerRoles.add(rid);
+        }
+        if (config.web && config.web.roles && Array.isArray(config.web.roles.staff_role_ids)) {
+            for (const rid of config.web.roles.staff_role_ids) if (rid) viewerRoles.add(rid);
+        }
+
         const overwrites = [
             { id: STAFF_GUILD_ID, type: 0, deny: (1<<10).toString() }, // VIEW_CHANNEL deny to @everyone
-            { id: config.role_ids.default_admin_role_id, type: 0, allow: (1<<10).toString() }, // VIEW_CHANNEL for default admin
-            { id: adminRoleId, type: 0, allow: (1<<10).toString() } // VIEW_CHANNEL for app admins
+            ...Array.from(viewerRoles).map(rid => ({ id: rid, type: 0, allow: (1<<10).toString() }))
         ];
         const channelName = `app-${appRec.username}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
