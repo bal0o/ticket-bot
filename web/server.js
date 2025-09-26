@@ -447,6 +447,20 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+
+    // Compute prev/next application IDs (default list: active apps sorted by updatedAt desc)
+    let prevId = null, nextId = null;
+    try {
+        let items = await applications.listApplications({});
+        // By default, show only active applications (exclude Approved, Denied, Archived)
+        items = items.filter(x => !['Approved','Denied','Archived'].includes(x.stage));
+        items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+        const idx = items.findIndex(x => x.id === appId);
+        if (idx !== -1) {
+            if (idx > 0) nextId = items[idx - 1]?.id || null; // newer item (previous in list)
+            if (idx < items.length - 1) prevId = items[idx + 1]?.id || null; // older item (next in list)
+        }
+    } catch (_) {}
     
             // Check if the communication channel actually exists
         let channelExists = false;
@@ -513,7 +527,9 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
         notification: req.query.notification,
         notificationType: req.query.type || 'info',
         channelExists,
-        lastTicket
+        lastTicket,
+        prevId,
+        nextId
     });
 });
 
