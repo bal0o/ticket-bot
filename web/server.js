@@ -452,7 +452,9 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
         let channelExists = false;
         let lastTicket = null;
         if (appRec.tickets && appRec.tickets.length > 0) {
-            lastTicket = appRec.tickets[appRec.tickets.length - 1];
+            // Only consider communication channels explicitly created via the web (type === 'comms')
+            const commsTickets = appRec.tickets.filter(t => t && t.type === 'comms');
+            lastTicket = commsTickets.length > 0 ? commsTickets[commsTickets.length - 1] : null;
             if (lastTicket && lastTicket.channelId) {
                 try {
                     // Try to fetch the channel to see if it exists
@@ -617,7 +619,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         ];
         const channelName = `app-${appRec.username}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
-        await applications.linkTicket(appId, chan.id, chan.id);
+        await applications.linkTicket(appId, chan.id, chan.id, 'comms');
         // Map channel -> application for interaction handlers
         try { await db.set(`AppMap.channelToApp.${chan.id}`, appId); } catch (_) {}
         // Log to application history

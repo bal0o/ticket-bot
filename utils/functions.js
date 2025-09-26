@@ -625,6 +625,7 @@ try {
             let server = null;
             const m = typeof responses === 'string' && responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
             if (m && m[1]) server = m[1];
+            // Mark the initial ticket link as type 'origin' inside the application record
             const appRec = await applications.createApplication({ userId: recepientMember.id, username: recepientMember.username, type: ticketType, server, ticketId: formattedTicketNumber, channelId: ticketChannel.id, stage: 'Submitted', responses });
             await db.set(`AppMap.channelToApp.${ticketChannel.id}`, appRec.id);
             await db.set(`AppMap.ticketToApp.${formattedTicketNumber}`, appRec.id);
