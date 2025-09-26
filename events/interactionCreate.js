@@ -397,7 +397,15 @@ module.exports = async function (client, interaction) {
                     await interaction.channel.send(chMsg).catch(()=>{});
                     // Close ticket after stage advance
                     await func.closeTicket(interaction.client, interaction.channel, interaction.member, `Application advanced to ${nextStage}`);
-                    await interaction.editReply({ content: `Advanced to ${nextStage} and ticket closed.` });
+                    try {
+                        await interaction.editReply({ content: `Advanced to ${nextStage} and ticket closed.` });
+                    } catch (e) {
+                        if (e && e.code === 10008) {
+                            func.handle_errors(null, client, 'interactionCreate.js', 'Edit reply skipped: Unknown Message (10008). The interaction response was likely cleaned up or expired.');
+                        } else {
+                            func.handle_errors(e, client, 'interactionCreate.js', null);
+                        }
+                    }
                 } else {
                     await applications.deny(appId, interaction.user.id, 'Denied via ticket');
                     const appRec = await applications.getApplication(appId);
@@ -407,7 +415,15 @@ module.exports = async function (client, interaction) {
                     const chMsg = (msgs.deny_channel || 'Application denied by {{STAFF}}.').replace('{{STAFF}}', interaction.user.username);
                     await interaction.channel.send(chMsg).catch(()=>{});
                     await func.closeTicket(interaction.client, interaction.channel, interaction.member, `Application denied`);
-                    await interaction.editReply({ content: `Application denied and ticket closed.` });
+                    try {
+                        await interaction.editReply({ content: `Application denied and ticket closed.` });
+                    } catch (e) {
+                        if (e && e.code === 10008) {
+                            func.handle_errors(null, client, 'interactionCreate.js', 'Edit reply skipped: Unknown Message (10008). The interaction response was likely cleaned up or expired.');
+                        } else {
+                            func.handle_errors(e, client, 'interactionCreate.js', null);
+                        }
+                    }
                 }
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error processing application stage action');

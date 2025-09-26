@@ -447,12 +447,28 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
     const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+
+    // Compute prev/next application IDs (default list: active apps sorted by updatedAt desc)
+    let prevId = null, nextId = null;
+    try {
+        let items = await applications.listApplications({});
+        // By default, show only active applications (exclude Approved, Denied, Archived)
+        items = items.filter(x => !['Approved','Denied','Archived'].includes(x.stage));
+        items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+        const idx = items.findIndex(x => x.id === appId);
+        if (idx !== -1) {
+            if (idx > 0) nextId = items[idx - 1]?.id || null; // newer item (previous in list)
+            if (idx < items.length - 1) prevId = items[idx + 1]?.id || null; // older item (next in list)
+        }
+    } catch (_) {}
     
             // Check if the communication channel actually exists
         let channelExists = false;
         let lastTicket = null;
         if (appRec.tickets && appRec.tickets.length > 0) {
-            lastTicket = appRec.tickets[appRec.tickets.length - 1];
+            // Only consider communication channels explicitly created via the web (type === 'comms')
+            const commsTickets = appRec.tickets.filter(t => t && t.type === 'comms');
+            lastTicket = commsTickets.length > 0 ? commsTickets[commsTickets.length - 1] : null;
             if (lastTicket && lastTicket.channelId) {
                 try {
                     // Try to fetch the channel to see if it exists
@@ -511,7 +527,9 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
         notification: req.query.notification,
         notificationType: req.query.type || 'info',
         channelExists,
-        lastTicket
+        lastTicket,
+        prevId,
+        nextId
     });
 });
 
@@ -600,14 +618,24 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
         const adminRoleId = config.role_ids.application_admin_role_id || config.role_ids.default_admin_role_id;
+
+        // Viewer roles mirror application visibility: admin + staff roles from web.roles
+        const viewerRoles = new Set();
+        if (adminRoleId) viewerRoles.add(adminRoleId);
+        if (config.web && config.web.roles && Array.isArray(config.web.roles.admin_role_ids)) {
+            for (const rid of config.web.roles.admin_role_ids) if (rid) viewerRoles.add(rid);
+        }
+        if (config.web && config.web.roles && Array.isArray(config.web.roles.staff_role_ids)) {
+            for (const rid of config.web.roles.staff_role_ids) if (rid) viewerRoles.add(rid);
+        }
+
         const overwrites = [
             { id: STAFF_GUILD_ID, type: 0, deny: (1<<10).toString() }, // VIEW_CHANNEL deny to @everyone
-            { id: config.role_ids.default_admin_role_id, type: 0, allow: (1<<10).toString() }, // VIEW_CHANNEL for default admin
-            { id: adminRoleId, type: 0, allow: (1<<10).toString() } // VIEW_CHANNEL for app admins
+            ...Array.from(viewerRoles).map(rid => ({ id: rid, type: 0, allow: (1<<10).toString() }))
         ];
         const channelName = `app-${appRec.username}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
-        await applications.linkTicket(appId, chan.id, chan.id);
+        await applications.linkTicket(appId, chan.id, chan.id, 'comms');
         // Map channel -> application for interaction handlers
         try { await db.set(`AppMap.channelToApp.${chan.id}`, appId); } catch (_) {}
         // Log to application history

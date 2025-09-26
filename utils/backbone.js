@@ -242,65 +242,85 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			const axios = require('axios');
 			const bmToken = client.config.tokens.battlemetricsToken;
 			const bmOrgId = client.config.misc.bm_org_id;
-			const bmHeaders = {
-				'Authorization': `Bearer ${bmToken}`,
-				'Accept': 'application/json'
-			};
-			// Get BM player info
+			// Build URLs up front for clearer error context
 			const bmPlayerUrl = `https://api.battlemetrics.com/players?filter[search]=${SteamID}&include=identifier,server`;
-			const bmResponse = await axios.get(bmPlayerUrl, { headers: bmHeaders, timeout: 10000 });
-			if (bmResponse.data && bmResponse.data.data && bmResponse.data.data.length > 0) {
-				const playerData = bmResponse.data.data[0];
-				const playerId = playerData.id;
-				let inGameName = null;
-				let mostRecentServer = null;
-				let mostRecentServerId = null;
-				let timePlayed = null;
-				let firstSeen = null;
-				let lastSeen = null;
-				if (bmResponse.data.included) {
-					for (const inc of bmResponse.data.included) {
-						if (inc.type === 'identifier' && inc.attributes.type === 'name' && !inGameName) {
-							inGameName = inc.attributes.identifier;
+			if (!bmToken) {
+				// Notify clearly when token is missing, include intended action
+				func.handle_errors(null, client, 'backbone.js', `BattleMetrics token is missing while attempting to fetch player info for SteamID ${SteamID}. URL: ${bmPlayerUrl}. Set config.tokens.battlemetricsToken to enable BM lookups.`);
+				bmInfo = null;
+			} else {
+				const bmHeaders = {
+					'Authorization': `Bearer ${bmToken}`,
+					'Accept': 'application/json'
+				};
+				// Get BM player info
+				const bmResponse = await axios.get(bmPlayerUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
+				if (bmResponse && bmResponse.status && bmResponse.status >= 200 && bmResponse.status < 300 && bmResponse.data && bmResponse.data.data && bmResponse.data.data.length > 0) {
+					const playerData = bmResponse.data.data[0];
+					const playerId = playerData.id;
+					let inGameName = null;
+					let mostRecentServer = null;
+					let mostRecentServerId = null;
+					let timePlayed = null;
+					let firstSeen = null;
+					let lastSeen = null;
+					if (bmResponse.data.included) {
+						for (const inc of bmResponse.data.included) {
+							if (inc.type === 'identifier' && inc.attributes.type === 'name' && !inGameName) {
+								inGameName = inc.attributes.identifier;
+							}
+						}
+						if (playerData.relationships && playerData.relationships.servers && playerData.relationships.servers.data && playerData.relationships.servers.data.length > 0) {
+							const servers = playerData.relationships.servers.data;
+							servers.sort((a, b) => {
+								const aLast = a.meta?.lastSeen || '';
+								const bLast = b.meta?.lastSeen || '';
+								return bLast.localeCompare(aLast);
+							});
+							const recentServer = servers[0];
+							const serverId = recentServer.id;
+							const serverInfo = bmResponse.data.included.find(inc => inc.type === 'server' && inc.id === serverId);
+							if (serverInfo) {
+								mostRecentServer = serverInfo.attributes.name;
+								mostRecentServerId = serverId;
+								timePlayed = recentServer.meta?.timePlayed || null;
+								firstSeen = recentServer.meta?.firstSeen || null;
+								lastSeen = recentServer.meta?.lastSeen || null;
+							}
 						}
 					}
-					if (playerData.relationships && playerData.relationships.servers && playerData.relationships.servers.data && playerData.relationships.servers.data.length > 0) {
-						const servers = playerData.relationships.servers.data;
-						servers.sort((a, b) => {
-							const aLast = a.meta?.lastSeen || '';
-							const bLast = b.meta?.lastSeen || '';
-							return bLast.localeCompare(aLast);
-						});
-						const recentServer = servers[0];
-						const serverId = recentServer.id;
-						const serverInfo = bmResponse.data.included.find(inc => inc.type === 'server' && inc.id === serverId);
-						if (serverInfo) {
-							mostRecentServer = serverInfo.attributes.name;
-							mostRecentServerId = serverId;
-							timePlayed = recentServer.meta?.timePlayed || null;
-							firstSeen = recentServer.meta?.firstSeen || null;
-							lastSeen = recentServer.meta?.lastSeen || null;
+					let banInfo = [];
+					const bansUrl = `https://api.battlemetrics.com/bans?filter[player]=${playerId}&include=server`;
+					const bansResponse = await axios.get(bansUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
+					if (bansResponse && bansResponse.status && bansResponse.status >= 200 && bansResponse.status < 300 && bansResponse.data && bansResponse.data.data && bansResponse.data.data.length > 0) {
+						for (const ban of bansResponse.data.data) {
+							const reason = ban.attributes.reason || 'No reason provided';
+							let serverName = ban.relationships?.server?.data?.id || '';
+							if (bansResponse.data.included) {
+								const serverInc = bansResponse.data.included.find(inc => inc.type === 'server' && inc.id === serverName);
+								if (serverInc) serverName = serverInc.attributes.name;
+							}
+							banInfo.push(`Ban on ${serverName}: ${reason}`);
 						}
 					}
+					// Report bans-specific auth/errors with clear context
+					else if (bansResponse && bansResponse.response && (bansResponse.response.status === 401 || bansResponse.response.status === 403)) {
+						func.handle_errors(null, client, 'backbone.js', `BattleMetrics auth error ${bansResponse.response.status} while fetching bans for playerId ${playerId}. URL: ${bansUrl}. Check token and permissions.`);
+					} else if (bansResponse && bansResponse.status && bansResponse.status >= 400) {
+						func.handle_errors(null, client, 'backbone.js', `BattleMetrics bans request failed with status ${bansResponse.status} for playerId ${playerId}. URL: ${bansUrl}.`);
+					}
+					bmInfo = { inGameName, mostRecentServer, mostRecentServerId, banInfo, playerId, timePlayed, firstSeen, lastSeen, steamId: SteamID };
+				} else if (bmResponse && bmResponse.response && (bmResponse.response.status === 401 || bmResponse.response.status === 403)) {
+					// Auth or permission error; report clearly to error channel with action + URL
+					func.handle_errors(null, client, 'backbone.js', `BattleMetrics auth error ${bmResponse.response.status} while fetching player info for SteamID ${SteamID}. URL: ${bmPlayerUrl}. Check config.tokens.battlemetricsToken and BM permissions.`);
+					bmInfo = null;
+				} else if (bmResponse && bmResponse.status && bmResponse.status >= 400) {
+					func.handle_errors(null, client, 'backbone.js', `BattleMetrics player request failed with status ${bmResponse.status} for SteamID ${SteamID}. URL: ${bmPlayerUrl}.`);
+					bmInfo = null;
 				}
-				let banInfo = [];
-				const bansUrl = `https://api.battlemetrics.com/bans?filter[player]=${playerId}&include=server`;
-				const bansResponse = await axios.get(bansUrl, { headers: bmHeaders, timeout: 10000 });
-				if (bansResponse.data && bansResponse.data.data && bansResponse.data.data.length > 0) {
-					for (const ban of bansResponse.data.data) {
-						const reason = ban.attributes.reason || 'No reason provided';
-						let serverName = ban.relationships?.server?.data?.id || '';
-						if (bansResponse.data.included) {
-							const serverInc = bansResponse.data.included.find(inc => inc.type === 'server' && inc.id === serverName);
-							if (serverInc) serverName = serverInc.attributes.name;
-						}
-						banInfo.push(`Ban on ${serverName}: ${reason}`);
-					}
-				}
-				bmInfo = { inGameName, mostRecentServer, mostRecentServerId, banInfo, playerId, timePlayed, firstSeen, lastSeen, steamId: SteamID };
 			}
 		} catch (e) {
-			func.handle_errors(e, client, 'backbone.js', 'Failed to fetch BattleMetrics info');
+			func.handle_errors(e, client, 'backbone.js', `Failed to fetch BattleMetrics info while resolving player/ban data for SteamID ${SteamID}.`);
 		}
 	}
 

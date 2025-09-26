@@ -625,6 +625,7 @@ try {
             let server = null;
             const m = typeof responses === 'string' && responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
             if (m && m[1]) server = m[1];
+            // Mark the initial ticket link as type 'origin' inside the application record
             const appRec = await applications.createApplication({ userId: recepientMember.id, username: recepientMember.username, type: ticketType, server, ticketId: formattedTicketNumber, channelId: ticketChannel.id, stage: 'Submitted', responses });
             await db.set(`AppMap.channelToApp.${ticketChannel.id}`, appRec.id);
             await db.set(`AppMap.ticketToApp.${formattedTicketNumber}`, appRec.id);
@@ -939,19 +940,31 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Update ticket count
         await module.exports.updateTicketStatus(client);
         
-        const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-        if (thread) {
-            await thread.setArchived(true, 'Ticket closed.');
-        }
+		try {
+			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+			if (thread) {
+				await thread.setArchived(true, 'Ticket closed.');
+			}
+		} catch (e) {
+			if (e && e.code === 10003) {
+				module.exports.handle_errors(null, client, "functions.js", `Archive skipped for staff thread #${globalTicketNumber}: Unknown Channel (10003). Likely already deleted or inaccessible.`);
+			} else {
+				module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
+			}
+		}
 
         // Delete channel after a short delay
-        setTimeout(async () => {
-            try {
-                await channel.delete();
-            } catch (err) {
-                module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
-            }
-        }, 1000);
+		setTimeout(async () => {
+			try {
+				await channel.delete();
+			} catch (err) {
+				if (err && err.code === 10003) {
+					module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
+				} else {
+					module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
+				}
+			}
+		}, 1000);
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
     }

@@ -23,7 +23,8 @@ module.exports = {
             stage,
             createdAt: now,
             updatedAt: now,
-            tickets: ticketId ? [{ ticketId, channelId, createdAt: now }] : [],
+            // Seed with the original application ticket channel (type: 'origin') if present
+            tickets: ticketId ? [{ ticketId, channelId, createdAt: now, type: 'origin' }] : [],
             history: [{ stage, at: now, by: null, note: 'Application created' }],
             responses: responses || ''
         };
@@ -55,11 +56,11 @@ module.exports = {
         return rec;
     },
 
-    async linkTicket(appId, ticketId, channelId) {
+    async linkTicket(appId, ticketId, channelId, linkType = 'comms') {
         const rec = await db.get(`${APPLICATIONS_KEY}.${appId}`);
         if (!rec) return null;
         rec.tickets = rec.tickets || [];
-        rec.tickets.push({ ticketId, channelId, createdAt: Date.now() });
+        rec.tickets.push({ ticketId, channelId, createdAt: Date.now(), type: linkType });
         await db.set(`${APPLICATIONS_KEY}.${appId}`, rec);
         return rec;
     },
