@@ -15,6 +15,7 @@
           <span class="avatar" style="background-image:url('https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png?size=64')"></span>
           <strong><%= user.username %></strong>
         </span>
+        <a class="btn" href="/my">My Tickets</a>
         <% if (roleFlags && roleFlags.isStaff) { %>
           <a class="btn" href="/staff">Staff View</a>
         <% } %>
