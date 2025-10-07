@@ -499,10 +499,11 @@ try {
     })();
 
     // Skip creating staff thread for internal tickets
+    let thread = null;
     if (!questionFile.internal) try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         // Create as public thread first so we can add role permissions
-        const thread = await ticketChannel.threads.create({
+        thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
@@ -673,6 +674,9 @@ try {
 
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
+
+    // Return identifiers for follow-up async tasks if caller needs them
+    try { return { ticketChannelId: ticketChannel?.id || null, staffThreadId: thread?.id || null }; } catch (_) { return; }
 }
 
 // Add function to update bot status
