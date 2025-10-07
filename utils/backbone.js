@@ -105,9 +105,9 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				}
 
 				try {
-					const collected = await sent.awaitMessageComponent({
+                    const collected = await sent.awaitMessageComponent({
 						filter: i => i.user.id === user.id,
-						time: 600000
+                        time: 600000
 					});
 
 					selectedServer = collected.customId;
@@ -147,7 +147,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 					stop = true
 					break;
 				}
-				const reply = await sent?.channel?.awaitMessages({filter, max: 1, time: 600 * 1000, errors: [ "time" ] }).catch(_obj => { return false });
+                const reply = await sent?.channel?.awaitMessages({filter, max: 1, time: 600 * 1000, errors: [ "time" ] }).catch(_obj => { return false });
 
 				if (!reply || !reply?.first() || reply?.first()?.content?.toLowerCase() == "stop") {
 					stop = true
