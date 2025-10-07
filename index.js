@@ -1,10 +1,18 @@
 // Environment variables are now loaded from config.json
 const { Client,Collection,Intents } = require("discord.js");
 const config = require("./config/config.json");
+const logger = require("./utils/logger");
 const axios = require("axios");
 // Debug helper toggled via config.debug
 const isDebugEnabled = !!config.debug;
 const debugLog = (...args) => { if (isDebugEnabled) console.log(...args); };
+
+// Initialize structured logger and capture existing console output
+try {
+	logger.init({ level: isDebugEnabled ? 'debug' : 'info' });
+	logger.captureConsole();
+	logger.attachProcessHandlers();
+} catch (_) {}
 
 const client = new Client({ intents: [
 	Intents.FLAGS.GUILDS,
@@ -40,6 +48,10 @@ client.login(config.tokens.bot_token).then(() => {
 	let difference = Math.round(endTime - startTime);
 	console.log(`Successfully logged in as ${client.user.username}! Took ${difference}ms`);
 	try { require('./utils/metrics').initPersisted?.(); } catch (_) {}
+
+	// Attach Discord client event logging and start resource monitor
+	try { logger.attachDiscordClient(client); } catch (_) {}
+	try { logger.startResourceMonitor({ intervalMs: 15000, logOnChangeOnly: true }); } catch (_) {}
 
 	// Start application interview scheduler loop
 	try {
