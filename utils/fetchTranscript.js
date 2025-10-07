@@ -3,6 +3,9 @@ const jsdom = require('jsdom');
 const fs = require('fs');
 const { JSDOM } = jsdom;
 
+// Cache the transcript HTML template to avoid sync disk reads on every close
+let CACHED_TEMPLATE = null;
+
 /**
  * Generate an HTML transcript for a ticket or thread channel
  * Modes:
@@ -40,9 +43,11 @@ module.exports.fetch = async (channel, options) => {
         lastId = fetched.lastKey();
     }
 
-    // Load HTML template
-    const template = fs.readFileSync('./utils/template.html', 'utf8');
-    if (!template) throw new Error('Missing transcript HTML template');
+    // Load HTML template (cached)
+    if (!CACHED_TEMPLATE) {
+        CACHED_TEMPLATE = fs.readFileSync('./utils/template.html', 'utf8');
+        if (!CACHED_TEMPLATE) throw new Error('Missing transcript HTML template');
+    }
 
     // Helper: reaction by requested canonical emoji name (e.g., ':white_check_mark:', ':a:')
     const hasReactionByName = (msg, name) => !!(msg.reactions && msg.reactions.cache && msg.reactions.cache.some(r => (r.emoji?.name || '') === name));
@@ -259,6 +264,6 @@ module.exports.fetch = async (channel, options) => {
         core.appendChild(closeHeader);
     }
     
-    return Buffer.from(topText + template + core.innerHTML);
+    return Buffer.from(topText + CACHED_TEMPLATE + core.innerHTML);
 };
 

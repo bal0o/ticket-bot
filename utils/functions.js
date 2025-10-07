@@ -874,7 +874,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
                 try {
                     const filePathFull = `${save_path}/${channel.name}.full.html`;
-                    fs.writeFileSync(filePathFull, data);
+                    await fs.promises.writeFile(filePathFull, data);
                 } catch (e) {
                     // removed debug
                 }
@@ -896,7 +896,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 if (userData) {
                     try {
                         const filePathUser = `${save_path}/${channel.name}.html`;
-                        fs.writeFileSync(filePathUser, userData);
+                        await fs.promises.writeFile(filePathUser, userData);
                     } catch (e) {
                         // removed debug
                     }
@@ -920,7 +920,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                         });
                         if (staffData) {
                             const staffPath = `${save_path}/${channel.name}.staff.html`;
-                            fs.writeFileSync(staffPath, staffData);
+                            await fs.promises.writeFile(staffPath, staffData);
                         }
                     }
                 } catch (e) {
@@ -933,12 +933,10 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
                 } catch (_) {}
                 if (logs_channel) {
-                    const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
-                    logs_channel.send({ content: `Transcript saved: <${transcriptURL}>`, files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
+                    logs_channel.send({ content: `Transcript saved: <${transcriptURL}>` }).catch(e => func.handle_errors(e, client, "functions.js", null));
                 }
             } else {
-                const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
-                if (logs_channel) logs_channel.send({ files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
+                if (logs_channel) logs_channel.send({ content: `Transcript generated (not persisted).` }).catch(e => func.handle_errors(e, client, "functions.js", null));
             }
         })(transcriptResult);
         // After transcript generation, compute metrics
