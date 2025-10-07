@@ -21,6 +21,47 @@ const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
 
+/**
+ * Send a DM with retries and delivery verification.
+ * Returns { delivered: boolean, message: Message|null, error: Error|null }
+ */
+module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
+    const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : 3;
+    const baseDelayMs = Number.isFinite(opts.baseDelayMs) ? opts.baseDelayMs : 500;
+    let attempt = 0;
+    /** Classify if error is retryable */
+    const isRetryable = (err) => {
+        if (!err) return false;
+        const code = err.code;
+        const name = err.name || '';
+        const msg = (err.message || '').toString();
+        // Non-retryable: user DMs closed or cannot send to user
+        if (code === 50007 || /Cannot send messages to this user/i.test(msg)) return false;
+        // Unknown Channel/Message → not applicable to DMs; treat as non-retryable
+        if (code === 10003 || code === 10008) return false;
+        // Network / 5xx / transient Discord errors
+        if (code === 500 || code === 502 || code === 503 || code === 504) return true;
+        if (/FetchError|ETIMEDOUT|ECONNRESET|ENOTFOUND|rate.?limit/i.test(msg)) return true;
+        // Default: retry once for unknown errors
+        return true;
+    };
+    while (attempt < maxAttempts) {
+        try {
+            const message = await user.send(payload);
+            return { delivered: !!(message && message.id), message: message || null, error: null };
+        } catch (err) {
+            attempt++;
+            if (!isRetryable(err) || attempt >= maxAttempts) {
+                return { delivered: false, message: null, error: err };
+            }
+            const jitter = Math.floor(Math.random() * 200);
+            const delay = Math.min(5000, baseDelayMs * Math.pow(2, attempt - 1) + jitter);
+            await new Promise(res => setTimeout(res, delay));
+        }
+    }
+    return { delivered: false, message: null, error: new Error('Unknown DM send failure') };
+}
+
 module.exports.handle_errors = async (err, client, file, message) => {
 
 	let ErrorChannel = client.channels.cache.get(client.config.channel_ids.error_channel)
@@ -280,6 +321,16 @@ let ticketChannel = await staffGuild.channels.create(channelName, {
     parent: parentId || null,
     permissionOverwrites: overwrites,
 });
+
+// Index: add to user's active ticket channels
+try {
+    const key = `UserTicketIndex.${recepientMember.id}`;
+    const list = (await db.get(key)) || [];
+    if (!list.includes(ticketChannel.id)) {
+        list.push(ticketChannel.id);
+        await db.set(key, list);
+    }
+} catch (_) {}
 
 // For public tickets, DM the user with the ticket name/number
 try {
@@ -965,6 +1016,13 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
 				}
 			}
 		}, 1000);
+        // Remove from user's ticket index
+        try {
+            const key = `UserTicketIndex.${DiscordID}`;
+            const list = (await db.get(key)) || [];
+            const updated = list.filter(id => id !== channel.id);
+            await db.set(key, updated);
+        } catch (_) {}
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
     }

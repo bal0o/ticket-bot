@@ -638,6 +638,15 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
         await applications.linkTicket(appId, chan.id, chan.id, 'comms');
         // Map channel -> application for interaction handlers
         try { await db.set(`AppMap.channelToApp.${chan.id}`, appId); } catch (_) {}
+        // Index application channel under user
+        try {
+            const key = `AppMap.userToChannels.${appRec.userId}`;
+            const list = (await db.get(key)) || [];
+            if (!list.includes(chan.id)) {
+                list.push(chan.id);
+                await db.set(key, list);
+            }
+        } catch (_) {}
         // Log to application history
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
         

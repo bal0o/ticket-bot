@@ -27,11 +27,7 @@ module.exports = async function (client, interaction) {
     }
 
     try {
-        // Update status when bot starts
-        if (!client.ticketStatusInitialized) {
-            await func.updateTicketStatus(client);
-            client.ticketStatusInitialized = true;
-        }
+        // Removed status init here to avoid delaying interaction ack; handled in ready.js
 
         if (interaction.isCommand()) {
     const command = client.commands.get(interaction.commandName + `_slash`)
@@ -51,7 +47,7 @@ module.exports = async function (client, interaction) {
     }
         
         if (interaction.customId === "feedbackModal") {
-            await interaction.deferReply().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})
+            try { await interaction.deferReply(); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, `interactionCreate.js`, null); }
 
             let feedbackChannel = client.channels.cache.find(x => x.id === client.config.channel_ids.feedback_channel)
 
@@ -107,7 +103,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'closeTicketModal') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
                 
                 const channel = interaction.channel;
                 if (!channel) {
@@ -367,7 +363,7 @@ module.exports = async function (client, interaction) {
         // Application stage buttons
         if (interaction.customId === 'app_next_stage' || interaction.customId === 'app_deny') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_next_stage/deny'); }
                 const channelId = interaction.channel.id;
                 const appId = await db.get(`AppMap.channelToApp.${channelId}`);
                 if (!appId) {
@@ -434,7 +430,7 @@ module.exports = async function (client, interaction) {
         // Close communication ticket button
         if (interaction.customId === 'app_comm_close') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_comm_close'); }
                 const channel = interaction.channel;
                 const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
                 if (!appId) { await interaction.editReply({ content: 'Not linked to an application.' }); return; }
@@ -537,6 +533,19 @@ module.exports = async function (client, interaction) {
                         console.error('Failed to delete communication channel:', err);
                     }
                 }, 1000);
+                // Remove from AppMap.userToChannels index
+                try {
+                    const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
+                    if (appId) {
+                        const appRec2 = await applications.getApplication(appId);
+                        if (appRec2 && appRec2.userId) {
+                            const key = `AppMap.userToChannels.${appRec2.userId}`;
+                            const arr = (await db.get(key)) || [];
+                            const filtered = arr.filter(cid => cid !== channel.id);
+                            await db.set(key, filtered);
+                        }
+                    }
+                } catch (_) {}
                 
                 await interaction.editReply({ content: 'Communication channel closed and transcript saved to application.' });
             } catch (e) {
@@ -547,7 +556,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'convertTicket') {
-            await interaction.deferReply({ ephemeral: true });
+            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for convertTicket'); }
 
             const handlerRaw = require("../content/handler/options.json");
             const myPins = await interaction.message.channel.messages.fetchPinned();
@@ -591,7 +600,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'selectTicketType') {
-            await interaction.deferReply({ ephemeral: true });
+            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectTicketType'); }
 
             const newTicketType = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
@@ -635,7 +644,12 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'moveticket') {
-            await interaction.deferReply({ ephemeral: true });
+            try {
+                await interaction.deferReply({ ephemeral: true });
+            } catch (e) {
+                // Tolerate expired/unknown interaction to avoid noisy errors
+                if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for moveticket');
+            }
 
             const handlerRaw = require("../content/handler/options.json");
             // Build move options from configured ticket types that have a valid ticket-category present in the guild
@@ -675,7 +689,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'selectMoveType') {
-            await interaction.deferReply({ ephemeral: true });
+            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectMoveType'); }
 
             const typeKey = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
@@ -1087,7 +1101,7 @@ module.exports = async function (client, interaction) {
 
                 if (customId == "supportaccept") {
 
-                    await interaction.deferUpdate().catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    try { await interaction.deferUpdate(); } catch (err) { if (err && err.code !== 10062 && err.code !== 40060) func.handle_errors(err, client, `interactionCreate.js`, null); }
                     embed.setAuthor({name: lang.accepted_ticket["accepted-transcript-embed-title"] != "" ? lang.accepted_ticket["accepted-transcript-embed-title"].replace(`{{ADMIN}}`, `${user.username}/${user.id}`) + `\n${embed?.author?.name}` : `Accepted by ${user.username}/${user.id} \n${embed?.author?.name}`, iconURL: user.displayAvatarURL()});
                     embed.addFields({
                         name: lang.accepted_ticket["accepted-transcript-embed-response-title"] != "" ? lang.accepted_ticket["accepted-transcript-embed-response-title"] : `Response Time`,
@@ -1146,7 +1160,7 @@ module.exports = async function (client, interaction) {
 
                 } else if (customId == "supportdeny") {
 
-                    await interaction.deferUpdate().catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    try { await interaction.deferUpdate(); } catch (err) { if (err && err.code !== 10062 && err.code !== 40060) func.handle_errors(err, client, `interactionCreate.js`, null); }
                     embed.setAuthor({name: lang.denied_ticket["denied-transcript-embed-title"] != "" ? lang.denied_ticket["denied-transcript-embed-title"].replace(`{{ADMIN}}`, `${user.username}/${user.id}`) + `\n${embed?.author.name}`: `Denied by ${user.username}/${user.id} \n${embed?.author.name}`, iconURL: user.displayAvatarURL()});
                     embed.addFields({
                         name: lang.denied_ticket["denied-transcript-embed-response-title"] != "" ? lang.denied_ticket["denied-transcript-embed-response-title"] : `Response Time`,
@@ -1229,7 +1243,7 @@ module.exports = async function (client, interaction) {
 
                 } else if (customId == "supportticket") {
 
-                    await interaction.deferUpdate().catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    try { await interaction.deferUpdate(); } catch (err) { if (err && err.code !== 10062 && err.code !== 40060) func.handle_errors(err, client, `interactionCreate.js`, null); }
 
                     if (found) {
                         const handlerRaw = require("../content/handler/options.json");
