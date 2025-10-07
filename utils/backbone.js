@@ -2,6 +2,7 @@ const Discord = require("discord.js");
 const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
 let unirest = require('unirest');
 const func = require("./functions.js")
+const logger = require('./logger');
 const lang = require("../content/handler/lang.json");
 const { createDB } = require('./quickdb');
 const db = createDB();
@@ -39,12 +40,15 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		}
 
 		let errorFound = 0;
+        // Visibility: beginning ticket DM flow
+        try { logger.event('TicketDMStart', { userId: user.id, ticketType }); } catch (_) {}
         // Send a divider line as the first DM, with retry + verification
         {
             const result = await func.sendDMWithRetry(user, '------------ BRIT SUPPORT -------------', { maxAttempts: 3, baseDelayMs: 500 });
             if (!result.delivered) {
                 errorFound++
                 await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                try { logger.warn('[TicketDM] Failed initial divider DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
 		if (errorFound == 1) return;
@@ -56,6 +60,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             if (!result.delivered) {
                 errorFound++
                 await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                try { logger.warn('[TicketDM] Failed welcome DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
 
@@ -175,6 +180,8 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				if (err.message === `Cannot send messages to this user`) return;
 			func.handle_errors(err, client, `backbone.js`, null)
 			});
+
+        try { logger.event('TicketCollected', { userId: user.id, ticketType, length: responses.length }); } catch (_) {}
 		
 	
 
@@ -357,7 +364,8 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			}
 		}
 		
-		if (questionFilesystem["open-as-ticket"] == true) {
+        if (questionFilesystem["open-as-ticket"] == true) {
+            try { logger.event('TicketOpenChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 
 await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo);
 try {
@@ -368,7 +376,8 @@ try {
 	metrics.ticketOpened(ticketType, serverVal, user.id, user.username, scope);
 } catch (_) {}
 
-		} else {
+        } else {
+        try { logger.event('TicketHoldChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 
 		const row = new Discord.MessageActionRow()
 		if (questionFilesystem.active_ticket_button_content.accept.enabled == true) {
@@ -411,8 +420,10 @@ try {
 			sent = await ticketChannel.send({ content: (pingRoleIDs && pingRoleIDs.length > 0) ? pingTags : `<@${user.id}>`, embeds: [embed], components: [row], files: [ dirpath ] }).catch(e => func.handle_errors(e, client, `backbone.js`, null));
 			unlinkSync(dirpath);
 		} else {
-			sent = await ticketChannel.send({ content: (pingRoleIDs && pingRoleIDs.length > 0) ? pingTags : `<@${user.id}>`, embeds: [embed], components: [row] }).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+            sent = await ticketChannel.send({ content: (pingRoleIDs && pingRoleIDs.length > 0) ? pingTags : `<@${user.id}>`, embeds: [embed], components: [row] }).catch(e => func.handle_errors(e, client, `backbone.js`, null));
 		};
+
+        try { logger.event('TicketPosted', { channelId: sent?.channel?.id || ticketChannel?.id, messageId: sent?.id, ticketType, formattedTicketNumber }); } catch (_) {}
 
 	}
 

@@ -9,6 +9,7 @@ const lang = require("../content/handler/lang.json");
 const { createDB } = require('../utils/quickdb')
 const db = createDB();
 const metrics = require('../utils/metrics');
+const logger = require('../utils/logger');
 const applications = require('../utils/applications');
 const perms = require('../utils/permissions');
 
@@ -18,6 +19,12 @@ if (!Discord.Collection.prototype.commands) {
 }
 
 module.exports = async function (client, interaction) {
+    // Minimal interaction visibility without metrics noise
+    try {
+        const kind = interaction.isCommand() ? 'command' : (interaction.isButton() ? 'button' : (interaction.isModalSubmit ? 'modal' : (interaction.isSelectMenu ? 'select' : 'other')));
+        const id = interaction.isCommand() ? interaction.commandName : (interaction.customId || 'n/a');
+        logger.event('Interaction', { kind, id, userId: interaction.user?.id, channelId: interaction.channelId });
+    } catch (_) {}
     if (interaction.isButton() && ['prev_page', 'next_page'].includes(interaction.customId)) {
         return;
     }
