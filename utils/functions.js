@@ -404,12 +404,14 @@ try {
         .setTitle('How to Reply')
         .setDescription(replyInfo);
 
-    await ticketChannel.send({ embeds: [instructionEmbed] });
+    // Fire-and-forget to avoid blocking the interaction path
+    ticketChannel.send({ embeds: [instructionEmbed] }).catch(() => {});
 
-    // Post Cheetos check in the main ticket channel (not in staff thread)
-    try {
-        const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
-        if (shouldCheckCheetos) {
+    // Post Cheetos check in the main ticket channel (not in staff thread) - run in background to avoid blocking
+    (async () => {
+        try {
+            const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
+            if (!shouldCheckCheetos) return;
             const req = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
             try { if (client.config && client.config.debug) console.log(`[Cheetos] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')}`); } catch(_) {}
@@ -419,12 +421,8 @@ try {
                 'Accept': 'text/plain',
                 'User-Agent': 'ticket-bot (Discord.js)'
             });
-
-            // Parse plaintext response into records
             const raw = (resp && (resp.raw_body || resp.body)) || '';
             const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
-            try { if (client.config && client.config.debug) console.log(`[Cheetos] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`); } catch(_) {}
-            // Try JSON first
             let records = [];
             try {
                 if (text.trim().startsWith('[') || text.trim().startsWith('{')) {
@@ -462,17 +460,12 @@ try {
                 }
                 if (current && Object.keys(current).length) records.push(current);
             }
-
-            const count = records.length;
-
-            // Compute LTS from Last Time Seen In Guild (TimestampAdded) per requirements
             let lastEpoch = null;
             for (const r of records) {
                 const tsRaw = r['TimestampAdded'] ?? r.TimestampAdded;
                 const ts = tsRaw !== undefined && tsRaw !== null ? parseInt(String(tsRaw), 10) : null;
                 if (Number.isFinite(ts) && ts > 0 && (!lastEpoch || ts > lastEpoch)) lastEpoch = ts;
             }
-            // Short age helper: h/d/w/m/y
             const toShortAge = (sec) => {
                 const s = Math.max(0, sec|0);
                 const h = Math.floor(s / 3600);
@@ -492,29 +485,25 @@ try {
                 const diffSec = Math.max(0, nowSec - lastEpoch);
                 ltsStr = toShortAge(diffSec);
             }
-
-            // WR = how many distinct discords they have roles in
-            // Approximate by counting records where Roles is non-empty
             let wr = 0;
             for (const r of records) {
                 const rolesVal = (r['Roles'] || '').trim();
                 if (rolesVal && rolesVal.length > 0) wr++;
             }
-            try { if (client.config && client.config.debug) console.log(`[Cheetos] Parsed count=${count} LTS=${ltsStr} WR=${wr}`); } catch(_) {}
-
             const cheetosEmbed = new Discord.MessageEmbed()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('Cheetos Check')
-                .setDescription(count > 0 ? `Result: ${count} CC LTS ${ltsStr} ${wr} WR` : `Cheetos Check: Clean`);
+                .setDescription(records.length > 0 ? `Result: ${records.length} CC LTS ${ltsStr} ${wr} WR` : `Cheetos Check: Clean`);
             await ticketChannel.send({ embeds: [cheetosEmbed] });
-        }
-    } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
+        } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
+    })();
 
     // Skip creating staff thread for internal tickets
+    let thread = null;
     if (!questionFile.internal) try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         // Create as public thread first so we can add role permissions
-        const thread = await ticketChannel.threads.create({
+        thread = await ticketChannel.threads.create({
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
@@ -685,6 +674,9 @@ try {
 
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
+
+    // Return identifiers for follow-up async tasks if caller needs them
+    try { return { ticketChannelId: ticketChannel?.id || null, staffThreadId: thread?.id || null }; } catch (_) { return; }
 }
 
 // Add function to update bot status
@@ -874,7 +866,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
                 try {
                     const filePathFull = `${save_path}/${channel.name}.full.html`;
-                    fs.writeFileSync(filePathFull, data);
+                    await fs.promises.writeFile(filePathFull, data);
                 } catch (e) {
                     // removed debug
                 }
@@ -896,7 +888,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 if (userData) {
                     try {
                         const filePathUser = `${save_path}/${channel.name}.html`;
-                        fs.writeFileSync(filePathUser, userData);
+                        await fs.promises.writeFile(filePathUser, userData);
                     } catch (e) {
                         // removed debug
                     }
@@ -920,7 +912,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                         });
                         if (staffData) {
                             const staffPath = `${save_path}/${channel.name}.staff.html`;
-                            fs.writeFileSync(staffPath, staffData);
+                            await fs.promises.writeFile(staffPath, staffData);
                         }
                     }
                 } catch (e) {
@@ -933,12 +925,10 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
                 } catch (_) {}
                 if (logs_channel) {
-                    const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
-                    logs_channel.send({ content: `Transcript saved: <${transcriptURL}>`, files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
+                    logs_channel.send({ content: `Transcript saved: <${transcriptURL}>` }).catch(e => func.handle_errors(e, client, "functions.js", null));
                 }
             } else {
-                const file = new Discord.MessageAttachment(data, `${channel.name}.full.html`);
-                if (logs_channel) logs_channel.send({ files: [file] }).catch(e => func.handle_errors(e, client, "functions.js", null));
+                if (logs_channel) logs_channel.send({ content: `Transcript generated (not persisted).` }).catch(e => func.handle_errors(e, client, "functions.js", null));
             }
         })(transcriptResult);
         // After transcript generation, compute metrics
