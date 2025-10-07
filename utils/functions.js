@@ -550,8 +550,8 @@ try {
                     { name: 'Steam Profile', value: `[${bmInfo.steamId}](https://steamcommunity.com/profiles/${bmInfo.steamId})` }
                 );
 
-            if (bmInfo.banInfo && bmInfo.banInfo.length > 0) {
-                staffEmbed.addField('BM Bans', bmInfo.banInfo.join('\n').substring(0, 1024));
+                if (bmInfo.banInfo && bmInfo.banInfo.length > 0) {
+                staffEmbed.addFields({ name: 'BM Bans', value: bmInfo.banInfo.join('\n').substring(0, 1024) });
             }
             
             try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
