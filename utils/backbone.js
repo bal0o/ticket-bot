@@ -39,26 +39,25 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		}
 
 		let errorFound = 0;
-		// Send a divider line as the first DM
-		await user.send('------------ BRIT SUPPORT -------------').catch(async (err) => {
-			if (err.message === `Cannot send messages to this user`) {
-				errorFound++
-				let errormsg = await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
-				return;
-			}
-			return;
-		})
+        // Send a divider line as the first DM, with retry + verification
+        {
+            const result = await func.sendDMWithRetry(user, '------------ BRIT SUPPORT -------------', { maxAttempts: 3, baseDelayMs: 500 });
+            if (!result.delivered) {
+                errorFound++
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+            }
+        }
 		if (errorFound == 1) return;
 
-		// Send the welcome/pre-message first
-		await user.send(questionFilesystem["pre-message"] == "" ? "Hi there! I'll ask you a few questions to help us better assist you. Please answer them to the best of your ability." : questionFilesystem["pre-message"]).catch(async (err) => {
-				if (err.message === `Cannot send messages to this user`) {
-					errorFound++
-				let errormsg = await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
-					return;
-				}
-				return;
-			})
+        // Send the welcome/pre-message first
+        {
+            const welcomeText = questionFilesystem["pre-message"] == "" ? "Hi there! I'll ask you a few questions to help us better assist you. Please answer them to the best of your ability." : questionFilesystem["pre-message"];
+            const result = await func.sendDMWithRetry(user, welcomeText, { maxAttempts: 3, baseDelayMs: 600 });
+            if (!result.delivered) {
+                errorFound++
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+            }
+        }
 
 			if (errorFound == 1) return;
 		await interaction.editReply({content: "I've sent you a DM to continue our conversation!", ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
@@ -88,7 +87,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 					rows.push(row);
 				}
 
-				const sent = await user.send({
+                const sent = await user.send({
 					content: "Which server are you playing on?",
 					components: rows
 				}).catch(async (err) => {
@@ -130,7 +129,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				if (stop) break;
 				const question = questionFilesystem.questions[x];
 
-			const sent = await user.send(question).catch(async (err) => {
+            const sent = await user.send(question).catch(async (err) => {
 					if (err.message === `Cannot send messages to this user`) return;
 				func.handle_errors(err, client, `backbone.js`, null)
 				})
@@ -172,7 +171,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			}
 		} catch(_){}
 
-		await user.send(questionFilesystem["post-message"] == "" ? "Thanks for your responses! Our team will review your ticket and get back to you as soon as possible." : questionFilesystem["post-message"]).catch(async (err) => {
+        await user.send(questionFilesystem["post-message"] == "" ? "Thanks for your responses! Our team will review your ticket and get back to you as soon as possible." : questionFilesystem["post-message"]).catch(async (err) => {
 				if (err.message === `Cannot send messages to this user`) return;
 			func.handle_errors(err, client, `backbone.js`, null)
 			});

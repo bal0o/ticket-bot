@@ -38,183 +38,83 @@ module.exports = async function (client, message) {
 
         if (message.author.bot || client.blocked_users.has(message.author.id)) return;
         if (message.channel.type === "DM") {
-            const handlerRaw = require("../content/handler/options.json");
-            const handlerKeys = Object.keys(handlerRaw.options);
-            let categoryIDs = "";
-        
-            for (let TicketType of handlerKeys) {
-                const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == TicketType.toLowerCase());
-                let typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-                categoryIDs = categoryIDs + `${typeFile["ticket-category"]} `
+            const guild = client.guilds.cache.get(config.channel_ids.staff_guild_id);
+            if (!guild) return;
+
+            // Fast-path: find user's ticket channels by topic
+            const topicChannels = guild.channels.cache.filter(ch => ch.type === 'GUILD_TEXT' && ch.topic === message.author.id);
+            const activeTickets = [];
+
+            // Build ticket items from channel name (avoid fetching pins)
+            for (const ch of topicChannels.values()) {
+                const name = ch.name || '';
+                const parts = name.split('-');
+                const ticketNumber = parts.length > 1 ? parts[parts.length - 1] : 'unknown';
+                const typeGuess = parts.length > 1 ? parts.slice(0, parts.length - 1).join('-') : 'ticket';
+                activeTickets.push({ channel: ch, type: 'regular', ticketInfo: { title: `${typeGuess} #${ticketNumber}` } });
             }
 
-            let guild = client.guilds.cache.find(x => x.id == config.channel_ids.staff_guild_id);
-            
-            // Find all user's active ticket channels
-            const channels = guild.channels.cache.filter(channel => 
-                categoryIDs.includes(channel.parentId)
-            );
-
-            let activeTickets = [];
-            for (const channel of channels.values()) {
-                try {
-                    const pinnedMessages = await channel.messages.fetchPinned();
-                    const userTicket = pinnedMessages.find(m => 
-                        m.embeds[0]?.footer?.text?.includes(message.author.id)
-                    );
-                    if (userTicket) {
-                        activeTickets.push({
-                            channel: channel,
-                            ticketInfo: userTicket.embeds[0],
-                            type: 'regular'
-                        });
-                    }
-                } catch (err) {
-                    continue;
-                }
-            }
-            
-            // Also check for application communication channels
+            // Application communication channels via index
             try {
-                const allChannels = guild.channels.cache;
-                for (const [channelId, channel] of allChannels) {
-                    // Check if this channel is linked to an application
-                    const appId = await db.get(`AppMap.channelToApp.${channelId}`);
-                    if (appId) {
-                        const appRec = await require('../utils/applications').getApplication(appId);
-                        if (appRec && appRec.userId === message.author.id) {
-                            activeTickets.push({
-                                channel: channel,
-                                ticketInfo: { title: `Application Communication - ${appRec.type}`, footer: { text: `${message.author.id}-app` } },
-                                type: 'application',
-                                appId: appId
-                            });
-                        }
+                const appIds = (await db.get(`AppMap.userToChannels.${message.author.id}`)) || [];
+                for (const channelId of appIds) {
+                    const ch = guild.channels.cache.get(channelId);
+                    if (ch) {
+                        activeTickets.push({ channel: ch, type: 'application', ticketInfo: { title: `application #n/a` } });
                     }
                 }
             } catch (err) {
-                console.error('Error checking application channels:', err);
+                console.error('Error loading application channel index:', err);
             }
 
-            // If no tickets found
             if (activeTickets.length === 0) {
-                // Check if user has any application communication channels
-                const appChannels = [];
-                try {
-                    const allChannels = guild.channels.cache;
-                    for (const [channelId, channel] of allChannels) {
-                        const appId = await db.get(`AppMap.channelToApp.${channelId}`);
-                        if (appId) {
-                            const appRec = await require('../utils/applications').getApplication(appId);
-                            if (appRec && appRec.userId === message.author.id) {
-                                appChannels.push({
-                                    channel: channel,
-                                    appRec: appRec
-                                });
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.error('Error checking application channels:', err);
-                }
-                
-                if (appChannels.length === 0) {
-                    // No tickets or application channels found
-                    let ticketCountEmbed = new Discord.MessageEmbed()
-                        .setTitle(lang.active_tickets["player-active-title"] != "" ? lang.active_tickets["player-active-title"].replace(`{{COUNT}}`, "0") : `You currently have 0 ticket(s) being looked at by the team.`)
-                        .setDescription(lang.active_tickets["player-active-description"] != "" ? lang.active_tickets["player-active-description"].replace(`{{TICKETCHANNEL}}`, `<#${client.config.channel_ids.post_embed_channel_id}>`) : `If you would like to open a ticket, please head to <#${client.config.channel_ids.post_embed_channel_id}>.\n`)
-                        .setColor(client.config.bot_settings.main_color)
-                        .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()})
+                const ticketCountEmbed = new Discord.MessageEmbed()
+                    .setTitle(lang.active_tickets["player-active-title"] != "" ? lang.active_tickets["player-active-title"].replace(`{{COUNT}}`, "0") : `You currently have 0 ticket(s) being looked at by the team.`)
+                    .setDescription(lang.active_tickets["player-active-description"] != "" ? lang.active_tickets["player-active-description"].replace(`{{TICKETCHANNEL}}`, `<#${client.config.channel_ids.post_embed_channel_id}>`) : `If you would like to open a ticket, please head to <#${client.config.channel_ids.post_embed_channel_id}>.\n`)
+                    .setColor(client.config.bot_settings.main_color)
+                    .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()});
 
-                    await message.channel.send({embeds: [ticketCountEmbed]})
-                    return;
-                } else {
-                    // User has application communication channels, process the message
-                    if (appChannels.length === 1) {
-                        await processTicketMessage(message, appChannels[0].channel, client);
-                        return;
-                    } else {
-                        // Multiple application channels - let user choose
-                        const selectionEmbed = new Discord.MessageEmbed()
-                            .setTitle("Multiple Application Communications")
-                            .setDescription("Please select which application communication you want to send your message to:")
-                            .setColor(client.config.bot_settings.main_color);
-
-                        let appList = "";
-                        appChannels.forEach((app, index) => {
-                            appList += `${index + 1}) ${app.appRec.type} Application\n`;
-                        });
-                        selectionEmbed.addFields({ name: "Your Applications", value: appList });
-
-                        const selectionMessage = await message.channel.send({embeds: [selectionEmbed]});
-                        usersSelectingTicket.add(message.author.id);
-
-                        const filter = m => m.author.id === message.author.id && /^[1-9][0-9]*$/.test(m.content) && parseInt(m.content) <= appChannels.length;
-                        try {
-                            const collected = await message.channel.awaitMessages({ filter, max: 1, time: 30000, errors: ['time'] });
-                            const selectedApp = appChannels[parseInt(collected.first().content) - 1];
-                            if (selectedApp) {
-                                await selectionMessage.delete().catch(() => {});
-                                await processTicketMessage(message, selectedApp.channel, client);
-                            }
-                        } catch (err) {
-                            await selectionMessage.delete().catch(() => {});
-                            await message.channel.send("No valid selection made. Please try sending your message again.");
-                        } finally {
-                            usersSelectingTicket.delete(message.author.id);
-                        }
-                        return;
-                    }
-                }
+                await message.channel.send({embeds: [ticketCountEmbed]});
+                return;
             }
 
-            // If only one ticket, process it directly
             if (activeTickets.length === 1) {
                 await processTicketMessage(message, activeTickets[0].channel, client);
                 return;
             }
 
-            // If multiple tickets, create selection menu
+            // Multiple tickets: selection
             const selectionEmbed = new Discord.MessageEmbed()
                 .setTitle("Multiple Active Tickets")
                 .setDescription("Please select which ticket you want to send your message to by replying with the corresponding number:")
                 .setColor(client.config.bot_settings.main_color);
 
             let ticketList = "";
-			activeTickets.forEach((ticket, index) => {
-				const rawTitle = (ticket && ticket.ticketInfo && ticket.ticketInfo.title) ? ticket.ticketInfo.title : "";
-				const ticketType = rawTitle.includes(" | ") ? rawTitle.split(" | ")[0] : (rawTitle || "Ticket");
-				const parts = rawTitle.split("#");
-				const ticketNumber = parts.length > 1 ? (parts[1] || "").trim() : "unknown";
-				ticketList += `${index + 1}) ${ticketType} #${ticketNumber}\n`;
-			});
+            activeTickets.forEach((t, idx) => {
+                const name = t.channel.name || 'ticket-unknown';
+                const parts = name.split('-');
+                const num = parts.length > 1 ? parts[parts.length - 1] : 'unknown';
+                const typeGuess = parts.length > 1 ? parts.slice(0, parts.length - 1).join('-') : 'ticket';
+                ticketList += `${idx + 1}) ${typeGuess} #${num}\n`;
+            });
             selectionEmbed.addFields({ name: "Your Active Tickets", value: ticketList });
 
             const selectionMessage = await message.channel.send({embeds: [selectionEmbed]});
-
-            // Add user to selection process
             usersSelectingTicket.add(message.author.id);
-
-            // Wait for user's selection
             const filter = m => m.author.id === message.author.id && /^[1-9][0-9]*$/.test(m.content) && parseInt(m.content) <= activeTickets.length;
             try {
                 const collected = await message.channel.awaitMessages({ filter, max: 1, time: 30000, errors: ['time'] });
-                const selectedTicket = activeTickets[parseInt(collected.first().content) - 1];
-                if (selectedTicket) {
-                    // Only delete the selection embed
+                const selected = activeTickets[parseInt(collected.first().content) - 1];
+                if (selected) {
                     await selectionMessage.delete().catch(() => {});
-                    
-                    // Process the message for the selected ticket
-                    await processTicketMessage(message, selectedTicket.channel, client);
+                    await processTicketMessage(message, selected.channel, client);
                 } else {
                     await message.channel.send("Invalid selection. Please try again.").catch(() => {});
                 }
             } catch (err) {
-                // Delete the selection embed if it times out
                 await selectionMessage.delete().catch(() => {});
                 await message.channel.send("No valid selection made. Please try sending your message again.");
             } finally {
-                // Remove user from selection process
                 usersSelectingTicket.delete(message.author.id);
             }
         } else {
@@ -301,7 +201,8 @@ module.exports = async function (client, message) {
                             // Send current batch first
                             if (filesToSend.length > 0) {
                                 try {
-                                    const filesSent = await user.send({ files: filesToSend });
+                                    const dmRes = await func.sendDMWithRetry(user, { files: filesToSend }, { maxAttempts: 2, baseDelayMs: 500 });
+                                    const filesSent = dmRes && dmRes.message ? dmRes.message : null;
                                     if (filesSent && filesSent.id) {
                                         staffForward.filesMessageId = filesSent.id;
                                         staffForward.dmChannelId = filesSent.channel?.id || staffForward.dmChannelId;
@@ -324,7 +225,8 @@ module.exports = async function (client, message) {
                     // Send remaining files
                     if (filesToSend.length > 0) {
                         try {
-                            const filesSent = await user.send({ files: filesToSend });
+                            const dmRes2 = await func.sendDMWithRetry(user, { files: filesToSend }, { maxAttempts: 2, baseDelayMs: 600 });
+                            const filesSent = dmRes2 && dmRes2.message ? dmRes2.message : null;
                             if (filesSent && filesSent.id) {
                                 staffForward.filesMessageId = filesSent.id;
                                 staffForward.dmChannelId = filesSent.channel?.id || staffForward.dmChannelId;
@@ -337,7 +239,8 @@ module.exports = async function (client, message) {
                                 let successCount = 0;
                                 for (const file of filesToSend) {
                                     try {
-                                        const individualSent = await user.send({ files: [file] });
+                                        const dmInd = await func.sendDMWithRetry(user, { files: [file] }, { maxAttempts: 2, baseDelayMs: 600 });
+                                        const individualSent = dmInd && dmInd.message ? dmInd.message : null;
                                         if (individualSent && individualSent.id) {
                                             successCount++;
                                             staffForward.dmChannelId = individualSent.channel?.id || staffForward.dmChannelId;
@@ -378,7 +281,8 @@ module.exports = async function (client, message) {
 				try {
 					const isUrlOnly = /^https?:\/\/\S+$/i.test(replyContent);
                     if (isUrlOnly) {
-                        const sent = await user.send(replyContent);
+                        const dmText = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 500 });
+                        const sent = dmText && dmText.message ? dmText.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
                             staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -404,7 +308,8 @@ module.exports = async function (client, message) {
                         .setDescription(replyContent)
                         .setColor(client.config.bot_settings.main_color)
                     
-                    const sent = await user.send({ embeds: [replyEmbed] });
+                    const dmEmb = await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                    const sent = dmEmb && dmEmb.message ? dmEmb.message : null;
                     if (sent && sent.id) {
                         staffForward.textMessageIds.push(sent.id);
                         staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -427,7 +332,8 @@ module.exports = async function (client, message) {
                     return message.reply("Please provide a message to send.");
                 }
                 try {
-                    const sent = await user.send(replyContent);
+                    const dmAnon = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 600 });
+                    const sent = dmAnon && dmAnon.message ? dmAnon.message : null;
                     if (sent && sent.id) {
                         staffForward.textMessageIds.push(sent.id);
                         staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -457,7 +363,8 @@ module.exports = async function (client, message) {
 
                 if (ticketType && ticketType["anonymous-only-replies"] === true) {
                     try {
-                        const sent = await user.send(replyContent);
+                        const dmAnon2 = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 600 });
+                        const sent = dmAnon2 && dmAnon2.message ? dmAnon2.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
                             staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -471,7 +378,8 @@ module.exports = async function (client, message) {
 					try {
 						const isUrlOnly = /^https?:\/\/\S+$/i.test(replyContent);
 						if (isUrlOnly) {
-                            const sent = await user.send(replyContent);
+                            const dmUrl = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 500 });
+                            const sent = dmUrl && dmUrl.message ? dmUrl.message : null;
                             if (sent && sent.id) {
                                 staffForward.textMessageIds.push(sent.id);
                                 staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -494,7 +402,8 @@ module.exports = async function (client, message) {
                             .setDescription(replyContent)
                             .setColor(client.config.bot_settings.main_color)
                         
-                        const sent = await user.send({ embeds: [replyEmbed] });
+                        const dmEmb2 = await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                        const sent = dmEmb2 && dmEmb2.message ? dmEmb2.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
                             staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
@@ -553,8 +462,15 @@ async function processTicketMessage(message, channel, client) {
     const webhookChannel = isThread ? channel.parent : channel;
     const threadId = isThread ? channel.id : null;
 
-    // Try to get cached webhook first (cache by parent id if thread)
-    let webhook = webhookCache.get(webhookChannel.id);
+    // Try to get cached webhook first (cache by parent id if thread), persist until invalid
+    let cacheEntry = webhookCache.get(webhookChannel.id);
+    let webhook = null;
+    if (cacheEntry && cacheEntry.webhook) {
+        webhook = cacheEntry.webhook;
+    } else if (cacheEntry) {
+        // Backward compatibility if a raw webhook object was stored previously
+        webhook = cacheEntry;
+    }
     
     if (!webhook) {
         try {
@@ -572,8 +488,8 @@ async function processTicketMessage(message, channel, client) {
                 });
             }
             
-            // Cache the webhook for future use
-            webhookCache.set(webhookChannel.id, webhook);
+            // Cache the webhook for future use (no TTL; cleared on failure)
+            webhookCache.set(webhookChannel.id, { webhook });
             
         } catch (webhookError) {
             console.error(`Failed to create/fetch webhook in channel ${webhookChannel?.id || 'unknown'}:`, webhookError);
@@ -587,7 +503,7 @@ async function processTicketMessage(message, channel, client) {
                         avatar: message.author.displayAvatarURL()
                     });
                 }
-                webhookCache.set(webhookChannel.id, webhook);
+                webhookCache.set(webhookChannel.id, { webhook });
             } catch (retryError) {
                 console.error(`Retry failed to create/fetch webhook in channel ${webhookChannel?.id || 'unknown'}:`, retryError);
                 
@@ -643,7 +559,7 @@ async function processTicketMessage(message, channel, client) {
                         avatar: message.author.displayAvatarURL()
                     });
                 }
-                webhookCache.set(webhookChannel.id, webhookRetry);
+                webhookCache.set(webhookChannel.id, { webhook: webhookRetry });
                 combinedMessage = await webhookRetry.send({
                     content: sanitize(messageContent),
                     username: username,
@@ -689,7 +605,7 @@ async function processTicketMessage(message, channel, client) {
                             avatar: message.author.displayAvatarURL()
                         });
                     }
-                    webhookCache.set(webhookChannel.id, webhookRetry);
+                    webhookCache.set(webhookChannel.id, { webhook: webhookRetry });
                     filesMessage = await webhookRetry.send({
                         username: username,
                         avatarURL: message.author.displayAvatarURL(),
@@ -736,7 +652,7 @@ async function processTicketMessage(message, channel, client) {
                                 avatar: message.author.displayAvatarURL()
                             });
                         }
-                        webhookCache.set(webhookChannel.id, webhookRetry);
+                        webhookCache.set(webhookChannel.id, { webhook: webhookRetry });
                         const sent = await webhookRetry.send({
                             content: sanitize(toSend),
                             username: username,
