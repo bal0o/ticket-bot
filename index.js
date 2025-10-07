@@ -1,18 +1,11 @@
 // Environment variables are now loaded from config.json
 const { Client,Collection,Intents } = require("discord.js");
 const config = require("./config/config.json");
-const logger = require("./utils/logger");
 const axios = require("axios");
 // Debug helper toggled via config.debug
 const isDebugEnabled = !!config.debug;
 const debugLog = (...args) => { if (isDebugEnabled) console.log(...args); };
-
-// Initialize structured logger and capture existing console output
-try {
-	logger.init({ level: isDebugEnabled ? 'debug' : 'info' });
-	logger.captureConsole();
-	logger.attachProcessHandlers();
-} catch (_) {}
+const logger = require('./utils/logger');
 
 const client = new Client({ intents: [
 	Intents.FLAGS.GUILDS,
@@ -46,12 +39,8 @@ client.login(config.tokens.bot_token).then(() => {
 	let endTime = new Date().getTime();
 
 	let difference = Math.round(endTime - startTime);
-	console.log(`Successfully logged in as ${client.user.username}! Took ${difference}ms`);
+    logger.info(`[Startup] Logged in as ${client.user.username} in ${difference}ms`);
 	try { require('./utils/metrics').initPersisted?.(); } catch (_) {}
-
-	// Attach Discord client event logging and start resource monitor
-	try { logger.attachDiscordClient(client); } catch (_) {}
-	try { logger.startResourceMonitor({ intervalMs: 15000, logOnChangeOnly: true }); } catch (_) {}
 
 	// Start application interview scheduler loop
 	try {
@@ -63,12 +52,12 @@ client.login(config.tokens.bot_token).then(() => {
 		const interviewCategory = cfg.applications && cfg.applications.interview ? cfg.applications.interview.category_id : null;
 		const interviewDuration = cfg.applications && cfg.applications.interview ? cfg.applications.interview.duration_minutes : 30;
 		
-		debugLog(`[Interview Scheduler] Initialized with guildId: ${guildId}, adminRoleId: ${adminRoleId}, interviewCategory: ${interviewCategory}, duration: ${interviewDuration} minutes`);
+        debugLog(`[Interview Scheduler] Initialized with guildId: ${guildId}, adminRoleId: ${adminRoleId}, interviewCategory: ${interviewCategory}, duration: ${interviewDuration} minutes`);
 		async function runScheduler() {
 			try {
 				const jobs = await db.get('ApplicationSchedules') || {};
 				const now = Date.now();
-				debugLog(`[Interview Scheduler] Checking ${Object.keys(jobs).length} jobs at ${new Date(now).toISOString()}`);
+                debugLog(`[Interview Scheduler] Checking ${Object.keys(jobs).length} jobs at ${new Date(now).toISOString()}`);
 				
 				// Immediate cleanup of completed/invalid jobs to avoid log spam
 				let mutated = false;
@@ -119,7 +108,7 @@ client.login(config.tokens.bot_token).then(() => {
 								continue; 
 							}
 							
-							debugLog(`[Interview Scheduler] Found guild: ${guild.name} (${guild.id})`);
+                            debugLog(`[Interview Scheduler] Found guild: ${guild.name} (${guild.id})`);
 							debugLog(`[Interview Scheduler] Guild channels:`, guild.channels.cache.size, 'channels available');
 							debugLog(`[Interview Scheduler] Guild permissions:`, guild.members.me?.permissions?.toArray() || 'unknown');
 							// Build permission overwrites with proper user/role resolution
@@ -166,7 +155,7 @@ client.login(config.tokens.bot_token).then(() => {
 								debugLog(`[Interview Scheduler] No category specified, creating channel in guild root`);
 							}
 							
-							debugLog(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId} with options:`, JSON.stringify(createOpts, null, 2));
+                            debugLog(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId} with options:`, JSON.stringify(createOpts, null, 2));
 							const vc = await guild.channels.create(name, createOpts);
 							debugLog(`[Interview Scheduler] Successfully created voice channel ${vc.id} for job ${jobId}`);
 							// Remove job immediately to prevent repeated logs
@@ -210,11 +199,11 @@ client.login(config.tokens.bot_token).then(() => {
 									}, { headers: { Authorization: `Bot ${config.tokens.bot_token}` } });
 								}
 							} catch (notifyError) {
-								console.error('Failed to send voice channel notifications:', notifyError?.response?.data || notifyError);
+                            logger.warn('Failed to send voice channel notifications:', notifyError?.response?.data || notifyError);
 							}
 						} catch (e) {
-							console.error(`[Interview Scheduler] Error creating voice channel for job ${jobId}:`, e);
-							console.error(`[Interview Scheduler] Error details:`, {
+                            logger.error(`[Interview Scheduler] Error creating voice channel for job ${jobId}:`, e);
+                            logger.error(`[Interview Scheduler] Error details:`, {
 								message: e.message,
 								code: e.code,
 								status: e.status,
@@ -327,7 +316,7 @@ client.login(config.tokens.bot_token).then(() => {
 					}
 				}
 			} catch (cleanupError) {
-				console.error('Interview cleanup scheduler error:', cleanupError);
+                logger.error('Interview cleanup scheduler error:', cleanupError);
 			}
 			setTimeout(runCleanupScheduler, 30000); // Check every 30 seconds
 		}
@@ -338,3 +327,31 @@ client.login(config.tokens.bot_token).then(() => {
 client
     .on("debug", console.log)
     .on("warn", console.log)
+
+// Basic process-level diagnostics to surface crashes and memory spikes
+process.on('unhandledRejection', (reason, promise) => {
+    try {
+        logger.error('[Process] UnhandledRejection', { reason: (reason && (reason.stack || reason.message || String(reason))) || String(reason) });
+    } catch (_) { console.error('[Process] UnhandledRejection', reason); }
+});
+process.on('uncaughtException', (err) => {
+    try {
+        logger.error('[Process] UncaughtException', { error: (err && (err.stack || err.message)) || String(err) });
+    } catch (_) { console.error('[Process] UncaughtException', err); }
+});
+process.on('warning', (warning) => {
+    try {
+        logger.warn('[Process] Warning', { name: warning.name, message: warning.message, stack: warning.stack });
+    } catch (_) { console.warn('[Process] Warning', warning); }
+});
+
+// Periodic health log: event loop/memory snapshot
+const HEALTH_INTERVAL_MS = 60 * 1000;
+setInterval(() => {
+    try {
+        const mem = process.memoryUsage();
+        const rssMb = Math.round((mem.rss || 0) / 1024 / 1024);
+        const heapMb = Math.round((mem.heapUsed || 0) / 1024 / 1024);
+        logger.info('[Health] Memory', { rssMb, heapMb });
+    } catch (_) {}
+}, HEALTH_INTERVAL_MS).unref();
