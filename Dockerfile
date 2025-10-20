@@ -28,12 +28,8 @@ RUN mkdir -p /app/config /app/content /app/transcripts /app/data
 RUN chown -R node:node /app
 USER node
 
-# Expose port for web interface
+# Expose port for web interface (web image only)
 EXPOSE 3050
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
-    CMD curl -fsS http://localhost:3050/health || exit 1
-
-# Start the application
-CMD ["node", "index.js"]
+# Start mode decided via RUN_MODE env ('bot' | 'web' | 'all')
+CMD ["sh", "-lc", "if [ \"$RUN_MODE\" = web ]; then node web/server.js; else node index.js; fi"]
