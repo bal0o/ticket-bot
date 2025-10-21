@@ -131,6 +131,20 @@ function ensureAuth(req, res, next) {
     return res.redirect('/login');
 }
 
+// Restrict access to Applications area: only site admins or users with application_admin_role_id
+async function ensureApplicationsAccess(req, res, next) {
+    try {
+        if (!req.user) return res.status(401).redirect('/login');
+        const rf = await getRoleFlags(req.user.id);
+        const appAdminRoleId = config.role_ids && config.role_ids.application_admin_role_id;
+        const can = !!(rf && (rf.isAdmin || (appAdminRoleId && Array.isArray(rf.roleIds) && rf.roleIds.includes(appAdminRoleId))));
+        if (can) return next();
+        return res.status(403).render('forbidden', { message: 'You do not have access to Applications.' });
+    } catch (_) {
+        return res.status(403).render('forbidden', { message: 'You do not have access to Applications.' });
+    }
+}
+
 function sanitizeFilename(input) {
     return input.replace(/[^a-zA-Z0-9_.\-]/g, '');
 }
@@ -413,9 +427,7 @@ app.get('/my', ensureAuth, async (req, res) => {
 app.get('/health', (req, res) => res.send('ok'));
 
 // Applications - list
-app.get('/applications', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.get('/applications', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const stage = (req.query.stage || '').trim();
     let items = await applications.listApplications({ stage: stage || undefined });
     // By default, show only active applications (exclude Approved, Denied, Archived)
@@ -434,9 +446,7 @@ app.get('/applications', ensureAuth, async (req, res) => {
 });
 
 // Applications - detail
-app.get('/applications/:id', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -537,10 +547,7 @@ app.get('/applications/:id', ensureAuth, async (req, res) => {
 });
 
 // Applications - stage advance
-app.post('/applications/:id/advance', ensureAuth, async (req, res) => {
-    const roles = await fetchGuildMemberRoles(req.user.id);
-    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
-    if (!isAdmin) return res.status(403).send('Forbidden');
+app.post('/applications/:id/advance', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -553,10 +560,7 @@ app.post('/applications/:id/advance', ensureAuth, async (req, res) => {
 });
 
 // Applications - deny
-app.post('/applications/:id/deny', ensureAuth, async (req, res) => {
-    const roles = await fetchGuildMemberRoles(req.user.id);
-    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
-    if (!isAdmin) return res.status(403).send('Forbidden');
+app.post('/applications/:id/deny', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -566,10 +570,7 @@ app.post('/applications/:id/deny', ensureAuth, async (req, res) => {
 });
 
 // Applications - archive
-app.post('/applications/:id/archive', ensureAuth, async (req, res) => {
-    const roles = await fetchGuildMemberRoles(req.user.id);
-    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
-    if (!isAdmin) return res.status(403).send('Forbidden');
+app.post('/applications/:id/archive', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -579,9 +580,7 @@ app.post('/applications/:id/archive', ensureAuth, async (req, res) => {
 });
 
 // Applications - comment
-app.post('/applications/:id/comment', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/comment', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -590,9 +589,7 @@ app.post('/applications/:id/comment', ensureAuth, async (req, res) => {
 });
 
 // Applications - open communication ticket (new ticket linked to application)
-app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -689,10 +686,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, async (req, res) => {
 });
 
 // Applications - schedule interview
-app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
-    const roles = await fetchGuildMemberRoles(req.user.id);
-    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
-    if (!isAdmin) return res.status(403).send('Forbidden');
+app.post('/applications/:id/schedule', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -771,9 +765,7 @@ app.post('/applications/:id/schedule', ensureAuth, async (req, res) => {
 });
 
 // Applications - list scheduled interviews
-app.get('/applications/:id/interviews', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.get('/applications/:id/interviews', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -811,9 +803,7 @@ app.get('/applications/:id/interviews', ensureAuth, async (req, res) => {
 });
 
 // Applications - delete scheduled interview
-app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const jobId = req.params.jobId;
     
@@ -858,9 +848,7 @@ app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, async (req, r
 });
 
 // Applications - reschedule interview
-app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const jobId = req.params.jobId;
     
@@ -916,9 +904,7 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, async (re
 });
 
 // Applications - skip failed interview
-app.post('/applications/:id/interviews/:jobId/skip', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/interviews/:jobId/skip', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const jobId = req.params.jobId;
     
@@ -946,10 +932,7 @@ app.post('/applications/:id/interviews/:jobId/skip', ensureAuth, async (req, res
 });
 
 // Applications - approve
-app.post('/applications/:id/approve', ensureAuth, async (req, res) => {
-    const roles = await fetchGuildMemberRoles(req.user.id);
-    const isAdmin = roles.includes(config.role_ids.application_admin_role_id) || (await getRoleFlags(req.user.id)).isAdmin;
-    if (!isAdmin) return res.status(403).send('Forbidden');
+app.post('/applications/:id/approve', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
@@ -960,9 +943,7 @@ app.post('/applications/:id/approve', ensureAuth, async (req, res) => {
 });
 
 // Applications - cleanup old interview jobs
-app.post('/applications/:id/interviews/cleanup', ensureAuth, async (req, res) => {
-    const { isStaff } = await getRoleFlags(req.user.id);
-    if (!isStaff) return res.status(403).send('Forbidden');
+app.post('/applications/:id/interviews/cleanup', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const appId = req.params.id;
     
     const appRec = await applications.getApplication(appId);
