@@ -22,7 +22,7 @@ module.exports.fetch = async (channel, options) => {
     const moment = require('moment');
 
     const opts = {
-        numberOfMessages: options.numberOfMessages || 1000,
+        numberOfMessages: (typeof options.numberOfMessages === 'number' && options.numberOfMessages > 0) ? options.numberOfMessages : null,
         channel,
         dateFormat: options.dateFormat || 'E, d MMM yyyy HH:mm:ss Z',
         dateLocale: options.dateLocale || 'en',
@@ -33,10 +33,11 @@ module.exports.fetch = async (channel, options) => {
     };
     moment.locale(opts.dateLocale);
 
-    // Collect messages (newest -> oldest)
+    // Collect messages (newest -> oldest). If numberOfMessages is null, fetch all available.
     let messageCollection = new Discord.Collection();
     let lastId = undefined;
-    for (let i = 0; i < 15 && messageCollection.size < opts.numberOfMessages; i++) {
+    for (;;) {
+        if (opts.numberOfMessages && messageCollection.size >= opts.numberOfMessages) break;
         const fetched = await opts.channel.messages.fetch({ limit: 100, before: lastId }).catch(() => null);
         if (!fetched || fetched.size === 0) break;
         messageCollection = messageCollection.concat(fetched);

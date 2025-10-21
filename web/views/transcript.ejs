@@ -32,6 +32,23 @@
   <div class="iframe-wrap">
     <iframe src="/transcripts/raw/<%= filename %>" title="Transcript"></iframe>
   </div>
+  <div class="container" style="margin-top:12px;">
+    <% const isFull = filename.endsWith('.full.html'); %>
+    <% const isStaff = filename.endsWith('.staff.html'); %>
+    <% const base = filename.replace(/\.(?:full|staff)?\.html$/i, ''); %>
+    <div class="muted">Other views:</div>
+    <div style="display:flex; gap:8px; margin-top:6px;">
+      <% if (!isFull) { %>
+        <a class="btn" href="/transcripts/<%= base %>.full.html">Full</a>
+      <% } %>
+      <% if (!isStaff) { %>
+        <a class="btn" href="/transcripts/<%= base %>.staff.html">Staff</a>
+      <% } %>
+      <% if (!filename.endsWith('.html') || isFull || isStaff) { %>
+        <a class="btn" href="/transcripts/<%= base %>.html">User</a>
+      <% } %>
+    </div>
+  </div>
 </body>
 </html>
 

@@ -1046,7 +1046,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
 
     // Build cache key from filters and pagination
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, roles: Array.from(roleIds).sort() });
     const cached = staffCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {

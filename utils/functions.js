@@ -863,123 +863,112 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             });
         } catch (_) {}
 
-        const transcriptResult = await transcript.fetch(channel, {
-            channel: channel,
-            numberOfMessages: 99,
-            dateFormat: "MMM Do YYYY, h:mm:ss a",
-            dateLocale: "en",
-            DiscordID: DiscordID,
-            closeReason: reason,
-            closedBy: staffMember.username || staffMember.user?.username,
-            responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp)
-        });
-        await (async (data) => {
-            if (!data) return;
+        // Offload transcript rendering to a worker thread to avoid blocking
+        try {
+            const { Worker } = require('worker_threads');
+            const path = require('path');
+            const { save_path, base_url } = client.config.transcript_settings;
+            if (!fs.existsSync(save_path)) fs.mkdirSync(save_path, { recursive: true });
 
-            const { enabled, save_path, base_url } = client.config.transcript_settings;
-            if (enabled) {
-                if (!fs.existsSync(save_path)) {
-                    fs.mkdirSync(save_path, { recursive: true });
-                }
-                try {
-                    const filePathFull = `${save_path}/${channel.name}.full.html`;
-                    await fs.promises.writeFile(filePathFull, data);
-                } catch (e) {
-                    // removed debug
-                }
-                const transcriptURL = `${base_url}${channel.name}.full.html`;
-                // Also generate a user-facing transcript
-                const userData = await transcript.fetch(channel, {
-                    channel: channel,
-                    numberOfMessages: 99,
-                    dateFormat: "MMM Do YYYY, h:mm:ss a",
-                    dateLocale: "en",
-                    DiscordID: DiscordID,
-                    filterMode: 'user',
-                    allowedMessageIds: allowedIds,
-                    isAnonTicket: !!typeFile["anonymous-only-replies"],
-                    closeReason: reason,
-                    closedBy: staffMember.username || staffMember.user?.username,
-                    responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp)
-                });
-                if (userData) {
-                    try {
-                        const filePathUser = `${save_path}/${channel.name}.html`;
-                        await fs.promises.writeFile(filePathUser, userData);
-                    } catch (e) {
-                        // removed debug
-                    }
-                }
-                // Save staff thread transcript
-                try {
-                    let staffThread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-                    if (!staffThread && channel.threads && channel.threads.fetchActive) {
-                        const fetched = await channel.threads.fetchActive().catch(() => null);
-                        if (fetched && fetched.threads) {
-                            staffThread = fetched.threads.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-                        }
-                    }
-                    if (staffThread) {
-                        const staffData = await transcript.fetch(staffThread, {
-                            channel: staffThread,
-                            numberOfMessages: 99,
-                            dateFormat: "MMM Do YYYY, h:mm:ss a",
-                            dateLocale: "en",
-                            DiscordID: DiscordID,
+            // Collect raw messages for worker
+            const collectAll = async (chan) => {
+                let all = [];
+                let lastId = undefined;
+                for (;;) {
+                    const fetched = await chan.messages.fetch({ limit: 100, before: lastId }).catch(() => null);
+                    if (!fetched || fetched.size === 0) break;
+                    for (const m of fetched.values()) {
+                        all.push({
+                            id: m.id,
+                            createdAt: m.createdAt ? m.createdAt.getTime() : Date.now(),
+                            content: m.content || '',
+                            pinned: !!m.pinned,
+                            type: m.type || '',
+                            webhookId: m.webhookId || null,
+                            author: m.author ? { id: m.author.id, username: m.author.username, tag: m.author.tag, avatarURL: (typeof m.author.displayAvatarURL === 'function' ? m.author.displayAvatarURL() : '') } : null,
+                            embeds: Array.isArray(m.embeds) ? m.embeds.map(e => ({ title: e.title || '', description: e.description || '', fields: Array.isArray(e.fields) ? e.fields.map(f => ({ name: f.name || '', value: f.value || '' })) : [] })) : [],
+                            attachments: m.attachments && m.attachments.size ? Array.from(m.attachments.values()).map(a => a.url) : []
                         });
-                        if (staffData) {
-                            const staffPath = `${save_path}/${channel.name}.staff.html`;
-                            await fs.promises.writeFile(staffPath, staffData);
-                        }
                     }
-                } catch (e) {
-                    // removed debug
+                    lastId = fetched.lastKey();
                 }
-                savedTranscriptURL = transcriptURL;
-                await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, transcriptURL);
-                // Maintain fast lookup index for transcript filename -> owner/ticket
-                try {
-                    const fnameFull = `${channel.name}.full.html`;
-                    const fnameUser = `${channel.name}.html`;
-                    await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-                    await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-                } catch (_) {}
-                // Append to staff list index (minimal row) for sorting by createdAt
-                try {
-                    const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
-                    const row = {
-                        userId: String(DiscordID),
-                        ticketId: String(globalTicketNumber),
-                        ticketType: ticketType,
-                        server: await (async () => {
-                            const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
-                            const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-                            return m && m[1] ? m[1] : null;
-                        })(),
-                        createdAt,
-                        closeTime: Math.floor(Date.now() / 1000),
-                        closeUserID: String(staffMember.id || staffMember.user?.id || ''),
-                        transcriptFilename: `${channel.name}.html`
-                    };
-                    const key = `TicketIndex.staffList`;
-                    const list = (await db.get(key)) || [];
-                    list.push(row);
-                    // Keep index from growing unbounded in memory-heavy environments: optionally cap to recent N
-                    const MAX_INDEX = 25000; // safe cap; adjust as needed
-                    const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
-                    await db.set(key, trimmed);
-                } catch (_) {}
-                try { 
-                    const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
-                    metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
-                } catch (_) {}
-                if (logs_channel) {
-                    logs_channel.send({ content: `Transcript saved: <${transcriptURL}>` }).catch(e => func.handle_errors(e, client, "functions.js", null));
+                return all;
+            };
+
+            let staffThread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+            if (!staffThread && channel.threads && channel.threads.fetchActive) {
+                const fetched = await channel.threads.fetchActive().catch(() => null);
+                if (fetched && fetched.threads) {
+                    staffThread = fetched.threads.find(t => t.name === `staff-chat-${globalTicketNumber}`);
                 }
-            } else {
-                if (logs_channel) logs_channel.send({ content: `Transcript generated (not persisted).` }).catch(e => func.handle_errors(e, client, "functions.js", null));
             }
-        })(transcriptResult);
+
+            const job = {
+                savePath: save_path,
+                baseUrl: base_url,
+                channelName: channel.name,
+                DiscordID,
+                isAnonTicket: !!typeFile["anonymous-only-replies"],
+                closeReason: reason,
+                closedBy: staffMember.username || staffMember.user?.username,
+                responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
+                messagesMain: await collectAll(channel),
+                messagesStaff: staffThread ? await collectAll(staffThread) : []
+            };
+
+            // Fire-and-forget rendering
+            try {
+                const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
+                worker.on('error', (err) => { try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {} });
+            } catch (e) {
+                try { func.handle_errors(e, client, 'functions.js', 'Failed to start transcript worker'); } catch(_) {}
+            }
+
+            const transcriptURL = `${base_url}${channel.name}.full.html`;
+            savedTranscriptURL = transcriptURL;
+            await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, transcriptURL);
+            // Indexes for fast lookups
+            try {
+                const fnameFull = `${channel.name}.full.html`;
+                const fnameUser = `${channel.name}.html`;
+                await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+                await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+            } catch (_) {}
+            try {
+                const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
+                    const row = {
+                    userId: String(DiscordID),
+                    ticketId: String(globalTicketNumber),
+                    ticketType: ticketType,
+                    server: await (async () => {
+                        const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
+                        const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+                        return m && m[1] ? m[1] : null;
+                    })(),
+                    createdAt,
+                    closeTime: Math.floor(Date.now() / 1000),
+                    closeUserID: String(staffMember.id || staffMember.user?.id || ''),
+                        closeUser: String(staffMember.user?.username || staffMember.username || ''),
+                        closeReason: String(reason || ''),
+                    transcriptFilename: `${channel.name}.html`
+                };
+                const key = `TicketIndex.staffList`;
+                const list = (await db.get(key)) || [];
+                list.push(row);
+                const MAX_INDEX = 25000;
+                const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
+                await db.set(key, trimmed);
+            } catch (_) {}
+            try { 
+                const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
+                metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
+            } catch (_) {}
+            if (logs_channel) {
+                logs_channel.send({ content: `Transcript saved: <${transcriptURL}>` }).catch(e => func.handle_errors(e, client, "functions.js", null));
+            }
+        } catch (e) {
+            func.handle_errors(e, client, 'functions.js', 'Transcript worker setup failed');
+        }
         // After transcript generation, compute metrics
         try {
             const metrics = require('./metrics');
