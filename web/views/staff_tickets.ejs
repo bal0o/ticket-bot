@@ -100,24 +100,24 @@
     <nav class="pagination">
       <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
       <% const next = Math.min(pagination.totalPages, (pagination.page || 1) + 1); %>
-      <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %>">Prev</a>
+      <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Prev</a>
       <% const p = pagination.page || 1; const tp = pagination.totalPages || 1; const start = Math.max(1, p - 2); const end = Math.min(tp, p + 2); %>
       <% if (start > 1) { %>
-        <a class="btn" href="?page=1&limit=<%= pagination.limit %>">1</a>
+        <a class="btn" href="?page=1&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">1</a>
         <% if (start > 2) { %><span class="muted">…</span><% } %>
       <% } %>
       <% for (let i = start; i <= end; i++) { %>
         <% if (i === p) { %>
           <span class="btn active"><%= i %></span>
         <% } else { %>
-          <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %>"><%= i %></a>
+          <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= i %></a>
         <% } %>
       <% } %>
       <% if (end < tp) { %>
         <% if (end < tp - 1) { %><span class="muted">…</span><% } %>
-        <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %>"><%= tp %></a>
+        <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= tp %></a>
       <% } %>
-      <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %>">Next</a>
+      <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Next</a>
     </nav>
   <% } %>
   </main>

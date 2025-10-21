@@ -130,10 +130,15 @@ module.exports = async function (client, interaction) {
                     func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
                 }
                 try {
-                    await interaction.editReply({ content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.' , ephemeral: true });
+                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', ephemeral: true };
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.editReply(payload);
+                    } else {
+                        await interaction.reply(payload);
+                    }
                 } catch (e) {
-                    // Ignore Unknown Message (10008) from expired/cleared ephemeral
-                    if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed after close');
+                    // Ignore Unknown Message (10008) or Unknown Interaction (10062)
+                    if (e && e.code !== 10008 && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'reply/editReply failed after close');
                 }
             } catch (error) {
                 func.handle_errors(error, client, 'interactionCreate.js', 'Error handling close ticket modal');
@@ -824,7 +829,8 @@ module.exports = async function (client, interaction) {
                 closeTicketModal.addComponents(firstActionRow);
                 await interaction.showModal(closeTicketModal);
             } catch (e) {
-                func.handle_errors(e, client, 'interactionCreate.js', 'Error preparing close modal');
+                // Ignore expired/unknown interaction tokens when attempting to show modal
+                if (!e || (e.code !== 10062 && e.code !== 40060)) func.handle_errors(e, client, 'interactionCreate.js', 'Error preparing close modal');
             }
             return;
         }
