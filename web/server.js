@@ -1090,8 +1090,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
         ticketId: x.ticketId,
         ticketType: x.ticketType || 'Unknown',
         server: x.server || null,
-        closeUser: null,
-        closeReason: null,
+        closeUser: x.closeUser || null,
+        closeReason: x.closeReason || null,
         createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
         transcriptFilename: x.transcriptFilename || null,
         transcriptAvailable: !!x.transcriptFilename
