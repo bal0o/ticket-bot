@@ -200,14 +200,31 @@ module.exports.CombineActionCountsUser = async (userid, actiontype) => {
 
 module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL = null) => {
 
-    await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeType`, closeType)
-    await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUser`, closeUser)
-    await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUserID`, closeUserID)
-    await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeTime`, closeTime)
-    await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeReason`, closeReason)
-    if (transcriptURL) {
-        await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.transcriptURL`, transcriptURL)
-    }
+	// Batch write close metadata in a single object set to reduce write amplification
+	try {
+		const baseKey = `PlayerStats.${userid}.ticketLogs.${ticketUniqueID}`;
+		const existing = (await db.get(baseKey)) || {};
+		const updated = {
+			...existing,
+			closeType: closeType,
+			closeUser: closeUser,
+			closeUserID: closeUserID,
+			closeTime: closeTime,
+			closeReason: closeReason
+		};
+		if (transcriptURL) updated.transcriptURL = transcriptURL;
+		await db.set(baseKey, updated);
+	} catch (_) {
+		// Fallback to per-field sets if needed
+		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeType`, closeType)
+		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUser`, closeUser)
+		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUserID`, closeUserID)
+		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeTime`, closeTime)
+		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeReason`, closeReason)
+		if (transcriptURL) {
+			await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.transcriptURL`, transcriptURL)
+		}
+	}
 }
 
 module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo) => {
@@ -920,6 +937,38 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
                 savedTranscriptURL = transcriptURL;
                 await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, transcriptURL);
+                // Maintain fast lookup index for transcript filename -> owner/ticket
+                try {
+                    const fnameFull = `${channel.name}.full.html`;
+                    const fnameUser = `${channel.name}.html`;
+                    await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+                    await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+                } catch (_) {}
+                // Append to staff list index (minimal row) for sorting by createdAt
+                try {
+                    const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
+                    const row = {
+                        userId: String(DiscordID),
+                        ticketId: String(globalTicketNumber),
+                        ticketType: ticketType,
+                        server: await (async () => {
+                            const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
+                            const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+                            return m && m[1] ? m[1] : null;
+                        })(),
+                        createdAt,
+                        closeTime: Math.floor(Date.now() / 1000),
+                        closeUserID: String(staffMember.id || staffMember.user?.id || ''),
+                        transcriptFilename: `${channel.name}.html`
+                    };
+                    const key = `TicketIndex.staffList`;
+                    const list = (await db.get(key)) || [];
+                    list.push(row);
+                    // Keep index from growing unbounded in memory-heavy environments: optionally cap to recent N
+                    const MAX_INDEX = 25000; // safe cap; adjust as needed
+                    const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
+                    await db.set(key, trimmed);
+                } catch (_) {}
                 try { 
                     const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
                     metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
