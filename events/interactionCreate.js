@@ -1040,17 +1040,25 @@ module.exports = async function (client, interaction) {
                 }
             }
 
-            // Enforce per-user ticket limit only for public tickets
+            // Enforce per-user ticket limit only for public tickets (bypass for staff)
             if (!questionFilesystem.internal) {
 			// Get all channels from the staff guild
 			const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
 			const allChannels = staffGuild.channels.cache;
 
-			let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
-			if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
-				let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
-				return;
-		}
+			// Determine if the requester is staff/admin per config.web roles or default admin role
+			const staffRoleIds = new Set(((client.config && client.config.web && client.config.web.roles && client.config.web.roles.staff_role_ids) || []).filter(Boolean));
+			const adminRoleIds = new Set(((client.config && client.config.web && client.config.web.roles && client.config.web.roles.admin_role_ids) || []).filter(Boolean));
+			const defaultAdminRoleId = client.config && client.config.role_ids ? client.config.role_ids.default_admin_role_id : '';
+			const isStaffUser = interaction.member.roles.cache.some(r => adminRoleIds.has(r.id) || staffRoleIds.has(r.id) || (defaultAdminRoleId && r.id === defaultAdminRoleId));
+
+			if (!isStaffUser) {
+				let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
+				if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
+					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+					return;
+				}
+			}
             }
 
 			client.cooldown.add(interaction.member.user.id);
