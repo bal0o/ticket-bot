@@ -295,7 +295,7 @@ module.exports = {
                     { name: 'Last Seen', value: lastUnix ? `<t:${lastUnix}:R>` : 'N/A', inline: true }
                 );
                 if (bm.banInfo && bm.banInfo.length > 0) {
-                    embed.addField('BM Bans', bm.banInfo.join('\n').substring(0, 1024));
+                    embed.addFields({ name: 'BM Bans', value: bm.banInfo.join('\n').substring(0, 1024) });
                 }
             } else {
                 const bmNote = steamId ? 'No BattleMetrics data' : 'No BattleMetrics data (no Steam link)';

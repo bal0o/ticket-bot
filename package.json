@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node --experimental-fetch index.js",
-    "web": "node web/server.js"
+    "web": "node web/server.js",
+    "backfill:index": "node scripts/backfill_index.js"
   },
   "author": "Metzey",
   "license": "GPL-3.0-or-later",

@@ -1,22 +1,36 @@
 services:
-  ticket-bot:
+  bot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ticket-bot
     restart: unless-stopped
+    environment:
+      - RUN_MODE=bot
+    volumes:
+      - ./config:/app/config:rw
+      - ./content:/app/content:rw
+      - ./transcripts:/app/transcripts:rw
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+    networks:
+      - ticket-bot-network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ticket-web
+    restart: unless-stopped
+    environment:
+      - RUN_MODE=web
     ports:
       - "3050:3050"
     volumes:
-      # Expose config directory for configuration files
       - ./config:/app/config:rw
-      # Expose content directory for questions and handler files
       - ./content:/app/content:rw
-      # Expose transcripts directory for saved transcripts
       - ./transcripts:/app/transcripts:rw
-      # Expose data directory for database files
       - ./data:/app/data:rw
-      # Expose logs directory
       - ./logs:/app/logs:rw
     networks:
       - ticket-bot-network

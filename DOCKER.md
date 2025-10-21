@@ -117,6 +117,20 @@ docker-compose build --no-cache
 docker-compose up -d
 ```
 
+## One-time index backfill (performance)
+
+After upgrading, run the backfill to build fast indexes for staff pages and transcript lookups. This only needs to be done once per database (indexes are stored in `data/json.sqlite`).
+
+```bash
+# If running locally
+npm run backfill:index
+
+# If running in Docker
+docker-compose run --rm ticket-bot npm run backfill:index
+```
+
+You can safely re-run the backfill; it is idempotent and will merge any missing entries.
+
 ## Health Checks
 
 The container includes health checks that monitor the web interface:

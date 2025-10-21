@@ -135,12 +135,30 @@ function sanitizeFilename(input) {
     return input.replace(/[^a-zA-Z0-9_.\-]/g, '');
 }
 
+// Short TTL caches for hot lookups
+const CACHE_TTL_MS = 60 * 1000; // 60s
+let cacheByFilename = new Map(); // filename -> { value, expiresAt }
+
 async function findOwnerByFilename(filename) {
-    // Accept either user-facing (.html) or staff/full (.full.html) filenames
+    // Normalize candidate filenames
     const candidates = new Set([filename]);
     if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
     if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
 
+    // Try index first (with small cache)
+    for (const cand of candidates) {
+        const cached = cacheByFilename.get(cand);
+        if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
+        try {
+            const idx = await db.get(`TicketIndex.byFilename.${cand}`);
+            if (idx && idx.ownerId) {
+                cacheByFilename.set(cand, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
+                return idx.ownerId;
+            }
+        } catch (_) {}
+    }
+
+    // As a last resort, fall back to the previous (expensive) scan
     const all = await db.all();
     const candList = Array.from(candidates);
     for (const row of all) {
@@ -149,26 +167,11 @@ async function findOwnerByFilename(filename) {
         if (!key.includes('.transcriptURL')) continue;
         const url = row.value ?? row.data;
         if (typeof url !== 'string') continue;
-        // Match any candidate regardless of preceding slash
         if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
             const parts = key.split('.');
-            return parts[1];
-        }
-    }
-    // Fallback: scan each user's ticket logs
-    for (const row of all) {
-        const key = row.id || row.ID || row.key;
-        if (!key || !key.startsWith('PlayerStats.') || !key.endsWith('.ticketLogs')) continue;
-        const userId = key.split('.')[1];
-        const logs = row.value ?? row.data;
-        if (!logs || typeof logs !== 'object') continue;
-        for (const ticketId of Object.keys(logs)) {
-            const t = logs[ticketId];
-            const url = t?.transcriptURL;
-            if (typeof url !== 'string') continue;
-            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
-                return userId;
-            }
+            const ownerId = parts[1];
+            for (const c of candList) cacheByFilename.set(c, { value: { ownerId }, expiresAt: Date.now() + CACHE_TTL_MS });
+            return ownerId;
         }
     }
     return null;
@@ -1005,8 +1008,15 @@ function getKnownTicketTypes() {
 }
 
 async function getAllUserIds() {
+    // Prefer fast path; avoid scanning the entire DB when possible
     const ps = await db.get('PlayerStats');
     if (ps && typeof ps === 'object') return Object.keys(ps);
+    // If not available, try to derive from the staffList index quickly
+    try {
+        const list = await db.get('TicketIndex.staffList');
+        if (Array.isArray(list)) return Array.from(new Set(list.map(x => x.userId).filter(Boolean)));
+    } catch (_) {}
+    // Last resort: scan DB
     const all = await db.all();
     const users = new Set();
     for (const row of all) {
@@ -1017,6 +1027,9 @@ async function getAllUserIds() {
     }
     return Array.from(users);
 }
+
+// Short TTL cache for staff page listings keyed by filters + page/limit
+let staffCache = new Map(); // key -> { data, expiresAt }
 
 app.get('/staff', ensureAuth, async (req, res) => {
     const { isStaff, roleIds } = await getRoleFlags(req.user.id);
@@ -1031,126 +1044,61 @@ app.get('/staff', ensureAuth, async (req, res) => {
     const qServer = (req.query.server || '').toLowerCase();
     const qClosedBy = (req.query.closed_by || '').toLowerCase();
 
-    const tickets = [];
-    const userNameCache = new Map();
-    const ps = await db.get('PlayerStats');
-    if (ps && typeof ps === 'object') {
-        const userIds = qUser ? [qUser] : Object.keys(ps);
-        for (const userId of userIds) {
-            const logs = ps[userId]?.ticketLogs || {};
-            if (!userNameCache.has(userId)) {
-                let name = '';
-                for (const tid of Object.keys(logs)) {
-                    if (logs[tid]?.username) { name = logs[tid].username; break; }
-                }
-                userNameCache.set(userId, name || userId);
-            }
-            for (const ticketId of Object.keys(logs)) {
-                const t = logs[ticketId] || {};
-                if (qSteam && String(t.steamId || '').indexOf(qSteam) === -1) continue;
-                // Only closed tickets
-                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
-                const url = t.transcriptURL || '';
-                const filename = url ? url.split('/').pop() : null;
-                const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
-                const typeLower = (t.ticketType || 'Unknown').toLowerCase();
-                // Enforce per-ticket-type visibility based on Discord roles
-                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
-                if (qType && typeLower !== qType) continue;
-                if (qFrom && created && created < qFrom) continue;
-                if (qTo && created && created > qTo) continue;
-                if (qServer) {
-                    const serverLower = (t.server || '').toLowerCase();
-                    if (!serverLower.includes(qServer)) continue;
-                }
-                if (qClosedBy) {
-                    const closedByName = (t.closeUser || '').toLowerCase();
-                    const closedById = (t.closeUserID || '').toString();
-                    if (!(closedByName.includes(qClosedBy) || closedById === qClosedBy)) continue;
-                }
-                tickets.push({
-                    userId,
-                    username: t.username || userNameCache.get(userId) || userId,
-                    ticketId,
-                    ticketType: t.ticketType || 'Unknown',
-                    server: t.server || null,
-                    closeUser: t.closeUser || null,
-                    closeReason: t.closeReason || null,
-                    createdAt: created,
-                    transcriptFilename: filename,
-                    transcriptAvailable: !!filename
-                });
-            }
-        }
-    } else {
-        // Fallback: scan across all keys
-        const all = await db.all();
-        const map = new Map(); // userId -> ticketId -> fields
-        for (const row of all) {
-            const key = row.id || row.ID || row.key;
-            if (!key || !key.startsWith('PlayerStats.')) continue;
-            const m = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.(\w+)$/);
-            if (!m) continue;
-            const [, userId, ticketId, field] = m;
-            if (qUser && userId !== qUser) continue;
-            if (!map.has(userId)) map.set(userId, new Map());
-            const userMap = map.get(userId);
-            if (!userMap.has(ticketId)) userMap.set(ticketId, {});
-            const obj = userMap.get(ticketId);
-            obj[field] = row.value ?? row.data;
-        }
-        for (const [userId, ticketMap] of map.entries()) {
-            // prime username cache
-            if (!userNameCache.has(userId)) {
-                let name = '';
-                for (const [, t] of ticketMap.entries()) {
-                    if (t.username) { name = t.username; break; }
-                }
-                userNameCache.set(userId, name || userId);
-            }
-            for (const [ticketId, t] of ticketMap.entries()) {
-                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
-                const url = t.transcriptURL || '';
-                const filename = url ? url.split('/').pop() : null;
-                const created = t.createdAt ? new Date((typeof t.createdAt === 'number' && t.createdAt < 2e10 ? t.createdAt * 1000 : t.createdAt)) : null;
-                const typeLower = (t.ticketType || 'Unknown').toLowerCase();
-                // Enforce per-ticket-type visibility based on Discord roles
-                if (!userCanSeeTicketType(roleIds, t.ticketType || '')) continue;
-                if (qType && typeLower !== qType) continue;
-                if (qFrom && created && created < qFrom) continue;
-                if (qTo && created && created > qTo) continue;
-                if (qServer) {
-                    const serverLower = (t.server || '').toLowerCase();
-                    if (!serverLower.includes(qServer)) continue;
-                }
-                if (qClosedBy) {
-                    const closedByName = (t.closeUser || '').toLowerCase();
-                    const closedById = (t.closeUserID || '').toString();
-                    if (!(closedByName.includes(qClosedBy) || closedById === qClosedBy)) continue;
-                }
-                tickets.push({
-                    userId,
-                    username: t.username || userNameCache.get(userId) || userId,
-                    ticketId,
-                    ticketType: t.ticketType || 'Unknown',
-                    server: t.server || null,
-                    closeUser: t.closeUser || null,
-                    closeReason: t.closeReason || null,
-                    createdAt: created,
-                    transcriptFilename: filename,
-                    transcriptAvailable: !!filename
-                });
-            }
-        }
-    }
-    tickets.sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
+    // Build cache key from filters and pagination
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
-    const total = tickets.length;
+    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, roles: Array.from(roleIds).sort() });
+    const cached = staffCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        const { tickets, pagination } = cached.data;
+        return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
+    }
+
+    // Prefer staffList index for closed tickets
+    let list = await db.get('TicketIndex.staffList');
+    if (!Array.isArray(list)) list = [];
+    // Filter according to query + permissions
+    const filtered = [];
+    for (const row of list) {
+        if (!row) continue;
+        if (qUser && row.userId !== qUser) continue;
+        if (qType && String(row.ticketType || '').toLowerCase() !== qType) continue;
+        if (qServer && String(row.server || '').toLowerCase().indexOf(qServer) === -1) continue;
+        if (qClosedBy) {
+            const idMatch = String(row.closeUserID || '').toLowerCase() === qClosedBy;
+            const nameMatch = false; // name not stored in index; skip
+            if (!(idMatch || nameMatch)) continue;
+        }
+        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
+        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
+        // Enforce per-ticket-type visibility based on Discord roles
+        if (!userCanSeeTicketType(roleIds, row.ticketType || '')) continue;
+        filtered.push(row);
+    }
+    // Sort by createdAt desc
+    filtered.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+    const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
-    const paged = tickets.slice(start, start + limit);
-    res.render('staff_tickets', { tickets: paged, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination: { page, limit, total, totalPages } });
+    const slice = filtered.slice(start, start + limit);
+    // Map to view model and resolve usernames in small batch
+    const userIds = Array.from(new Set(slice.map(x => x.userId))).slice(0, 50);
+    const nameMap = await getUsernamesMap(userIds);
+    const tickets = slice.map(x => ({
+        userId: x.userId,
+        username: nameMap[x.userId] || x.userId,
+        ticketId: x.ticketId,
+        ticketType: x.ticketType || 'Unknown',
+        server: x.server || null,
+        closeUser: null,
+        closeReason: null,
+        createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
+        transcriptFilename: x.transcriptFilename || null,
+        transcriptAvailable: !!x.transcriptFilename
+    }));
+    const pagination = { page, limit, total, totalPages };
+    staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
+    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {

@@ -355,7 +355,7 @@ const openResult = await func.openTicket(client, interaction, questionFilesystem
                 .addFields(
                     { name: 'Steam Profile', value: `[${SteamID}](https://steamcommunity.com/profiles/${SteamID})` }
                 );
-            if (banInfo.length > 0) { try { staffEmbed.addField('BM Bans', banInfo.join('\n').substring(0, 1024)); } catch (_) {} }
+            if (banInfo.length > 0) { try { staffEmbed.addFields({ name: 'BM Bans', value: banInfo.join('\n').substring(0, 1024) }); } catch (_) {} }
             try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
         }
     } catch (e) { func.handle_errors(e, client, 'backbone.js', 'BM async lookup failed'); }

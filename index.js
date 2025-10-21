@@ -22,13 +22,13 @@ client.cooldown = new Set();
 client.claims = new Map();
 client.config = config;
 
-// Start the web server if enabled in config
+// Web server is now a separate process; only start here if explicitly requested
 try {
-	if (client.config.web && client.config.web.enabled) {
-		require("./web/server");
-	}
+    if (process.env.RUN_MODE === 'all' && client.config.web && client.config.web.enabled) {
+        require("./web/server");
+    }
 } catch (e) {
-	console.log("[web] Failed to start web server:", e?.message || e);
+    console.log("[web] Failed to start web server:", e?.message || e);
 }
 
 
