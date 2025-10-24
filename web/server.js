@@ -9,6 +9,7 @@ const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
 const { createDB } = require('../utils/quickdb');
 const metrics = require('../utils/metrics');
+const promClient = require('prom-client');
 const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
@@ -458,14 +459,16 @@ app.get('/login', (req, res, next) => {
 app.get('/auth/callback', (req, res, next) => {
     console.log('[web] /auth/callback hit');
     next();
-}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), async (req, res) => {
+}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), (req, res) => {
+    // Fire-and-forget prewarm to avoid blocking login redirect
     try {
-        // Pre-compute role flags and allowed ticket types at login to avoid first-view latency
-        const rf = await getRoleFlags(req.user.id);
-        req.session.roleFlags = rf;
-        req.session.roleFlagsExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
-        req.session.allowedTicketTypes = computeAllowedTicketTypes(rf.roleIds);
-        req.session.allowedTicketTypesExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
+        setImmediate(async () => {
+            try {
+                const rf = await getRoleFlags(req.user.id);
+                // Compute allowed types from cached role flags; middleware will persist to session on next request
+                computeAllowedTicketTypes(rf.roleIds);
+            } catch (_) {}
+        });
     } catch (_) {}
     const redirectTo = req.session.returnTo || '/my';
     delete req.session.returnTo;
@@ -1075,30 +1078,47 @@ function getKnownTicketTypes() {
     return [];
 }
 
-async function getAllUserIds() {
-    // Prefer fast path; avoid scanning the entire DB when possible
-    const ps = await db.get('PlayerStats');
-    if (ps && typeof ps === 'object') return Object.keys(ps);
-    // If not available, try to derive from the staffList index quickly
+// Background-refreshed list of user IDs to avoid DB-wide scans on /api/users
+let cachedUserIdList = [];
+let cachedUserIdListExpiresAt = 0;
+const USERID_LIST_TTL_MS = 60 * 1000; // 60s
+async function refreshUserIdList() {
     try {
         const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) return Array.from(new Set(list.map(x => x.userId).filter(Boolean)));
+        if (Array.isArray(list)) {
+            const uniq = Array.from(new Set(list.map(x => x && x.userId).filter(Boolean)));
+            cachedUserIdList = uniq;
+            cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
+        }
     } catch (_) {}
-    // Last resort: scan DB
-    const all = await db.all();
-    const users = new Set();
-    for (const row of all) {
-        const key = row.id || row.ID || row.key;
-        if (!key || !key.startsWith('PlayerStats.')) continue;
-        const parts = key.split('.');
-        if (parts.length >= 2) users.add(parts[1]);
+}
+async function getAllUserIds() {
+    if (cachedUserIdListExpiresAt <= Date.now() || !Array.isArray(cachedUserIdList) || cachedUserIdList.length === 0) {
+        await refreshUserIdList();
     }
-    return Array.from(users);
+    return cachedUserIdList || [];
 }
 
 // Short TTL cache for staff page listings keyed by filters + page/limit
 let staffCache = new Map(); // key -> { data, expiresAt }
 const STAFF_CACHE_MAX = 500;
+// In-memory cache for the full staffList index to avoid DB reads per request
+let staffListCache = { list: [], expiresAt: 0 };
+const STAFFLIST_TTL_MS = 30 * 1000; // 30s
+async function getStaffListCached() {
+    const now = Date.now();
+    if (staffListCache.expiresAt > now && Array.isArray(staffListCache.list) && staffListCache.list.length > 0) {
+        return staffListCache.list;
+    }
+    try {
+        const list = await db.get('TicketIndex.staffList');
+        if (Array.isArray(list)) {
+            staffListCache = { list, expiresAt: now + STAFFLIST_TTL_MS };
+            return list;
+        }
+    } catch (_) {}
+    return staffListCache.list || [];
+}
 
 app.get('/staff', ensureAuth, async (req, res) => {
     const rf = res.locals.roleFlags || { isStaff: false, roleIds: [] };
@@ -1125,9 +1145,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
         return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
     }
 
-    // Prefer staffList index for closed tickets
-    let list = await db.get('TicketIndex.staffList');
-    if (!Array.isArray(list)) list = [];
+    // Prefer staffList index for closed tickets (cached in memory)
+    const list = await getStaffListCached();
     // Filter according to query + permissions
     const filtered = [];
     for (const row of list) {
@@ -1147,8 +1166,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         if (!allowedTypes.has(ttype)) continue;
         filtered.push(row);
     }
-    // Sort by createdAt desc
-    filtered.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+    // Keep original order from index (already sorted desc at build time)
     const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
@@ -1185,15 +1203,38 @@ app.get('/api/users', ensureAuth, async (req, res) => {
     const q = (req.query.q || '').toLowerCase();
     const users = await getAllUserIds();
     const results = [];
+    const byIdCandidates = [];
+    const nameCandidates = new Set();
+    // First, match by ID without any DB I/O
     for (const userId of users) {
         if (results.length >= 10) break;
-        const logs = await db.get(`PlayerStats.${userId}.ticketLogs`) || {};
-        let username = '';
-        for (const tid of Object.keys(logs)) {
-            if (logs[tid]?.username) { username = logs[tid].username; break; }
+        if (!q || userId.toLowerCase().includes(q)) {
+            byIdCandidates.push(userId);
+        } else {
+            // Defer to name check
+            nameCandidates.add(userId);
         }
-        if (!q || userId.includes(q) || (username && username.toLowerCase().includes(q))) {
-            results.push({ userId, username });
+    }
+    // Fill results from ID matches using cached usernames where possible
+    if (byIdCandidates.length > 0) {
+        const nameMap = await getUsernamesMap(byIdCandidates.slice(0, 10));
+        for (const userId of byIdCandidates) {
+            if (results.length >= 10) break;
+            results.push({ userId, username: nameMap[userId] || '' });
+        }
+    }
+    // If still need matches and q provided, do a limited name search using cached/batched lookups
+    if (results.length < 10 && q) {
+        const remaining = 10 - results.length;
+        // Take a bounded subset to avoid large loops
+        const subset = Array.from(nameCandidates).slice(0, 200);
+        const nameMap = await getUsernamesMap(subset);
+        for (const userId of subset) {
+            if (results.length >= 10) break;
+            const username = (nameMap[userId] || '').toLowerCase();
+            if (username && username.includes(q)) {
+                results.push({ userId, username: nameMap[userId] || '' });
+            }
         }
     }
     res.json(results);
@@ -1258,6 +1299,22 @@ app.listen(PORT, HOST, async () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);
     // Warm transcript index in background
     try { await warmTranscriptIndex(); } catch (_) {}
+    // Prime the user ID list cache without blocking
+    try { refreshUserIdList(); } catch (_) {}
+    // Event loop lag instrumentation
+    try {
+        const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
+        metrics.registry.registerMetric(eventLoopLagGauge);
+        const intervalMs = 1000;
+        let last = process.hrtime.bigint();
+        setInterval(() => {
+            const now = process.hrtime.bigint();
+            const diffMs = Number(now - last) / 1e6;
+            const lag = Math.max(0, diffMs - intervalMs);
+            eventLoopLagGauge.set(lag);
+            last = now;
+        }, intervalMs).unref();
+    } catch (_) {}
 });
 
 
