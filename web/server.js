@@ -260,14 +260,17 @@ async function findOwnerByFilename(filename) {
         if (rec && rec.ownerId) return rec.ownerId;
     }
 
-    // Try persistent index next (with small cache)
+    // Try persistent index next (with small cache); be tolerant of case by checking both
     for (const cand of candidates) {
-        const cached = cacheByFilename.get(cand);
+        const cKey = String(cand);
+        const cKeyLower = cKey.toLowerCase();
+        const cached = cacheByFilename.get(cKey) || cacheByFilename.get(cKeyLower);
         if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
         try {
-            const idx = await db.get(`TicketIndex.byFilename.${cand}`);
+            let idx = await db.get(`TicketIndex.byFilename.${cKey}`);
+            if (!idx) idx = await db.get(`TicketIndex.byFilename.${cKeyLower}`);
             if (idx && idx.ownerId) {
-                cacheByFilename.set(cand, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
+                cacheByFilename.set(cKeyLower, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
                 return idx.ownerId;
             }
         } catch (_) {}
@@ -299,8 +302,18 @@ async function findTicketContextByFilename(filename) {
         // Try persistent index
         for (const c of candList) {
             try {
-                const idx = await db.get(`TicketIndex.byFilename.${c}`);
-                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) return idx;
+                // Try both lower-cased and original-case keys
+                const idx = await db.get(`TicketIndex.byFilename.${c}`) || await db.get(`TicketIndex.byFilename.${filename}`);
+                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) {
+                    // Enrich with ticketType if missing
+                    if (!idx.ticketType && idx.ownerId && idx.ticketId) {
+                        try {
+                            const t = await db.get(`PlayerStats.${idx.ownerId}.ticketLogs.${idx.ticketId}`) || {};
+                            if (t && t.ticketType) return { ownerId: idx.ownerId, ticketId: idx.ticketId, ticketType: t.ticketType };
+                        } catch (_) {}
+                    }
+                    return idx;
+                }
             } catch (_) {}
         }
         // Last resort: derive ticketId from filename suffix and try direct get without scanning all
@@ -326,12 +339,13 @@ async function findTicketContextByFilename(filename) {
 }
 
 async function canViewTranscript(userId, filename, roleFlags) {
+    const t0 = Date.now();
     console.log('[auth] canViewTranscript start', { userId, filename });
     const rf = roleFlags || (await getRoleFlags(userId));
     const { isStaff, isAdmin, roleIds } = rf || { isStaff: false, isAdmin: false, roleIds: [] };
     console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
-    if (isAdmin) { console.log('[auth] allow: admin'); return true; }
-    if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override'); return true; }
+    if (isAdmin) { console.log('[auth] allow: admin', { ms: Date.now() - t0 }); return true; }
+    if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override', { ms: Date.now() - t0 }); return true; }
     // Fast-path: check the current user's own ticket logs directly
     try {
         const candList = [filename];
@@ -343,14 +357,14 @@ async function canViewTranscript(userId, filename, roleFlags) {
             const url = t?.transcriptURL;
             if (typeof url !== 'string') continue;
             if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
-                console.log('[auth] allow: owner via own logs', { ticketId: tid, url });
+                console.log('[auth] allow: owner via own logs', { ticketId: tid, url, ms: Date.now() - t0 });
                 return true;
             }
         }
     } catch (e) { console.log('[auth] own logs check error', e?.message || e); }
     const ownerId = await findOwnerByFilename(filename);
     console.log('[auth] owner lookup', { ownerId });
-    if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup'); return true; }
+    if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup', { ms: Date.now() - t0 }); return true; }
     // If not owner/admin, see if staff but only with per-type permission; infer type from DB
     if (isStaff) {
         try {
@@ -359,13 +373,13 @@ async function canViewTranscript(userId, filename, roleFlags) {
             if (ctx && ctx.ticketType) {
                 const can = userCanSeeTicketType(roleIds, ctx.ticketType);
                 console.log('[auth] staff type permission', { ticketType: ctx.ticketType, can });
-                if (can) return true;
+                if (can) { console.log('[auth] allow: staff by type', { ms: Date.now() - t0 }); return true; }
             } else {
                 console.log('[auth] staff: could not infer ticketType for', { filename });
             }
         } catch (e) { console.log('[auth] staff check error', e?.message || e); }
     }
-    console.log('[auth] deny: no rule matched', { userId, filename, isStaff, isAdmin });
+    console.log('[auth] deny: no rule matched', { userId, filename, isStaff, isAdmin, ms: Date.now() - t0 });
     return false;
 }
 
@@ -444,7 +458,15 @@ app.get('/login', (req, res, next) => {
 app.get('/auth/callback', (req, res, next) => {
     console.log('[web] /auth/callback hit');
     next();
-}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), (req, res) => {
+}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), async (req, res) => {
+    try {
+        // Pre-compute role flags and allowed ticket types at login to avoid first-view latency
+        const rf = await getRoleFlags(req.user.id);
+        req.session.roleFlags = rf;
+        req.session.roleFlagsExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
+        req.session.allowedTicketTypes = computeAllowedTicketTypes(rf.roleIds);
+        req.session.allowedTicketTypesExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
+    } catch (_) {}
     const redirectTo = req.session.returnTo || '/my';
     delete req.session.returnTo;
     res.redirect(redirectTo);
