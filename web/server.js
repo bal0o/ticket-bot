@@ -458,14 +458,16 @@ app.get('/login', (req, res, next) => {
 app.get('/auth/callback', (req, res, next) => {
     console.log('[web] /auth/callback hit');
     next();
-}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), async (req, res) => {
+}, passport.authenticate('discord', { failureRedirect: '/auth/failure' }), (req, res) => {
+    // Fire-and-forget prewarm to avoid blocking login redirect
     try {
-        // Pre-compute role flags and allowed ticket types at login to avoid first-view latency
-        const rf = await getRoleFlags(req.user.id);
-        req.session.roleFlags = rf;
-        req.session.roleFlagsExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
-        req.session.allowedTicketTypes = computeAllowedTicketTypes(rf.roleIds);
-        req.session.allowedTicketTypesExpiresAt = Date.now() + ROLE_CACHE_TTL_MS;
+        setImmediate(async () => {
+            try {
+                const rf = await getRoleFlags(req.user.id);
+                // Compute allowed types from cached role flags; middleware will persist to session on next request
+                computeAllowedTicketTypes(rf.roleIds);
+            } catch (_) {}
+        });
     } catch (_) {}
     const redirectTo = req.session.returnTo || '/my';
     delete req.session.returnTo;
