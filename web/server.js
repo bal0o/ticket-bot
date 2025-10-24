@@ -30,6 +30,9 @@ const ADMIN_ROLE_IDS = new Set((config.web?.roles?.admin_role_ids || []).filter(
 const BOT_TOKEN = config.tokens?.bot_token;
 const TRANSCRIPT_DIR = path.resolve(process.cwd(), config.transcript_settings?.save_path || './transcripts/');
 
+// Harden outbound HTTP calls
+axios.defaults.timeout = 3000;
+
 if (!WEB_ENABLED) {
     console.log('[web] Disabled by config.');
     process.exit(0);
@@ -78,17 +81,38 @@ async function fetchGuildMemberRoles(userId) {
     }
 }
 
+// Role flags cache with TTL and request coalescing
+const ROLE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+let roleCache = new Map(); // userId -> { flags, expiresAt }
+let roleInFlight = new Map(); // userId -> Promise<{ isStaff,isAdmin,roleIds }>
+
 async function getRoleFlags(userId) {
-    const roles = new Set(await fetchGuildMemberRoles(userId));
-    let isStaff = false;
-    let isAdmin = false;
-    for (const rid of roles) {
-        if (ADMIN_ROLE_IDS.has(rid)) isAdmin = true;
-        if (STAFF_ROLE_IDS.has(rid)) isStaff = true;
+    try {
+        const cached = roleCache.get(userId);
+        if (cached && cached.expiresAt > Date.now()) return cached.flags;
+        if (roleInFlight.has(userId)) return await roleInFlight.get(userId);
+        const p = (async () => {
+            const roles = new Set(await fetchGuildMemberRoles(userId));
+            let isStaff = false;
+            let isAdmin = false;
+            for (const rid of roles) {
+                if (ADMIN_ROLE_IDS.has(rid)) isAdmin = true;
+                if (STAFF_ROLE_IDS.has(rid)) isStaff = true;
+            }
+            if (isAdmin) isStaff = true;
+            const flags = { isStaff, isAdmin, roleIds: Array.from(roles) };
+            roleCache.set(userId, { flags, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+            return flags;
+        })().finally(() => {
+            roleInFlight.delete(userId);
+        });
+        roleInFlight.set(userId, p);
+        return await p;
+    } catch (_) {
+        const cached = roleCache.get(userId);
+        if (cached) return cached.flags;
+        return { isStaff: false, isAdmin: false, roleIds: [] };
     }
-    // Admin/staff solely via Discord roles; admins imply staff
-    if (isAdmin) isStaff = true;
-    return { isStaff, isAdmin, roleIds: Array.from(roles) };
 }
 
 function userCanSeeTicketType(roleIds, ticketType) {
@@ -102,14 +126,25 @@ function userCanSeeTicketType(roleIds, ticketType) {
 
 async function getUsernamesMap(ids = []) {
     const map = {};
-    if (!BOT_TOKEN || !Array.isArray(ids) || ids.length === 0) return map;
+    if (!Array.isArray(ids) || ids.length === 0) return map;
     for (const id of ids) {
         if (!id || map[id]) continue;
+        const cached = usernameCache.get(id);
+        if (cached && cached.expiresAt > Date.now()) {
+            map[id] = cached.value;
+            continue;
+        }
         try {
-            const r = await axios.get(`https://discord.com/api/v10/users/${id}`, {
-                headers: { Authorization: `Bot ${BOT_TOKEN}` }
-            });
-            if (r && r.data && r.data.username) map[id] = r.data.username;
+            const logs = await db.get(`PlayerStats.${id}.ticketLogs`) || {};
+            let username = '';
+            for (const tid of Object.keys(logs)) {
+                if (logs[tid]?.username) { username = logs[tid].username; break; }
+            }
+            if (username) {
+                usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
+                enforceUsernameCacheBound();
+                map[id] = username;
+            }
         } catch (_) {}
     }
     return map;
@@ -152,6 +187,32 @@ function sanitizeFilename(input) {
 // Short TTL caches for hot lookups
 const CACHE_TTL_MS = 60 * 1000; // 60s
 let cacheByFilename = new Map(); // filename -> { value, expiresAt }
+
+// Username cache (DB-derived) to avoid Discord lookups on hot paths
+const USERNAME_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const USERNAME_CACHE_MAX = 5000;
+let usernameCache = new Map(); // userId -> { value, expiresAt }
+function enforceUsernameCacheBound() {
+    while (usernameCache.size > USERNAME_CACHE_MAX) {
+        const firstKey = usernameCache.keys().next().value;
+        if (!firstKey) break;
+        usernameCache.delete(firstKey);
+    }
+}
+
+// Compute allowed ticket types for a given role set
+function computeAllowedTicketTypes(roleIds) {
+    try {
+        const types = getKnownTicketTypes();
+        const allowed = [];
+        for (const t of types) {
+            if (userCanSeeTicketType(roleIds || [], t)) allowed.push(String(t).toLowerCase());
+        }
+        return allowed;
+    } catch (_) {
+        return [];
+    }
+}
 
 async function findOwnerByFilename(filename) {
     // Normalize candidate filenames
@@ -279,9 +340,10 @@ async function findTicketContextByFilename(filename) {
     return null;
 }
 
-async function canViewTranscript(userId, filename) {
+async function canViewTranscript(userId, filename, roleFlags) {
     console.log('[auth] canViewTranscript start', { userId, filename });
-    const { isStaff, isAdmin, roleIds } = await getRoleFlags(userId);
+    const rf = roleFlags || (await getRoleFlags(userId));
+    const { isStaff, isAdmin, roleIds } = rf || { isStaff: false, isAdmin: false, roleIds: [] };
     console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
     if (isAdmin) { console.log('[auth] allow: admin'); return true; }
     if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override'); return true; }
@@ -346,7 +408,25 @@ app.use(passport.session());
 
 app.use(async (req, res, next) => {
     res.locals.user = req.user || null;
-    res.locals.roleFlags = req.user ? await getRoleFlags(req.user.id) : { isStaff: false, isAdmin: false, roleIds: [] };
+    // Session-cached role flags and allowed types
+    if (req.user) {
+        const now = Date.now();
+        const sessFlags = req.session.roleFlags;
+        const sessExp = req.session.roleFlagsExpiresAt || 0;
+        if (!sessFlags || sessExp <= now) {
+            const rf = await getRoleFlags(req.user.id);
+            req.session.roleFlags = rf;
+            req.session.roleFlagsExpiresAt = now + ROLE_CACHE_TTL_MS;
+            req.session.allowedTicketTypes = computeAllowedTicketTypes(rf.roleIds);
+            req.session.allowedTicketTypesExpiresAt = now + ROLE_CACHE_TTL_MS;
+        } else if (!req.session.allowedTicketTypes || (req.session.allowedTicketTypesExpiresAt || 0) <= now) {
+            req.session.allowedTicketTypes = computeAllowedTicketTypes((sessFlags && sessFlags.roleIds) || []);
+            req.session.allowedTicketTypesExpiresAt = now + ROLE_CACHE_TTL_MS;
+        }
+        res.locals.roleFlags = req.session.roleFlags || { isStaff: false, isAdmin: false, roleIds: [] };
+    } else {
+        res.locals.roleFlags = { isStaff: false, isAdmin: false, roleIds: [] };
+    }
     // Applications visibility: admins or explicit application admin role id
     try {
         const appAdminRoleId = config.role_ids?.application_admin_role_id;
@@ -1011,9 +1091,11 @@ async function getAllUserIds() {
 
 // Short TTL cache for staff page listings keyed by filters + page/limit
 let staffCache = new Map(); // key -> { data, expiresAt }
+const STAFF_CACHE_MAX = 500;
 
 app.get('/staff', ensureAuth, async (req, res) => {
-    const { isStaff, roleIds } = await getRoleFlags(req.user.id);
+    const rf = res.locals.roleFlags || { isStaff: false, roleIds: [] };
+    const { isStaff, roleIds } = rf;
     if (!isStaff) return res.status(403).send('Forbidden');
     req.session.staff_ok = true;
 
@@ -1028,7 +1110,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
     // Build cache key from filters and pagination
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
-    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, roles: Array.from(roleIds).sort() });
+    const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
+    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, allowed: Array.from(allowedTypes).sort() });
     const cached = staffCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
         const { tickets, pagination } = cached.data;
@@ -1052,8 +1135,9 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }
         if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
         if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
-        // Enforce per-ticket-type visibility based on Discord roles
-        if (!userCanSeeTicketType(roleIds, row.ticketType || '')) continue;
+        // Enforce per-ticket-type visibility based on allowed types from session (case-insensitive)
+        const ttype = String(row.ticketType || '').toLowerCase();
+        if (!allowedTypes.has(ttype)) continue;
         filtered.push(row);
     }
     // Sort by createdAt desc
@@ -1078,13 +1162,17 @@ app.get('/staff', ensureAuth, async (req, res) => {
         transcriptAvailable: !!x.transcriptFilename
     }));
     const pagination = { page, limit, total, totalPages };
+    if (staffCache.size >= STAFF_CACHE_MAX) {
+        const firstKey = staffCache.keys().next().value;
+        if (firstKey) staffCache.delete(firstKey);
+    }
     staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
     res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {
     if (!req.session.staff_ok) {
-        const { isStaff } = await getRoleFlags(req.user.id);
+        const isStaff = !!(res.locals.roleFlags && res.locals.roleFlags.isStaff);
         if (!isStaff) return res.status(403).json([]);
     }
     const q = (req.query.q || '').toLowerCase();
@@ -1109,7 +1197,7 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     // Non-staff users should be routed to user-friendly transcript if available
-    const { isStaff } = await getRoleFlags(req.user.id);
+    const { isStaff } = res.locals.roleFlags || { isStaff: false };
     let effectiveFilename = filename;
     if (!isStaff && filename.endsWith('.full.html')) {
         const alt = filename.replace(/\.full\.html$/, '.html');
@@ -1119,7 +1207,7 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
         }
     }
     console.log('[web] /transcripts view', { userId: req.user.id, filename, effectiveFilename, isStaff });
-    const allowed = await canViewTranscript(req.user.id, effectiveFilename);
+    const allowed = await canViewTranscript(req.user.id, effectiveFilename, res.locals.roleFlags);
     if (!allowed) {
         console.log('[web] /transcripts deny', { userId: req.user.id, filename: effectiveFilename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
@@ -1145,7 +1233,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
-    const allowed = await canViewTranscript(req.user.id, filename);
+    const allowed = await canViewTranscript(req.user.id, filename, res.locals.roleFlags);
     if (!allowed) {
         console.log('[web] /transcripts/raw deny', { userId: req.user.id, filename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
