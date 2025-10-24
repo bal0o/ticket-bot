@@ -1171,21 +1171,39 @@ app.get('/staff', ensureAuth, async (req, res) => {
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
     const slice = filtered.slice(start, start + limit);
-    // Map to view model and resolve usernames in small batch
+    // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
     const userIds = Array.from(new Set(slice.map(x => x.userId))).slice(0, 50);
     const nameMap = await getUsernamesMap(userIds);
-    const tickets = slice.map(x => ({
-        userId: x.userId,
-        username: nameMap[x.userId] || x.userId,
-        ticketId: x.ticketId,
-        ticketType: x.ticketType || 'Unknown',
-        server: x.server || null,
-        closeUser: x.closeUser || null,
-        closeReason: x.closeReason || null,
-        createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
-        transcriptFilename: x.transcriptFilename || null,
-        transcriptAvailable: !!x.transcriptFilename
-    }));
+    const closureInfo = {};
+    for (const x of slice) {
+        if (!(x && (x.closeReason && x.closeUser))) {
+            try {
+                const t = await db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`) || {};
+                let cu = x.closeUser || t.closeUser || t.closeUserUsername || null;
+                let cr = x.closeReason || t.closeReason || t.closeType || null;
+                if (!cu && x.closeUserID) {
+                    try { cu = await metrics.getUsername(String(x.closeUserID)); } catch (_) {}
+                }
+                if (cu || cr) closureInfo[`${x.userId}:${x.ticketId}`] = { closeUser: cu || null, closeReason: cr || null };
+            } catch (_) {}
+        }
+    }
+    const tickets = slice.map(x => {
+        const key = `${x.userId}:${x.ticketId}`;
+        const enriched = closureInfo[key] || {};
+        return {
+            userId: x.userId,
+            username: nameMap[x.userId] || x.userId,
+            ticketId: x.ticketId,
+            ticketType: x.ticketType || 'Unknown',
+            server: x.server || null,
+            closeUser: enriched.closeUser ?? x.closeUser ?? null,
+            closeReason: enriched.closeReason ?? x.closeReason ?? null,
+            createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
+            transcriptFilename: x.transcriptFilename || null,
+            transcriptAvailable: !!x.transcriptFilename
+        };
+    });
     const pagination = { page, limit, total, totalPages };
     if (staffCache.size >= STAFF_CACHE_MAX) {
         const firstKey = staffCache.keys().next().value;
