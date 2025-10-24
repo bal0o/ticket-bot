@@ -9,6 +9,7 @@ const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
 const { createDB } = require('../utils/quickdb');
 const metrics = require('../utils/metrics');
+const promClient = require('prom-client');
 const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
@@ -1077,25 +1078,25 @@ function getKnownTicketTypes() {
     return [];
 }
 
-async function getAllUserIds() {
-    // Prefer fast path; avoid scanning the entire DB when possible
-    const ps = await db.get('PlayerStats');
-    if (ps && typeof ps === 'object') return Object.keys(ps);
-    // If not available, try to derive from the staffList index quickly
+// Background-refreshed list of user IDs to avoid DB-wide scans on /api/users
+let cachedUserIdList = [];
+let cachedUserIdListExpiresAt = 0;
+const USERID_LIST_TTL_MS = 60 * 1000; // 60s
+async function refreshUserIdList() {
     try {
         const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) return Array.from(new Set(list.map(x => x.userId).filter(Boolean)));
+        if (Array.isArray(list)) {
+            const uniq = Array.from(new Set(list.map(x => x && x.userId).filter(Boolean)));
+            cachedUserIdList = uniq;
+            cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
+        }
     } catch (_) {}
-    // Last resort: scan DB
-    const all = await db.all();
-    const users = new Set();
-    for (const row of all) {
-        const key = row.id || row.ID || row.key;
-        if (!key || !key.startsWith('PlayerStats.')) continue;
-        const parts = key.split('.');
-        if (parts.length >= 2) users.add(parts[1]);
+}
+async function getAllUserIds() {
+    if (cachedUserIdListExpiresAt <= Date.now() || !Array.isArray(cachedUserIdList) || cachedUserIdList.length === 0) {
+        await refreshUserIdList();
     }
-    return Array.from(users);
+    return cachedUserIdList || [];
 }
 
 // Short TTL cache for staff page listings keyed by filters + page/limit
@@ -1187,15 +1188,38 @@ app.get('/api/users', ensureAuth, async (req, res) => {
     const q = (req.query.q || '').toLowerCase();
     const users = await getAllUserIds();
     const results = [];
+    const byIdCandidates = [];
+    const nameCandidates = new Set();
+    // First, match by ID without any DB I/O
     for (const userId of users) {
         if (results.length >= 10) break;
-        const logs = await db.get(`PlayerStats.${userId}.ticketLogs`) || {};
-        let username = '';
-        for (const tid of Object.keys(logs)) {
-            if (logs[tid]?.username) { username = logs[tid].username; break; }
+        if (!q || userId.toLowerCase().includes(q)) {
+            byIdCandidates.push(userId);
+        } else {
+            // Defer to name check
+            nameCandidates.add(userId);
         }
-        if (!q || userId.includes(q) || (username && username.toLowerCase().includes(q))) {
-            results.push({ userId, username });
+    }
+    // Fill results from ID matches using cached usernames where possible
+    if (byIdCandidates.length > 0) {
+        const nameMap = await getUsernamesMap(byIdCandidates.slice(0, 10));
+        for (const userId of byIdCandidates) {
+            if (results.length >= 10) break;
+            results.push({ userId, username: nameMap[userId] || '' });
+        }
+    }
+    // If still need matches and q provided, do a limited name search using cached/batched lookups
+    if (results.length < 10 && q) {
+        const remaining = 10 - results.length;
+        // Take a bounded subset to avoid large loops
+        const subset = Array.from(nameCandidates).slice(0, 200);
+        const nameMap = await getUsernamesMap(subset);
+        for (const userId of subset) {
+            if (results.length >= 10) break;
+            const username = (nameMap[userId] || '').toLowerCase();
+            if (username && username.includes(q)) {
+                results.push({ userId, username: nameMap[userId] || '' });
+            }
         }
     }
     res.json(results);
@@ -1260,6 +1284,22 @@ app.listen(PORT, HOST, async () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);
     // Warm transcript index in background
     try { await warmTranscriptIndex(); } catch (_) {}
+    // Prime the user ID list cache without blocking
+    try { refreshUserIdList(); } catch (_) {}
+    // Event loop lag instrumentation
+    try {
+        const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
+        metrics.registry.registerMetric(eventLoopLagGauge);
+        const intervalMs = 1000;
+        let last = process.hrtime.bigint();
+        setInterval(() => {
+            const now = process.hrtime.bigint();
+            const diffMs = Number(now - last) / 1e6;
+            const lag = Math.max(0, diffMs - intervalMs);
+            eventLoopLagGauge.set(lag);
+            last = now;
+        }, intervalMs).unref();
+    } catch (_) {}
 });
 
 
