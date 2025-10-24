@@ -214,13 +214,53 @@ function computeAllowedTicketTypes(roleIds) {
     }
 }
 
+// In-memory transcript context index for O(1) access checks
+let transcriptIndex = new Map(); // lowercased filename -> { ownerId, ticketId, ticketType }
+async function warmTranscriptIndex() {
+    try {
+        const ps = await db.get('PlayerStats');
+        const idx = new Map();
+        if (ps && typeof ps === 'object') {
+            for (const ownerId of Object.keys(ps)) {
+                const logs = ps[ownerId]?.ticketLogs || {};
+                for (const ticketId of Object.keys(logs)) {
+                    const t = logs[ticketId];
+                    const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
+                    if (!url) continue;
+                    const ticketType = t.ticketType || null;
+                    const file = url.split('/').pop();
+                    if (!file) continue;
+                    const base = String(file).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+                    const variants = [
+                        `${base}.html`,
+                        `${base}.full.html`,
+                        `${base}.staff.html`
+                    ];
+                    for (const f of variants) {
+                        idx.set(f.toLowerCase(), { ownerId, ticketId, ticketType });
+                    }
+                }
+            }
+        }
+        transcriptIndex = idx;
+    } catch (_) {
+        // Leave previous index in place on failure
+    }
+}
+
 async function findOwnerByFilename(filename) {
     // Normalize candidate filenames
     const candidates = new Set([filename]);
     if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
     if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
 
-    // Try index first (with small cache)
+    // Fast path: in-memory transcript index
+    for (const cand of candidates) {
+        const rec = transcriptIndex.get(String(cand).toLowerCase());
+        if (rec && rec.ownerId) return rec.ownerId;
+    }
+
+    // Try persistent index next (with small cache)
     for (const cand of candidates) {
         const cached = cacheByFilename.get(cand);
         if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
@@ -233,22 +273,7 @@ async function findOwnerByFilename(filename) {
         } catch (_) {}
     }
 
-    // As a last resort, fall back to the previous (expensive) scan
-    const all = await db.all();
-    const candList = Array.from(candidates);
-    for (const row of all) {
-        const key = row.id || row.ID || row.key; // quick.db variants
-        if (!key || !key.startsWith('PlayerStats.')) continue;
-        if (!key.includes('.transcriptURL')) continue;
-        const url = row.value ?? row.data;
-        if (typeof url !== 'string') continue;
-        if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
-            const parts = key.split('.');
-            const ownerId = parts[1];
-            for (const c of candList) cacheByFilename.set(c, { value: { ownerId }, expiresAt: Date.now() + CACHE_TTL_MS });
-            return ownerId;
-        }
-    }
+    // Avoid DB-wide scan on request path; not found
     return null;
 }
 
@@ -257,7 +282,7 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function findTicketContextByFilename(filename) {
-    // Return { ownerId, ticketId, ticketType } if we can resolve it from DB
+    // Return { ownerId, ticketId, ticketType } using fast in-memory index or lightweight lookups
     try {
         // Build candidate filenames we consider equivalent
         const candidates = new Set([filename]);
@@ -265,54 +290,24 @@ async function findTicketContextByFilename(filename) {
         if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
         if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
         const candList = Array.from(candidates).map(c => c.toLowerCase());
-        // Preferred: scan aggregated PlayerStats object for reliability
-        try {
-            const ps = await db.get('PlayerStats');
-            if (ps && typeof ps === 'object') {
-                for (const ownerId of Object.keys(ps)) {
-                    const logs = ps[ownerId]?.ticketLogs || {};
-                    for (const ticketId of Object.keys(logs)) {
-                        const t = logs[ticketId];
-                        const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
-                        const urlLower = url.toLowerCase();
-                        if (candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) {
-                            const ticketType = t.ticketType || null;
-                            return { ownerId, ticketId, ticketType };
-                        }
-                    }
-                }
-            }
-        } catch (_) {}
-        const all = await db.all();
-        for (const row of all) {
-            const key = row.id || row.ID || row.key;
-            if (!key) continue;
-            const m = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.transcriptURL$/);
-            if (!m) continue;
-            const url = (row.value ?? row.data);
-            if (typeof url !== 'string') continue;
-            const urlLower = url.toLowerCase();
-            if (!candList.some(c => urlLower.endsWith(c) || urlLower.endsWith('/' + c) || urlLower === c)) continue;
-            const ownerId = m[1];
-            const ticketId = m[2];
-            // Try to get ticketType fast via get
-            let ticketType = null;
-            try { ticketType = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`); } catch (_) {}
-            if (!ticketType) {
-                // Fallback within cached rows
-                const typeKey = `PlayerStats.${ownerId}.ticketLogs.${ticketId}.ticketType`;
-                const tRow = all.find(r => (r.id||r.ID||r.key) === typeKey);
-                if (tRow) ticketType = tRow.value ?? tRow.data;
-            }
-            return { ownerId, ticketId, ticketType };
-        }
 
-        // Secondary fallback: derive ticketId from filename suffix (e.g., ...-0003.*) and look up by id
+        // Fast path: in-memory index
+        for (const c of candList) {
+            const rec = transcriptIndex.get(c);
+            if (rec) return rec;
+        }
+        // Try persistent index
+        for (const c of candList) {
+            try {
+                const idx = await db.get(`TicketIndex.byFilename.${c}`);
+                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) return idx;
+            } catch (_) {}
+        }
+        // Last resort: derive ticketId from filename suffix and try direct get without scanning all
         const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
         const idMatch = base.match(/-(\d{1,8})$/);
         if (idMatch) {
             const ticketId = idMatch[1];
-            // Try via aggregated object first
             try {
                 const ps = await db.get('PlayerStats');
                 if (ps && typeof ps === 'object') {
@@ -325,16 +320,6 @@ async function findTicketContextByFilename(filename) {
                     }
                 }
             } catch (_) {}
-            for (const row of all) {
-                const key = row.id || row.ID || row.key;
-                if (!key) continue;
-                const m2 = key.match(/^PlayerStats\.(\d+)\.ticketLogs\.(\d+)\.ticketType$/);
-                if (!m2) continue;
-                if (m2[2] !== ticketId) continue;
-                const ownerId = m2[1];
-                const ticketType = row.value ?? row.data;
-                return { ownerId, ticketId, ticketType };
-            }
         }
     } catch (_) {}
     return null;
@@ -1247,8 +1232,10 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
 
 // Admin overrides routes removed
 
-app.listen(PORT, HOST, () => {
+app.listen(PORT, HOST, async () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);
+    // Warm transcript index in background
+    try { await warmTranscriptIndex(); } catch (_) {}
 });
 
 
