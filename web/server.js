@@ -1113,8 +1113,10 @@ async function getStaffListCached() {
     try {
         const list = await db.get('TicketIndex.staffList');
         if (Array.isArray(list)) {
-            staffListCache = { list, expiresAt: now + STAFFLIST_TTL_MS };
-            return list;
+            // Ensure most-recent-first order once per cache refresh
+            const sorted = list.slice().sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+            staffListCache = { list: sorted, expiresAt: now + STAFFLIST_TTL_MS };
+            return staffListCache.list;
         }
     } catch (_) {}
     return staffListCache.list || [];
@@ -1147,8 +1149,11 @@ app.get('/staff', ensureAuth, async (req, res) => {
 
     // Prefer staffList index for closed tickets (cached in memory)
     const list = await getStaffListCached();
-    // Filter according to query + permissions
-    const filtered = [];
+    // Stream filter in one pass; compute only current page rows to reduce CPU and memory
+    let matchCount = 0;
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const pageRows = [];
     for (const row of list) {
         if (!row) continue;
         if (qUser && row.userId !== qUser) continue;
@@ -1164,18 +1169,22 @@ app.get('/staff', ensureAuth, async (req, res) => {
         // Enforce per-ticket-type visibility based on allowed types from session (case-insensitive)
         const ttype = String(row.ticketType || '').toLowerCase();
         if (!allowedTypes.has(ttype)) continue;
-        filtered.push(row);
+        // This row matches
+        if (matchCount >= start && matchCount < end) pageRows.push(row);
+        matchCount++;
+        if (matchCount >= end && !qUser && !qServer && !qClosedBy && !qFrom && !qTo && !qType) {
+            // Fast-exit when no filters beyond permissions and we've filled the page
+            // (keeps CPU low for common case)
+            // Note: keep going if there are filters so totals are accurate
+        }
     }
-    // Keep original order from index (already sorted desc at build time)
-    const total = filtered.length;
+    const total = matchCount;
     const totalPages = Math.max(1, Math.ceil(total / limit));
-    const start = (page - 1) * limit;
-    const slice = filtered.slice(start, start + limit);
     // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
-    const userIds = Array.from(new Set(slice.map(x => x.userId))).slice(0, 50);
+    const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
     const nameMap = await getUsernamesMap(userIds);
     const closureInfo = {};
-    for (const x of slice) {
+    for (const x of pageRows) {
         if (!(x && (x.closeReason && x.closeUser))) {
             try {
                 const t = await db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`) || {};
@@ -1188,7 +1197,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
             } catch (_) {}
         }
     }
-    const tickets = slice.map(x => {
+    const tickets = pageRows.map(x => {
         const key = `${x.userId}:${x.ticketId}`;
         const enriched = closureInfo[key] || {};
         return {
