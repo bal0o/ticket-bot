@@ -82,7 +82,7 @@
           <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
           <td>
             <% if (t.transcriptFilename) { %>
-              <% const base = String(t.transcriptFilename).replace(/\.(?:full|staff)?\.html$/i, ''); %>
+              <% const base = String(t.transcriptFilename).split('/').pop().replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, ''); %>
               <a href="/transcripts/<%= base %>.full.html">Full</a>
               <span class="muted">/</span>
               <a href="/transcripts/<%= base %>.html">User</a>
