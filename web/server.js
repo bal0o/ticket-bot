@@ -1102,6 +1102,23 @@ async function getAllUserIds() {
 // Short TTL cache for staff page listings keyed by filters + page/limit
 let staffCache = new Map(); // key -> { data, expiresAt }
 const STAFF_CACHE_MAX = 500;
+// In-memory cache for the full staffList index to avoid DB reads per request
+let staffListCache = { list: [], expiresAt: 0 };
+const STAFFLIST_TTL_MS = 30 * 1000; // 30s
+async function getStaffListCached() {
+    const now = Date.now();
+    if (staffListCache.expiresAt > now && Array.isArray(staffListCache.list) && staffListCache.list.length > 0) {
+        return staffListCache.list;
+    }
+    try {
+        const list = await db.get('TicketIndex.staffList');
+        if (Array.isArray(list)) {
+            staffListCache = { list, expiresAt: now + STAFFLIST_TTL_MS };
+            return list;
+        }
+    } catch (_) {}
+    return staffListCache.list || [];
+}
 
 app.get('/staff', ensureAuth, async (req, res) => {
     const rf = res.locals.roleFlags || { isStaff: false, roleIds: [] };
@@ -1128,9 +1145,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
         return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
     }
 
-    // Prefer staffList index for closed tickets
-    let list = await db.get('TicketIndex.staffList');
-    if (!Array.isArray(list)) list = [];
+    // Prefer staffList index for closed tickets (cached in memory)
+    const list = await getStaffListCached();
     // Filter according to query + permissions
     const filtered = [];
     for (const row of list) {
@@ -1150,8 +1166,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         if (!allowedTypes.has(ttype)) continue;
         filtered.push(row);
     }
-    // Sort by createdAt desc
-    filtered.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+    // Keep original order from index (already sorted desc at build time)
     const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
