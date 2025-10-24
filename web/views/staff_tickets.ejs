@@ -82,13 +82,12 @@
           <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
           <td>
             <% if (t.transcriptFilename) { %>
-              <a href="/transcripts/<%= t.transcriptFilename %>">Full</a>
-              <% const userFile = t.transcriptFilename.replace(/\.full\.html$/, '.html'); %>
+              <% const base = String(t.transcriptFilename).replace(/\.(?:full|staff)?\.html$/i, ''); %>
+              <a href="/transcripts/<%= base %>.full.html">Full</a>
               <span class="muted">/</span>
-              <a href="/transcripts/<%= userFile %>">User</a>
-              <% const staffFile = t.transcriptFilename.replace(/\.full\.html$/, '.staff.html'); %>
+              <a href="/transcripts/<%= base %>.html">User</a>
               <span class="muted">/</span>
-              <a href="/transcripts/<%= staffFile %>">Staff</a>
+              <a href="/transcripts/<%= base %>.staff.html">Staff</a>
             <% } else { %>
               <em>Not available</em>
             <% } %>
