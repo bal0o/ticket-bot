@@ -1276,51 +1276,27 @@ app.get('/staff', ensureAuth, async (req, res) => {
     // Fallback to all tickets only if no filters
     if (!candidateTickets) candidateTickets = index.allTickets;
     
-    // Pagination: load only current page, estimate total efficiently
-    const start = (page - 1) * limit;
-    const hasFilters = !!(qUser || qType || qServer || qClosedBy || qFrom || qTo);
-    const pageRows = [];
-    
-    // For searches with exact index matches AND no date filters:
-    // use array length as accurate total without iterating
-    let total = null;
-    const needsDateFiltering = !!(qFrom || qTo);
-    
-    if (!needsDateFiltering && hasFilters) {
-        // Index matches are already filtered, total is accurate
-        total = candidateTickets.length;
-    }
-    
-    let matchCount = 0;
-    for (const row of candidateTickets) {
-        if (!row) continue;
+    // SEARCH first: filter candidate tickets into a new filtered set
+    // Then PAGINATE the filtered set (no need to count separately)
+    const filteredTickets = candidateTickets.filter(row => {
+        if (!row) return false;
         
         // Permission check
         const ttype = String(row.ticketType || '').toLowerCase();
-        if (!allowedTypes.has(ttype)) continue;
+        if (!allowedTypes.has(ttype)) return false;
         
-        // Date range filters (only if needed)
-        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
-        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
+        // Date range filters
+        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) return false;
+        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) return false;
         
-        matchCount++;
-        
-        // Only collect current page's tickets
-        if (matchCount > start && matchCount <= start + limit) {
-            pageRows.push(row);
-        }
-        
-        // Early exit: if we have total already and loaded the page
-        if (total !== null && pageRows.length >= limit) {
-            break;
-        }
-    }
+        return true;
+    });
     
-    // If we don't have an estimate yet, use the match count (more accurate)
-    if (total === null) {
-        total = matchCount;
-    }
-    
+    // Now paginate on the filtered subset
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const pageRows = filteredTickets.slice(start, end);
+    const total = filteredTickets.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
     const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
