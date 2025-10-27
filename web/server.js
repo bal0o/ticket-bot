@@ -1276,34 +1276,28 @@ app.get('/staff', ensureAuth, async (req, res) => {
     // Fallback to all tickets only if no filters
     if (!candidateTickets) candidateTickets = index.allTickets;
     
-    // Filter by date range and permissions, then paginate
-    // Only scan what we need for the page + small buffer
-    let matchedTickets = [];
-    const start = (page - 1) * limit;
-    const target = start + limit;
-    const maxScan = target + 100; // Small buffer for accurate pagination
-    
-    for (const row of candidateTickets) {
-        if (!row) continue;
+    // SEARCH first: filter candidate tickets into a new filtered set
+    // Then PAGINATE the filtered set (no need to count separately)
+    const filteredTickets = candidateTickets.filter(row => {
+        if (!row) return false;
         
         // Permission check
         const ttype = String(row.ticketType || '').toLowerCase();
-        if (!allowedTypes.has(ttype)) continue;
+        if (!allowedTypes.has(ttype)) return false;
         
         // Date range filters
-        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
-        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
+        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) return false;
+        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) return false;
         
-        matchedTickets.push(row);
-        
-        // Early exit: stop scanning once we have enough results
-        if (matchedTickets.length >= maxScan) break;
-    }
+        return true;
+    });
     
-    // Calculate totals
-    const total = matchedTickets.length;
+    // Now paginate on the filtered subset
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const pageRows = filteredTickets.slice(start, end);
+    const total = filteredTickets.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
-    const pageRows = matchedTickets.slice(start, start + limit);
     // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
     const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
     let nameMap = {};
