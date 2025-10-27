@@ -1276,15 +1276,22 @@ app.get('/staff', ensureAuth, async (req, res) => {
     // Fallback to all tickets only if no filters
     if (!candidateTickets) candidateTickets = index.allTickets;
     
-    // Filter by date range and permissions, count all matches, but only collect current page
+    // Pagination: load only current page, estimate total efficiently
     const start = (page - 1) * limit;
-    const end = start + limit;
-    let matchCount = 0;
+    const hasFilters = !!(qUser || qType || qServer || qClosedBy || qFrom || qTo);
     const pageRows = [];
     
-    // Track if we have specific filters that require accurate count
-    const hasFilters = !!(qUser || qType || qServer || qClosedBy || qFrom || qTo);
+    // For searches with exact index matches AND no date filters:
+    // use array length as accurate total without iterating
+    let total = null;
+    const needsDateFiltering = !!(qFrom || qTo);
     
+    if (!needsDateFiltering && hasFilters) {
+        // Index matches are already filtered, total is accurate
+        total = candidateTickets.length;
+    }
+    
+    let matchCount = 0;
     for (const row of candidateTickets) {
         if (!row) continue;
         
@@ -1292,29 +1299,28 @@ app.get('/staff', ensureAuth, async (req, res) => {
         const ttype = String(row.ticketType || '').toLowerCase();
         if (!allowedTypes.has(ttype)) continue;
         
-        // Date range filters
+        // Date range filters (only if needed)
         if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
         if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
         
-        // Count all matches for accurate pagination
         matchCount++;
         
-        // Only collect tickets for the current page to minimize memory and processing
-        if (matchCount > start && matchCount <= end) {
+        // Only collect current page's tickets
+        if (matchCount > start && matchCount <= start + limit) {
             pageRows.push(row);
         }
         
-        // Early exit optimization: only if NO filters and we have a full page
-        // When there are filters, we need accurate count so continue counting
-        if (!hasFilters && matchCount > end) {
-            // Unfiltered search: stop early, use estimated count
+        // Early exit: if we have total already and loaded the page
+        if (total !== null && pageRows.length >= limit) {
             break;
         }
     }
     
-    // For unfiltered searches, estimate total based on what we scanned + buffer
-    // For filtered searches, use actual match count
-    const total = hasFilters ? matchCount : (pageRows.length < limit ? matchCount : matchCount + 500);
+    // If we don't have an estimate yet, use the match count (more accurate)
+    if (total === null) {
+        total = matchCount;
+    }
+    
     const totalPages = Math.max(1, Math.ceil(total / limit));
     // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
     const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
