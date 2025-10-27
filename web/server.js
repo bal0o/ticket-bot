@@ -34,6 +34,16 @@ const TRANSCRIPT_DIR = path.resolve(process.cwd(), config.transcript_settings?.s
 // Harden outbound HTTP calls
 axios.defaults.timeout = 3000;
 
+// Timeout wrapper for async operations
+const withTimeout = (promise, ms = 5000, errorMessage = 'Operation timeout') => {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(errorMessage)), ms)
+        )
+    ]);
+};
+
 if (!WEB_ENABLED) {
     console.log('[web] Disabled by config.');
     process.exit(0);
@@ -405,6 +415,17 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Request timeout protection (10 seconds)
+app.use((req, res, next) => {
+    res.setTimeout(10000, () => {
+        if (!res.headersSent) {
+            console.error(`[web] Request timeout: ${req.method} ${req.path}`);
+            res.status(503).send('Request timeout');
+        }
+    });
+    next();
+});
 
 app.use(async (req, res, next) => {
     res.locals.user = req.user || null;
@@ -1102,31 +1123,95 @@ async function getAllUserIds() {
 // Short TTL cache for staff page listings keyed by filters + page/limit
 let staffCache = new Map(); // key -> { data, expiresAt }
 const STAFF_CACHE_MAX = 500;
-// In-memory cache for the full staffList index to avoid DB reads per request
-let staffListCache = { list: [], expiresAt: 0 };
-const STAFFLIST_TTL_MS = 30 * 1000; // 30s
-async function getStaffListCached() {
+
+// Indexed cache structure: build once, query efficiently
+let staffIndexCache = { 
+    byUserId: new Map(),      // userId -> [row, row, ...] (sorted desc by createdAt)
+    byType: new Map(),        // ticketType -> [row, row, ...] (sorted desc)
+    byServer: new Map(),      // server -> [row, row, ...] (sorted desc)
+    byCloseUser: new Map(),   // closeUserID -> [row, row, ...] (sorted desc)
+    allTickets: [],          // All tickets sorted desc (fallback)
+    expiresAt: 0 
+};
+const INDEX_TTL_MS = 30 * 1000; // 30s
+
+async function buildStaffIndex() {
     const now = Date.now();
-    if (staffListCache.expiresAt > now && Array.isArray(staffListCache.list) && staffListCache.list.length > 0) {
-        return staffListCache.list;
-    }
+    if (staffIndexCache.expiresAt > now) return staffIndexCache;
+    
     try {
-        const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) {
-            // Ensure most-recent-first order once per cache refresh
-            const sorted = list.slice().sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-            staffListCache = { list: sorted, expiresAt: now + STAFFLIST_TTL_MS };
-            return staffListCache.list;
+        const list = await withTimeout(
+            db.get('TicketIndex.staffList'),
+            8000,
+            'Staff index build timeout'
+        );
+        if (!Array.isArray(list)) return staffIndexCache;
+        
+        // Build indexes
+        const byUserId = new Map();
+        const byType = new Map();
+        const byServer = new Map();
+        const byCloseUser = new Map();
+        
+        for (const row of list) {
+            if (!row) continue;
+            
+            // Index by userId
+            if (row.userId) {
+                if (!byUserId.has(row.userId)) byUserId.set(row.userId, []);
+                byUserId.get(row.userId).push(row);
+            }
+            
+            // Index by type
+            const ttype = String(row.ticketType || '').toLowerCase();
+            if (ttype) {
+                if (!byType.has(ttype)) byType.set(ttype, []);
+                byType.get(ttype).push(row);
+            }
+            
+            // Index by server
+            const server = String(row.server || '').toLowerCase();
+            if (server) {
+                if (!byServer.has(server)) byServer.set(server, []);
+                byServer.get(server).push(row);
+            }
+            
+            // Index by close user
+            const closeUser = String(row.closeUserID || '').toLowerCase();
+            if (closeUser) {
+                if (!byCloseUser.has(closeUser)) byCloseUser.set(closeUser, []);
+                byCloseUser.get(closeUser).push(row);
+            }
         }
+        
+        // Sort each index by createdAt desc
+        for (const arr of byUserId.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        for (const arr of byType.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        for (const arr of byServer.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        for (const arr of byCloseUser.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        
+        // Sort all tickets too
+        const allTickets = list.slice().sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        
+        staffIndexCache = {
+            byUserId,
+            byType,
+            byServer,
+            byCloseUser,
+            allTickets,
+            expiresAt: now + INDEX_TTL_MS
+        };
     } catch (_) {}
-    return staffListCache.list || [];
+    
+    return staffIndexCache;
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {
-    const rf = res.locals.roleFlags || { isStaff: false, roleIds: [] };
-    const { isStaff, roleIds } = rf;
-    if (!isStaff) return res.status(403).send('Forbidden');
-    req.session.staff_ok = true;
+    try {
+        const rf = res.locals.roleFlags || { isStaff: false, roleIds: [] };
+        const { isStaff, roleIds } = rf;
+        if (!isStaff) return res.status(403).send('Forbidden');
+        req.session.staff_ok = true;
 
     const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
     const qSteam = (req.query.steam || '').replace(/[^0-9]/g, '');
@@ -1147,56 +1232,113 @@ app.get('/staff', ensureAuth, async (req, res) => {
         return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
     }
 
-    // Prefer staffList index for closed tickets (cached in memory)
-    const list = await getStaffListCached();
-    // Stream filter in one pass; compute only current page rows to reduce CPU and memory
-    let matchCount = 0;
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const pageRows = [];
-    for (const row of list) {
-        if (!row) continue;
-        if (qUser && row.userId !== qUser) continue;
-        if (qType && String(row.ticketType || '').toLowerCase() !== qType) continue;
-        if (qServer && String(row.server || '').toLowerCase().indexOf(qServer) === -1) continue;
-        if (qClosedBy) {
-            const idMatch = String(row.closeUserID || '').toLowerCase() === qClosedBy;
-            const nameMatch = false; // name not stored in index; skip
-            if (!(idMatch || nameMatch)) continue;
+    // Use indexed lookups to get only relevant tickets, never scan all 25k
+    const index = await buildStaffIndex();
+    
+    // Intersect results from multiple indexes if multiple filters
+    let candidateTickets = null;
+    
+    // Start with the most selective filter first
+    if (qUser) {
+        candidateTickets = index.byUserId.get(qUser) || [];
+    } else if (qType) {
+        candidateTickets = index.byType.get(qType.toLowerCase()) || [];
+    } else if (qClosedBy) {
+        candidateTickets = index.byCloseUser.get(qClosedBy.toLowerCase()) || [];
+    }
+    
+    // Now apply additional filters as intersections (reduce candidate set)
+    if (candidateTickets && qType && !qUser && !qClosedBy) {
+        // Already filtered by type above
+    } else if (candidateTickets && qType) {
+        // Filter candidates by type
+        candidateTickets = candidateTickets.filter(row => 
+            String(row.ticketType || '').toLowerCase() === qType.toLowerCase()
+        );
+    }
+    
+    if (qServer && candidateTickets) {
+        const serverLower = qServer.toLowerCase();
+        candidateTickets = candidateTickets.filter(row =>
+            String(row.server || '').toLowerCase().includes(serverLower)
+        );
+    } else if (qServer && !candidateTickets) {
+        // Only server filter: use server index
+        const serverLower = qServer.toLowerCase();
+        const tickets = [];
+        for (const [server, rows] of index.byServer.entries()) {
+            if (server.includes(serverLower)) tickets.push(...rows);
         }
-        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
-        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
-        // Enforce per-ticket-type visibility based on allowed types from session (case-insensitive)
+        candidateTickets = tickets;
+        candidateTickets.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+    }
+    
+    // Fallback to all tickets only if no filters
+    if (!candidateTickets) candidateTickets = index.allTickets;
+    
+    // Filter by date range and permissions, then paginate
+    // Only scan what we need for the page + small buffer
+    let matchedTickets = [];
+    const start = (page - 1) * limit;
+    const target = start + limit;
+    const maxScan = target + 100; // Small buffer for accurate pagination
+    
+    for (const row of candidateTickets) {
+        if (!row) continue;
+        
+        // Permission check
         const ttype = String(row.ticketType || '').toLowerCase();
         if (!allowedTypes.has(ttype)) continue;
-        // This row matches
-        if (matchCount >= start && matchCount < end) pageRows.push(row);
-        matchCount++;
-        if (matchCount >= end && !qUser && !qServer && !qClosedBy && !qFrom && !qTo && !qType) {
-            // Fast-exit when no filters beyond permissions and we've filled the page
-            // (keeps CPU low for common case)
-            // Note: keep going if there are filters so totals are accurate
-        }
+        
+        // Date range filters
+        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) continue;
+        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) continue;
+        
+        matchedTickets.push(row);
+        
+        // Early exit: stop scanning once we have enough results
+        if (matchedTickets.length >= maxScan) break;
     }
-    const total = matchCount;
+    
+    // Calculate totals
+    const total = matchedTickets.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageRows = matchedTickets.slice(start, start + limit);
     // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
     const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
-    const nameMap = await getUsernamesMap(userIds);
-    const closureInfo = {};
-    for (const x of pageRows) {
-        if (!(x && (x.closeReason && x.closeUser))) {
-            try {
-                const t = await db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`) || {};
-                let cu = x.closeUser || t.closeUser || t.closeUserUsername || null;
-                let cr = x.closeReason || t.closeReason || t.closeType || null;
-                if (!cu && x.closeUserID) {
-                    try { cu = await metrics.getUsername(String(x.closeUserID)); } catch (_) {}
-                }
-                if (cu || cr) closureInfo[`${x.userId}:${x.ticketId}`] = { closeUser: cu || null, closeReason: cr || null };
-            } catch (_) {}
-        }
+    let nameMap = {};
+    try {
+        nameMap = await withTimeout(
+            getUsernamesMap(userIds),
+            3000,
+            'Username lookup timeout'
+        );
+    } catch (err) {
+        console.error('[web] Username lookup timeout, continuing with empty map');
     }
+    const closureInfo = {};
+    // Batch DB queries for tickets missing closure info (with timeout)
+    const missingClosure = pageRows.filter(x => x && !(x.closeReason && x.closeUser));
+    const closurePromises = missingClosure.map(async (x) => {
+        try {
+            const t = await withTimeout(
+                db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`),
+                2000,
+                `DB timeout for ticket ${x.userId}:${x.ticketId}`
+            ) || {};
+            let cu = x.closeUser || t.closeUser || t.closeUserUsername || null;
+            let cr = x.closeReason || t.closeReason || t.closeType || null;
+            if (!cu && x.closeUserID) {
+                try { cu = await metrics.getUsername(String(x.closeUserID)); } catch (_) {}
+            }
+            if (cu || cr) closureInfo[`${x.userId}:${x.ticketId}`] = { closeUser: cu || null, closeReason: cr || null };
+        } catch (err) {
+            if (err.message && err.message.includes('timeout')) {
+                console.error('[web] Closure info fetch timeout', x);
+            }
+        }
+    });
+    await Promise.all(closurePromises);
     const tickets = pageRows.map(x => {
         const key = `${x.userId}:${x.ticketId}`;
         const enriched = closureInfo[key] || {};
@@ -1220,6 +1362,12 @@ app.get('/staff', ensureAuth, async (req, res) => {
     }
     staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
     res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
+    } catch (err) {
+        console.error('[web] /staff error:', err.message || err);
+        if (!res.headersSent) {
+            res.status(500).render('forbidden', { message: 'An error occurred while loading tickets. Please try again.' });
+        }
+    }
 });
 
 app.get('/api/users', ensureAuth, async (req, res) => {
@@ -1328,6 +1476,8 @@ app.listen(PORT, HOST, async () => {
     try { await warmTranscriptIndex(); } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
+    // Build staff index in background
+    try { await buildStaffIndex(); } catch (_) {}
     // Event loop lag instrumentation
     try {
         const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
