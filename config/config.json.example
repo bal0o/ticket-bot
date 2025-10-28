@@ -21,6 +21,7 @@
 "role_ids_blacklist_cmd": [],
         "role_ids_anonymous_cmd": [],
 "default_admin_role_id": "",
+"application_admin_role_id": "",
 "ticket_blacklisted_role_id": ""
     ,"role_ids_checkcc_cmd": []
 },
