@@ -103,12 +103,15 @@ async function getRoleFlags(userId) {
         if (cached && cached.expiresAt > Date.now()) return cached.flags;
         if (roleInFlight.has(userId)) return await roleInFlight.get(userId);
         const p = (async () => {
-            const roles = new Set(await fetchGuildMemberRoles(userId));
+            const fetchedRoles = await fetchGuildMemberRoles(userId);
+            const roles = new Set(fetchedRoles);
             let isStaff = false;
             let isAdmin = false;
             for (const rid of roles) {
-                if (ADMIN_ROLE_IDS.has(rid)) isAdmin = true;
-                if (STAFF_ROLE_IDS.has(rid)) isStaff = true;
+                // Check both as string and convert to ensure type matching
+                const ridStr = String(rid);
+                if (ADMIN_ROLE_IDS.has(ridStr)) isAdmin = true;
+                if (STAFF_ROLE_IDS.has(ridStr)) isStaff = true;
             }
             if (isAdmin) isStaff = true;
             const flags = { isStaff, isAdmin, roleIds: Array.from(roles) };
