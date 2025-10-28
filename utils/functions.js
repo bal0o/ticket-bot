@@ -907,6 +907,11 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             const transcriptURL = `${base_url}${channel.name}.full.html`;
             savedTranscriptURL = transcriptURL;
             
+            // Send notification to channel that it will be deleted after transcript generation
+            try {
+                await channel.send('🔒 **This ticket has been closed.**\n\n📝 Generating transcript... This channel will be deleted once the transcript is complete.');
+            } catch (_) {}
+            
             // Fire-and-forget: collect messages and generate transcript without blocking
             // Delete channel only after messages are collected to ensure transcript success
             setImmediate(async () => {
