@@ -570,7 +570,8 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
-    const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+    const rf = await getRoleFlags(req.user.id);
+    const canAdmin = !!(rf.isAdmin || (config.role_ids.application_admin_role_id && Array.isArray(rf.roleIds) && rf.roleIds.includes(config.role_ids.application_admin_role_id)));
 
     // Compute prev/next application IDs (default list: active apps sorted by updatedAt desc)
     let prevId = null, nextId = null;
