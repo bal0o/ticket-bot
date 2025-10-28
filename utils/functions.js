@@ -930,45 +930,69 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
 
                     // Fire-and-forget rendering
                     const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
+                    
+                    // Delete channel only when worker confirms completion
                     worker.on('message', async (msg) => {
                         try {
-                            if (!msg || msg.ok !== true) {
+                            if (msg && msg.ok === true) {
+                                // Transcript successfully generated, safe to delete channel
+                                try {
+                                    await channel.delete();
+                                } catch (err) {
+                                    if (err && err.code === 10003) {
+                                        module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
+                                    } else {
+                                        module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
+                                    }
+                                }
+                            } else {
                                 // Fallback: write minimal placeholder so links are valid
                                 const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
                                 await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
                                 await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
+                                
+                                // Still delete on failure after fallback
+                                setTimeout(async () => {
+                                    try {
+                                        await channel.delete();
+                                    } catch (err) {
+                                        if (err && err.code === 10003) {
+                                            module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                        }
+                                    }
+                                }, 2000);
                             }
                         } catch (_) {}
                     });
-                    worker.on('error', (err) => { try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {} });
                     
-                    // Now that messages are collected, safe to delete channel
-                    // Use a longer delay to ensure transcript generation completes
-                    setTimeout(async () => {
-                        try {
-                            await channel.delete();
-                        } catch (err) {
-                            if (err && err.code === 10003) {
-                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
-                            } else {
-                                module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
+                    // On worker error, still try to delete after a delay
+                    worker.on('error', async (err) => { 
+                        try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {}
+                        // Delete channel on error after delay
+                        setTimeout(async () => {
+                            try {
+                                await channel.delete();
+                            } catch (err) {
+                                if (err && err.code === 10003) {
+                                    module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                }
                             }
-                        }
-                    }, 5000); // Give transcript time to generate
+                        }, 2000);
+                    });
                 } catch (e) {
                     try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
-                    // On error, still try to delete the channel
+                    // On error collecting messages, still try to delete the channel as fallback
                     setTimeout(async () => {
                         try {
                             await channel.delete();
                         } catch (err) {
                             if (err && err.code === 10003) {
-                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
+                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
                             } else {
                                 module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
                             }
                         }
-                    }, 1000);
+                    }, 2000);
                 }
             });
             
