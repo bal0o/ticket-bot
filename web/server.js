@@ -103,12 +103,15 @@ async function getRoleFlags(userId) {
         if (cached && cached.expiresAt > Date.now()) return cached.flags;
         if (roleInFlight.has(userId)) return await roleInFlight.get(userId);
         const p = (async () => {
-            const roles = new Set(await fetchGuildMemberRoles(userId));
+            const fetchedRoles = await fetchGuildMemberRoles(userId);
+            const roles = new Set(fetchedRoles);
             let isStaff = false;
             let isAdmin = false;
             for (const rid of roles) {
-                if (ADMIN_ROLE_IDS.has(rid)) isAdmin = true;
-                if (STAFF_ROLE_IDS.has(rid)) isStaff = true;
+                // Check both as string and convert to ensure type matching
+                const ridStr = String(rid);
+                if (ADMIN_ROLE_IDS.has(ridStr)) isAdmin = true;
+                if (STAFF_ROLE_IDS.has(ridStr)) isStaff = true;
             }
             if (isAdmin) isStaff = true;
             const flags = { isStaff, isAdmin, roleIds: Array.from(roles) };
@@ -570,7 +573,8 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
-    const canAdmin = (await getRoleFlags(req.user.id)).isAdmin || (config.role_ids.application_admin_role_id && (await fetchGuildMemberRoles(req.user.id)).includes(config.role_ids.application_admin_role_id));
+    const rf = await getRoleFlags(req.user.id);
+    const canAdmin = !!(rf.isAdmin || (config.role_ids.application_admin_role_id && Array.isArray(rf.roleIds) && rf.roleIds.includes(config.role_ids.application_admin_role_id)));
 
     // Compute prev/next application IDs (default list: active apps sorted by updatedAt desc)
     let prevId = null, nextId = null;
