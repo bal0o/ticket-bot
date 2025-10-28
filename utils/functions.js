@@ -903,40 +903,49 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
             }
 
-            const job = {
-                savePath: save_path,
-                baseUrl: base_url,
-                channelName: channel.name,
-                DiscordID,
-                isAnonTicket: !!typeFile["anonymous-only-replies"],
-                closeReason: reason,
-                closedBy: staffMember.username || staffMember.user?.username,
-                responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
-                messagesMain: await collectAll(channel),
-                messagesStaff: staffThread ? await collectAll(staffThread) : []
-            };
-
-            // Fire-and-forget rendering
-            try {
-                const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
-                worker.on('message', async (msg) => {
-                    try {
-                        if (!msg || msg.ok !== true) {
-                            // Fallback: write minimal placeholder so links are valid
-                            const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
-                            await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
-                            await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
-                        }
-                    } catch (_) {}
-                });
-                worker.on('error', (err) => { try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {} });
-            } catch (e) {
-                try { func.handle_errors(e, client, 'functions.js', 'Failed to start transcript worker'); } catch(_) {}
-            }
-
+            // Start message collection asynchronously (don't block close response)
             const transcriptURL = `${base_url}${channel.name}.full.html`;
             savedTranscriptURL = transcriptURL;
-            await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, transcriptURL);
+            
+            // Fire-and-forget: collect messages and generate transcript without blocking
+            setImmediate(async () => {
+                try {
+                    // Collect messages (this is slow, happens after response)
+                    const messagesMain = await collectAll(channel);
+                    const messagesStaff = staffThread ? await collectAll(staffThread) : [];
+                    
+                    const job = {
+                        savePath: save_path,
+                        baseUrl: base_url,
+                        channelName: channel.name,
+                        DiscordID,
+                        isAnonTicket: !!typeFile["anonymous-only-replies"],
+                        closeReason: reason,
+                        closedBy: staffMember.username || staffMember.user?.username,
+                        responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
+                        messagesMain,
+                        messagesStaff
+                    };
+
+                    // Fire-and-forget rendering
+                    const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
+                    worker.on('message', async (msg) => {
+                        try {
+                            if (!msg || msg.ok !== true) {
+                                // Fallback: write minimal placeholder so links are valid
+                                const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
+                                await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
+                                await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
+                            }
+                        } catch (_) {}
+                    });
+                    worker.on('error', (err) => { try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {} });
+                } catch (e) {
+                    try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
+                }
+            });
+            
+            await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, savedTranscriptURL);
             // Indexes for fast lookups
             try {
                 const fnameFull = `${channel.name}.full.html`;
