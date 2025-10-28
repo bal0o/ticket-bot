@@ -1053,7 +1053,11 @@ module.exports = async function (client, interaction) {
 			const isStaffUser = interaction.member.roles.cache.some(r => adminRoleIds.has(r.id) || staffRoleIds.has(r.id) || (defaultAdminRoleId && r.id === defaultAdminRoleId));
 
 			if (!isStaffUser) {
-				let filteredChannels = allChannels.filter(x => x.topic === interaction.member.user.id)
+				// Filter to only text channels with topic matching user ID
+				let filteredChannels = allChannels.filter(x => 
+					x.type === 'GUILD_TEXT' && 
+					x.topic === interaction.member.user.id
+				);
 				if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
 					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 					return;
