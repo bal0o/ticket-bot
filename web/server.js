@@ -1193,6 +1193,14 @@ async function buildStaffIndex(allowStale = true) {
     indexRebuildInProgress = true;
     
     try {
+        // Check memory before loading - skip if we're already high
+        const memUsage = process.memoryUsage();
+        if (memUsage.heapUsed > 1500 * 1024 * 1024) { // > 1.5GB
+            console.warn('[web] Skipping index rebuild due to high memory usage:', Math.round(memUsage.heapUsed / 1024 / 1024), 'MB');
+            indexRebuildInProgress = false;
+            return staffIndexCache;
+        }
+        
         const list = await withTimeout(
             db.get('TicketIndex.staffList'),
             8000,
@@ -1205,10 +1213,17 @@ async function buildStaffIndex(allowStale = true) {
         
         // Only load recent tickets to reduce memory usage (last 1000 tickets)
         // The index is already sorted by createdAt desc, so take first 1000
+        // IMPORTANT: slice immediately to avoid keeping full list in memory
         const RECENT_TICKET_LIMIT = 1000;
-        const recentTickets = list.length > RECENT_TICKET_LIMIT 
-            ? list.slice(0, RECENT_TICKET_LIMIT)
-            : list;
+        let recentTickets;
+        if (list.length > RECENT_TICKET_LIMIT) {
+            recentTickets = list.slice(0, RECENT_TICKET_LIMIT);
+            // Explicitly null the full list to help GC (though slice creates new array)
+            // Force GC hint by clearing and waiting briefly
+            list.length = 0; // Clear original array
+        } else {
+            recentTickets = list;
+        }
         
         // Build indexes only for recent tickets
         const byUserId = new Map();
@@ -1289,31 +1304,53 @@ function rebuildStaffIndexInBackground() {
 
 // Search full DB index for specific criteria when recent tickets don't have matches
 // This allows finding older tickets without loading everything into memory
+// IMPORTANT: Only use when absolutely necessary - avoid loading full 25k list
 async function searchFullIndex({ userId, ticketId, ticketType, limit = 100 }) {
+    // Don't load full index if we're hitting memory limits - return empty
+    // The recent 1000 tickets should cover most use cases
+    if (process.memoryUsage().heapUsed > 1500 * 1024 * 1024) { // > 1.5GB
+        console.warn('[web] Skipping full index search due to high memory usage');
+        return [];
+    }
+    
     try {
+        // Load with stricter timeout and limited processing
         const fullList = await withTimeout(
             db.get('TicketIndex.staffList'),
-            5000,
+            3000,
             'Full index search timeout'
         );
         if (!Array.isArray(fullList)) return [];
         
-        let results = fullList;
+        // For large lists, process in chunks to avoid memory spikes
+        let results = [];
+        const chunkSize = 5000;
         
-        // Apply filters
-        if (userId) {
-            results = results.filter(r => r && String(r.userId) === String(userId));
-        }
-        if (ticketId) {
-            const tidStr = String(ticketId);
-            results = results.filter(r => {
-                const t = String(r?.ticketId || '').trim();
-                return t === tidStr || t === tidStr.padStart(4, '0') || t.includes(tidStr);
-            });
-        }
-        if (ticketType) {
-            const typeLower = String(ticketType).toLowerCase();
-            results = results.filter(r => String(r?.ticketType || '').toLowerCase() === typeLower);
+        // Apply filters in chunks
+        for (let i = 0; i < fullList.length; i += chunkSize) {
+            const chunk = fullList.slice(i, i + chunkSize);
+            let chunkResults = chunk;
+            
+            // Apply filters
+            if (userId) {
+                chunkResults = chunkResults.filter(r => r && String(r.userId) === String(userId));
+            }
+            if (ticketId) {
+                const tidStr = String(ticketId);
+                chunkResults = chunkResults.filter(r => {
+                    const t = String(r?.ticketId || '').trim();
+                    return t === tidStr || t === tidStr.padStart(4, '0') || t.includes(tidStr);
+                });
+            }
+            if (ticketType) {
+                const typeLower = String(ticketType).toLowerCase();
+                chunkResults = chunkResults.filter(r => String(r?.ticketType || '').toLowerCase() === typeLower);
+            }
+            
+            results.push(...chunkResults);
+            
+            // Early exit if we have enough results
+            if (results.length >= limit * 2) break;
         }
         
         // Sort by createdAt desc and limit
@@ -1772,8 +1809,13 @@ app.listen(PORT, HOST, async () => {
     try { await warmTranscriptIndex(); } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
-    // Build staff index in background
-    try { await buildStaffIndex(); } catch (_) {}
+    // Build staff index in background (deferred, non-blocking startup)
+    try { 
+        // Defer index build to avoid blocking startup - do it after a delay
+        setTimeout(() => {
+            rebuildStaffIndexInBackground();
+        }, 2000); // Wait 2 seconds after server starts
+    } catch (_) {}
     // Event loop lag instrumentation
     try {
         const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
