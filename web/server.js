@@ -32,6 +32,9 @@ const TRANSCRIPT_DIR = path.resolve(process.cwd(), config.transcript_settings?.s
 // Harden outbound HTTP calls
 axios.defaults.timeout = 3000;
 
+// In-memory per-user lock to avoid concurrent comms channel creation
+const openCommsLocks = new Map(); // userId -> true while creating
+
 // Timeout wrapper for async operations
 const withTimeout = (promise, ms = 5000, errorMessage = 'Operation timeout') => {
     return Promise.race([
@@ -250,6 +253,36 @@ function enforceUsernameCacheBound() {
         if (!firstKey) break;
         usernameCache.delete(firstKey);
     }
+}
+
+// Discord user cache for rendering usernames in web views
+let discordUserCache = new Map(); // userId -> { username, globalName, tag, expiresAt }
+async function getDiscordUsernamesMap(userIds = []) {
+    const map = {};
+    if (!Array.isArray(userIds) || userIds.length === 0) return map;
+    for (const uid of userIds) {
+        const id = String(uid || '');
+        if (!id) continue;
+        const cached = discordUserCache.get(id);
+        if (cached && cached.expiresAt > Date.now()) {
+            map[id] = cached.username || cached.globalName || cached.tag || id;
+            continue;
+        }
+        try {
+            if (!BOT_TOKEN) { map[id] = id; continue; }
+            const res = await axios.get(`https://discord.com/api/v10/users/${id}`, {
+                headers: { Authorization: `Bot ${BOT_TOKEN}` }
+            });
+            const data = res.data || {};
+            const username = data.global_name || data.username || null;
+            const tag = data.username && data.discriminator ? `${data.username}#${data.discriminator}` : null;
+            discordUserCache.set(id, { username, globalName: data.global_name || null, tag, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
+            map[id] = username || tag || id;
+        } catch (_) {
+            map[id] = id;
+        }
+    }
+    return map;
 }
 
 // Compute allowed ticket types for a given role set
@@ -768,28 +801,52 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
-    
-    // Check if there's already an active communication channel for this application
-    if (appRec.tickets && appRec.tickets.length > 0) {
-        const lastTicket = appRec.tickets[appRec.tickets.length - 1];
-        if (lastTicket && lastTicket.channelId) {
-            try {
-                // Check if the existing channel still exists
-                const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
-                    headers: { Authorization: `Bot ${BOT_TOKEN}` }
-                });
-                if (channelResponse.status === 200) {
-                    // Channel exists, redirect to application with warning
-                    return res.redirect(`/applications/${appId}?notification=A communication channel is already open for this application!&type=error`);
+    const userId = String(appRec.userId || '');
+    // Per-user lock to prevent race conditions creating multiple comms channels
+    if (userId && openCommsLocks.get(userId)) {
+        return res.redirect(`/applications/${appId}?notification=Another communication channel open is in progress for this user. Please retry in a moment.&type=error`);
+    }
+    if (userId) openCommsLocks.set(userId, true);
+    try {
+        // Check if there's already an active communication channel for this application (scan all comms links)
+        if (Array.isArray(appRec.tickets) && appRec.tickets.length > 0) {
+            const commsLinks = appRec.tickets.filter(t => t && t.type === 'comms' && t.channelId);
+            for (const t of commsLinks) {
+                try {
+                    const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${t.channelId}`, {
+                        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                    });
+                    if (channelResponse.status === 200) {
+                        return res.redirect(`/applications/${appId}?notification=A communication channel is already open for this application!&type=error`);
+                    }
+                } catch (_) {
+                    // Non-200 means channel not accessible/existing; continue
                 }
-            } catch (error) {
-                // Channel doesn't exist, we can create a new one
-                console.log(`Existing channel ${lastTicket.channelId} not found, creating new one`);
             }
         }
-    }
-    
-    try {
+        // Check if the user already has an active communication channel across applications
+        if (userId) {
+            try {
+                const key = `AppMap.userToChannels.${userId}`;
+                const list = (await db.get(key)) || [];
+                if (Array.isArray(list) && list.length > 0) {
+                    const stillOpen = [];
+                    for (const chId of list) {
+                        try {
+                            const r = await axios.get(`https://discord.com/api/v10/channels/${chId}`, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                            if (r.status === 200) {
+                                // Found an existing open comms channel for this user
+                                return res.redirect(`/applications/${appId}?notification=This user already has an open communication channel. Please close it before opening another.&type=error`);
+                            }
+                        } catch (_) {
+                            // Not found; drop from index
+                        }
+                    }
+                    // Save cleaned index (likely empty if we got here)
+                    await db.set(key, stillOpen);
+                }
+            } catch (_) {}
+        }
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
         const adminRoleId = config.role_ids.application_admin_role_id || config.role_ids.default_admin_role_id;
@@ -856,6 +913,8 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         return res.redirect(`/applications/${appId}?notification=Communication channel opened successfully!&type=success`);
     } catch (e) {
         console.error('open_ticket error', e?.response?.data || e);
+    } finally {
+        if (userId) openCommsLocks.delete(userId);
     }
     return res.redirect(`/applications/${appId}`);
 });
@@ -867,9 +926,11 @@ app.post('/applications/:id/schedule', ensureAuth, ensureApplicationsAccess, asy
     if (!appRec) return res.status(404).send('Not found');
     if (appRec.stage !== 'Interview') return res.redirect(`/applications/${appId}`);
     
-    // Prefer explicit UTC from client if provided; fallback to parsing local and relying on JS conversion
-    const whenSource = req.body.when_utc || req.body.when;
-    const when = new Date(whenSource);
+    // Require explicit UTC from client to avoid timezone drift
+    if (!req.body.when_utc) {
+        return res.redirect(`/applications/${appId}?notification=Please reload and resubmit. The schedule form must include UTC time to avoid timezone errors.&type=error`);
+    }
+    const when = new Date(req.body.when_utc);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) return res.redirect(`/applications/${appId}`);
     
@@ -973,8 +1034,15 @@ app.get('/applications/:id/interviews', ensureAuth, ensureApplicationsAccess, as
             };
         })
         .sort((a, b) => a.at - b.at);
-    
-    res.render('interviews_list', { app: appRec, schedules: appSchedules });
+    // Resolve usernames for staff and applicant
+    try {
+        const ids = new Set([String(appRec.userId || '')]);
+        for (const s of appSchedules) if (s.staffId) ids.add(String(s.staffId));
+        const nameMap = await getDiscordUsernamesMap(Array.from(ids));
+        res.render('interviews_list', { app: { ...appRec, displayUsername: nameMap[String(appRec.userId)] || appRec.username }, schedules: appSchedules, userNames: nameMap });
+    } catch (_) {
+        res.render('interviews_list', { app: appRec, schedules: appSchedules, userNames: {} });
+    }
 });
 
 // Applications - delete scheduled interview
@@ -1030,9 +1098,11 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, ensureApp
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
     
-    // Prefer explicit UTC from client if provided; fallback to parsing local and relying on JS conversion
-    const whenSource = req.body.when_utc || req.body.when;
-    const when = new Date(whenSource);
+    // Require explicit UTC from client for reschedule as well
+    if (!req.body.when_utc) {
+        return res.redirect(`/applications/${appId}?notification=Please provide UTC time (reload page) to reschedule accurately.&type=error`);
+    }
+    const when = new Date(req.body.when_utc);
     const staffId = (req.body.staff_id || '').replace(/[^0-9]/g, '');
     if (!when || isNaN(when.getTime()) || !staffId) {
         return res.redirect(`/applications/${appId}?notification=Invalid interview time or staff ID&type=error`);
