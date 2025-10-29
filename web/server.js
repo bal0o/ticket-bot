@@ -141,26 +141,50 @@ function userCanSeeTicketType(roleIds, ticketType) {
 async function getUsernamesMap(ids = []) {
     const map = {};
     if (!Array.isArray(ids) || ids.length === 0) return map;
+    
+    // First pass: check cache for all IDs
+    const uncachedIds = [];
     for (const id of ids) {
         if (!id || map[id]) continue;
         const cached = usernameCache.get(id);
         if (cached && cached.expiresAt > Date.now()) {
             map[id] = cached.value;
-            continue;
+        } else {
+            uncachedIds.push(id);
         }
-        try {
-            const logs = await db.get(`PlayerStats.${id}.ticketLogs`) || {};
-            let username = '';
-            for (const tid of Object.keys(logs)) {
-                if (logs[tid]?.username) { username = logs[tid].username; break; }
-            }
-            if (username) {
-                usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
-                enforceUsernameCacheBound();
-                map[id] = username;
-            }
-        } catch (_) {}
     }
+    
+    // Second pass: batch fetch uncached usernames in parallel (limit concurrent queries)
+    if (uncachedIds.length > 0) {
+        const batchSize = 15; // Process 15 concurrent queries at a time
+        for (let i = 0; i < uncachedIds.length; i += batchSize) {
+            const batch = uncachedIds.slice(i, i + batchSize);
+            await Promise.all(batch.map(async (id) => {
+                try {
+                    const logs = await withTimeout(
+                        db.get(`PlayerStats.${id}.ticketLogs`),
+                        1500,
+                        `Username lookup timeout for ${id}`
+                    ) || {};
+                    let username = '';
+                    for (const tid of Object.keys(logs)) {
+                        if (logs[tid]?.username) { 
+                            username = logs[tid].username; 
+                            break; 
+                        }
+                    }
+                    if (username) {
+                        usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
+                        enforceUsernameCacheBound();
+                        map[id] = username;
+                    }
+                } catch (_) {
+                    // Silently fail - username will remain undefined
+                }
+            }));
+        }
+    }
+    
     return map;
 }
 async function createGuildChannel({ name, type = 0, topic = '', parentId = '', permissionOverwrites = [] }) {
@@ -1138,10 +1162,35 @@ let staffIndexCache = {
     expiresAt: 0 
 };
 const INDEX_TTL_MS = 30 * 1000; // 30s
+let indexRebuildInProgress = false; // Track background rebuilds
 
-async function buildStaffIndex() {
+async function buildStaffIndex(allowStale = true) {
     const now = Date.now();
     if (staffIndexCache.expiresAt > now) return staffIndexCache;
+    
+    // If we have a stale cache and rebuild is in progress, return stale cache immediately
+    // This prevents blocking requests while index rebuilds in background
+    if (allowStale && indexRebuildInProgress && staffIndexCache.allTickets.length > 0) {
+        return staffIndexCache;
+    }
+    
+    // If rebuild is already in progress (e.g., triggered by background function)
+    if (indexRebuildInProgress) {
+        if (allowStale && staffIndexCache.allTickets.length > 0) {
+            return staffIndexCache;
+        }
+        // Wait briefly for rebuild to complete if we need fresh data
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (staffIndexCache.expiresAt > now || staffIndexCache.allTickets.length > 0) {
+            return staffIndexCache;
+        }
+        // If still not ready and we need fresh, fall through to rebuild
+        // (shouldn't normally happen since background rebuild should handle it)
+    }
+    
+    // Start rebuild (mark as in progress if not already)
+    const wasAlreadyInProgress = indexRebuildInProgress;
+    indexRebuildInProgress = true;
     
     try {
         const list = await withTimeout(
@@ -1149,7 +1198,10 @@ async function buildStaffIndex() {
             8000,
             'Staff index build timeout'
         );
-        if (!Array.isArray(list)) return staffIndexCache;
+        if (!Array.isArray(list)) {
+            indexRebuildInProgress = false;
+            return staffIndexCache;
+        }
         
         // Build indexes
         const byUserId = new Map();
@@ -1205,9 +1257,27 @@ async function buildStaffIndex() {
             allTickets,
             expiresAt: now + INDEX_TTL_MS
         };
-    } catch (_) {}
+    } catch (_) {
+        // On error, keep existing cache if available
+    } finally {
+        indexRebuildInProgress = false;
+    }
     
     return staffIndexCache;
+}
+
+// Background rebuild function (non-blocking)
+function rebuildStaffIndexInBackground() {
+    if (indexRebuildInProgress) return;
+    setImmediate(async () => {
+        try {
+            // This will set the flag internally and perform the rebuild
+            await buildStaffIndex(false);
+        } catch (err) {
+            console.error('[web] Background index rebuild error:', err.message || err);
+            indexRebuildInProgress = false; // Reset on error so retry is possible
+        }
+    });
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {
@@ -1224,25 +1294,35 @@ app.get('/staff', ensureAuth, async (req, res) => {
     const qTo = req.query.to ? new Date(req.query.to) : null;
     const qServer = (req.query.server || '').toLowerCase();
     const qClosedBy = (req.query.closed_by || '').toLowerCase();
+    const qTicket = (req.query.ticket || '').trim();
 
     // Build cache key from filters and pagination
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
-    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, allowed: Array.from(allowedTypes).sort() });
+    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, qTicket, page, limit, allowed: Array.from(allowedTypes).sort() });
     const cached = staffCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
         const { tickets, pagination } = cached.data;
-        return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
+        return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '', ticket: qTicket }, types: getKnownTicketTypes(), pagination });
     }
 
     // Use indexed lookups to get only relevant tickets, never scan all 25k
-    const index = await buildStaffIndex();
+    // Allow stale cache for fast response; trigger background rebuild if needed
+    const now = Date.now();
+    const cacheExpired = staffIndexCache.expiresAt <= now;
+    if (cacheExpired && !indexRebuildInProgress) {
+        // Trigger background rebuild immediately (non-blocking)
+        rebuildStaffIndexInBackground();
+    }
+    // Always use allowStale=true to return existing cache immediately if rebuild is in progress
+    // This prevents blocking requests while index rebuilds
+    const index = await buildStaffIndex(true);
     
     // Intersect results from multiple indexes if multiple filters
     let candidateTickets = null;
     
-    // Start with the most selective filter first
+    // Start with the most selective filter first (excluding ticket ID which will be applied later)
     if (qUser) {
         candidateTickets = index.byUserId.get(qUser) || [];
     } else if (qType) {
@@ -1259,6 +1339,23 @@ app.get('/staff', ensureAuth, async (req, res) => {
         candidateTickets = candidateTickets.filter(row => 
             String(row.ticketType || '').toLowerCase() === qType.toLowerCase()
         );
+    }
+    
+    // Apply ticket ID filter if set (can be combined with other filters)
+    if (qTicket && candidateTickets) {
+        // Filter existing candidates by ticket ID
+        candidateTickets = candidateTickets.filter(row => {
+            const ticketId = String(row.ticketId || '').trim();
+            // Support both exact match and prefix match (e.g., "1" matches "0001")
+            return ticketId === qTicket || ticketId === qTicket.padStart(4, '0') || ticketId.includes(qTicket);
+        });
+    } else if (qTicket && !candidateTickets) {
+        // Ticket ID is the only filter or primary filter - search all tickets
+        candidateTickets = index.allTickets.filter(row => {
+            const ticketId = String(row.ticketId || '').trim();
+            // Support both exact match and prefix match (e.g., "1" matches "0001")
+            return ticketId === qTicket || ticketId === qTicket.padStart(4, '0') || ticketId.includes(qTicket);
+        });
     }
     
     if (qServer && candidateTickets) {
@@ -1315,28 +1412,161 @@ app.get('/staff', ensureAuth, async (req, res) => {
         console.error('[web] Username lookup timeout, continuing with empty map');
     }
     const closureInfo = {};
-    // Batch DB queries for tickets missing closure info (with timeout)
-    const missingClosure = pageRows.filter(x => x && !(x.closeReason && x.closeUser));
-    const closurePromises = missingClosure.map(async (x) => {
-        try {
-            const t = await withTimeout(
-                db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`),
-                2000,
-                `DB timeout for ticket ${x.userId}:${x.ticketId}`
-            ) || {};
-            let cu = x.closeUser || t.closeUser || t.closeUserUsername || null;
-            let cr = x.closeReason || t.closeReason || t.closeType || null;
-            if (!cu && x.closeUserID) {
-                try { cu = await metrics.getUsername(String(x.closeUserID)); } catch (_) {}
+    // Optimize: Separate tickets into those needing DB lookup vs just username resolution
+    const needsDBLookup = [];
+    const needsUsernameOnly = new Map(); // closeUserID -> [ticket keys]
+    
+    for (const x of pageRows) {
+        if (!x) continue;
+        const key = `${x.userId}:${x.ticketId}`;
+        // If we already have both, skip
+        if (x.closeReason && x.closeUser) {
+            closureInfo[key] = { closeUser: x.closeUser, closeReason: x.closeReason };
+            continue;
+        }
+        // If we have closeUserID but no closeUser name, just need username lookup
+        if (x.closeUserID && !x.closeUser) {
+            if (!needsUsernameOnly.has(x.closeUserID)) {
+                needsUsernameOnly.set(x.closeUserID, []);
             }
-            if (cu || cr) closureInfo[`${x.userId}:${x.ticketId}`] = { closeUser: cu || null, closeReason: cr || null };
-        } catch (err) {
-            if (err.message && err.message.includes('timeout')) {
-                console.error('[web] Closure info fetch timeout', x);
+            needsUsernameOnly.get(x.closeUserID).push(key);
+            closureInfo[key] = { closeUser: null, closeReason: x.closeReason || null };
+        } else {
+            // Need full DB lookup (missing both or missing reason)
+            needsDBLookup.push({ x, key });
+        }
+    }
+    
+    // Batch username lookups for closeUserIDs (non-blocking if timeout)
+    if (needsUsernameOnly.size > 0) {
+        const usernameLookups = Array.from(needsUsernameOnly.keys()).slice(0, 20); // Limit to 20 concurrent
+        const usernameMap = await Promise.all(
+            usernameLookups.map(async (closeUserID) => {
+                try {
+                    const username = await withTimeout(
+                        metrics.getUsername(String(closeUserID)),
+                        1500,
+                        'Username lookup timeout'
+                    );
+                    return { closeUserID, username: username || null };
+                } catch (_) {
+                    return { closeUserID, username: null };
+                }
+            })
+        );
+        
+        // Map usernames back to tickets
+        for (const { closeUserID, username } of usernameMap) {
+            if (username) {
+                const ticketKeys = needsUsernameOnly.get(closeUserID) || [];
+                for (const key of ticketKeys) {
+                    if (closureInfo[key]) {
+                        closureInfo[key].closeUser = username;
+                    }
+                }
             }
         }
-    });
-    await Promise.all(closurePromises);
+    }
+    
+    // Batch DB lookups for tickets truly missing data (limit concurrent queries)
+    const enrichedTickets = []; // Track which tickets we enriched for index update
+    if (needsDBLookup.length > 0) {
+        const batchSize = 10; // Process max 10 at a time to avoid overwhelming DB
+        for (let i = 0; i < needsDBLookup.length; i += batchSize) {
+            const batch = needsDBLookup.slice(i, i + batchSize);
+            await Promise.all(batch.map(async ({ x, key }) => {
+                try {
+                    const t = await withTimeout(
+                        db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`),
+                        1500,
+                        `DB timeout for ticket ${x.userId}:${x.ticketId}`
+                    ) || {};
+                    const cu = x.closeUser || t.closeUser || t.closeUserUsername || closureInfo[key]?.closeUser || null;
+                    const cr = x.closeReason || t.closeReason || t.closeType || null;
+                    closureInfo[key] = { closeUser: cu, closeReason: cr };
+                    // Track if we actually enriched this ticket (got new data)
+                    if ((cu && cu !== x.closeUser) || (cr && cr !== x.closeReason)) {
+                        enrichedTickets.push({ userId: x.userId, ticketId: x.ticketId, closeUser: cu, closeReason: cr });
+                    }
+                } catch (err) {
+                    // Silently fail - use existing data or null
+                    if (!closureInfo[key]) {
+                        closureInfo[key] = { 
+                            closeUser: x.closeUser || null, 
+                            closeReason: x.closeReason || null 
+                        };
+                    }
+                }
+            }));
+        }
+    }
+    
+    // Track enriched usernames for index update
+    for (const closeUserID of needsUsernameOnly.keys()) {
+        const ticketKeys = needsUsernameOnly.get(closeUserID) || [];
+        for (const key of ticketKeys) {
+            const match = key.match(/^(.+):(.+)$/);
+            if (match && closureInfo[key]?.closeUser) {
+                const userId = match[1];
+                const ticketId = match[2];
+                // Find the original row to check if we actually added new data
+                const originalRow = pageRows.find(r => r.userId === userId && r.ticketId === ticketId);
+                if (originalRow && !originalRow.closeUser && closureInfo[key].closeUser) {
+                    enrichedTickets.push({ 
+                        userId, 
+                        ticketId, 
+                        closeUser: closureInfo[key].closeUser, 
+                        closeReason: closureInfo[key].closeReason || originalRow.closeReason || null 
+                    });
+                }
+            }
+        }
+    }
+    
+    // Persist enriched closure info back to index (fire-and-forget, non-blocking)
+    if (enrichedTickets.length > 0) {
+        setImmediate(async () => {
+            try {
+                const list = await db.get('TicketIndex.staffList');
+                if (Array.isArray(list)) {
+                    let updated = false;
+                    const ticketMap = new Map(); // userId:ticketId -> enriched data
+                    for (const et of enrichedTickets) {
+                        if (et.userId && et.ticketId) {
+                            ticketMap.set(`${et.userId}:${et.ticketId}`, et);
+                        }
+                    }
+                    
+                    // Update entries in the list
+                    for (let i = 0; i < list.length; i++) {
+                        const row = list[i];
+                        if (!row || !row.userId || !row.ticketId) continue;
+                        const key = `${row.userId}:${row.ticketId}`;
+                        const enriched = ticketMap.get(key);
+                        if (enriched) {
+                            if (enriched.closeUser && !row.closeUser) {
+                                row.closeUser = enriched.closeUser;
+                                updated = true;
+                            }
+                            if (enriched.closeReason && !row.closeReason) {
+                                row.closeReason = enriched.closeReason;
+                                updated = true;
+                            }
+                        }
+                    }
+                    
+                    // Save updated index if we made changes
+                    if (updated) {
+                        await db.set('TicketIndex.staffList', list);
+                        // Invalidate index cache so next request uses updated data
+                        staffIndexCache.expiresAt = 0;
+                    }
+                }
+            } catch (err) {
+                console.error('[web] Failed to persist enriched closure info to index:', err.message || err);
+            }
+        });
+    }
     const tickets = pageRows.map(x => {
         const key = `${x.userId}:${x.ticketId}`;
         const enriched = closureInfo[key] || {};
@@ -1359,7 +1589,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         if (firstKey) staffCache.delete(firstKey);
     }
     staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
+    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '', ticket: qTicket }, types: getKnownTicketTypes(), pagination });
     } catch (err) {
         console.error('[web] /staff error:', err.message || err);
         if (!res.headersSent) {
