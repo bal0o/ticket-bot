@@ -104,10 +104,15 @@
     <p style="text-align: center; color: #999; margin-top: 20px;">No tickets found matching your search criteria.</p>
   <% } %>
   <% if (hasSearchResults && pagination && pagination.totalPages > 1) { %>
-    <nav class="pagination" style="margin-top: 20px; display: flex; justify-content: center; gap: 8px; align-items: center;">
+    <nav class="pagination" style="margin-top: 20px; display: flex; justify-content: center; gap: 8px; align-items: center; flex-wrap: wrap;">
       <% 
         const prev = Math.max(1, pagination.page - 1);
         const next = Math.min(pagination.totalPages, pagination.page + 1);
+        const p = pagination.page || 1;
+        const tp = pagination.totalPages || 1;
+        const start = Math.max(1, p - 2);
+        const end = Math.min(tp, p + 2);
+        
         function buildQuery(pageNum) {
           const params = new URLSearchParams();
           if (query && query.ticket) params.set('ticket', query.ticket);
@@ -123,13 +128,29 @@
         }
       %>
       <% if (pagination.page > 1) { %>
-        <a href="?<%= buildQuery(prev) %>" class="btn">Previous</a>
+        <a href="?<%= buildQuery(prev) %>" class="btn">Prev</a>
       <% } else { %>
-        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Previous</span>
+        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Prev</span>
       <% } %>
-      <span style="color: #666;">
-        Page <%= pagination.page %> of <%= pagination.totalPages %>
-      </span>
+      <% if (start > 1) { %>
+        <a href="?<%= buildQuery(1) %>" class="btn">1</a>
+        <% if (start > 2) { %>
+          <span class="muted" style="padding: 0 4px;">…</span>
+        <% } %>
+      <% } %>
+      <% for (let i = start; i <= end; i++) { %>
+        <% if (i === p) { %>
+          <span class="btn active" style="background: #4a5568; color: white; cursor: default;"><%= i %></span>
+        <% } else { %>
+          <a href="?<%= buildQuery(i) %>" class="btn"><%= i %></a>
+        <% } %>
+      <% } %>
+      <% if (end < tp) { %>
+        <% if (end < tp - 1) { %>
+          <span class="muted" style="padding: 0 4px;">…</span>
+        <% } %>
+        <a href="?<%= buildQuery(tp) %>" class="btn"><%= tp %></a>
+      <% } %>
       <% if (pagination.page < pagination.totalPages) { %>
         <a href="?<%= buildQuery(next) %>" class="btn">Next</a>
       <% } else { %>
