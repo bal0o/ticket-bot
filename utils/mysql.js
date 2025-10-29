@@ -436,10 +436,10 @@ class MySQLAdapter {
                 
                 return {
                     userId: String(row.user_id || ''),
+                    username: row.username || null,
                     ticketId: String(row.ticket_id || ''),
                     ticketType: row.ticket_type || 'Unknown',
                     server: row.server || null,
-                    username: row.username || null,
                     createdAt: row.created_at || null,
                     closeUser: row.close_user || null,
                     closeUserID: row.close_user_id || null,

@@ -141,80 +141,37 @@ function userCanSeeTicketType(roleIds, ticketType) {
 async function getUsernamesMap(ids = []) {
     const map = {};
     if (!Array.isArray(ids) || ids.length === 0) return map;
-    
-    // First, check cache
-    const uncachedIds = [];
     for (const id of ids) {
         if (!id || map[id]) continue;
         const cached = usernameCache.get(id);
         if (cached && cached.expiresAt > Date.now()) {
             map[id] = cached.value;
-        } else {
-            uncachedIds.push(id);
+            continue;
         }
-    }
-    
-    if (uncachedIds.length === 0) return map;
-    
-    // Check database for usernames from tickets
-    const conn = await db.pool.getConnection();
-    try {
-        const placeholders = uncachedIds.map(() => '?').join(',');
-        const [rows] = await conn.query(
-            `SELECT DISTINCT user_id, username FROM tickets 
-             WHERE user_id IN (${placeholders}) AND username IS NOT NULL AND username != ''`,
-            uncachedIds
-        );
-        
-        for (const row of rows) {
-            const userId = String(row.user_id);
-            const username = row.username;
-            if (username && !map[userId]) {
-                map[userId] = username;
-                usernameCache.set(userId, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
-            }
-        }
-    } catch (err) {
-        console.error('[web] Error fetching usernames from database:', err.message);
-    } finally {
-        conn.release();
-    }
-    
-    // For any remaining IDs without usernames, try Discord API (if bot token available)
-    const stillMissing = uncachedIds.filter(id => !map[id]);
-    if (stillMissing.length > 0 && BOT_TOKEN) {
-        // Fetch from Discord API in batches (rate limit: ~50 requests/second)
-        const conn2 = await db.pool.getConnection();
         try {
-            for (const id of stillMissing.slice(0, 10)) { // Limit to 10 per call to avoid rate limits
-                try {
-                    const res = await axios.get(`https://discord.com/api/v10/users/${id}`, {
-                        headers: { Authorization: `Bot ${BOT_TOKEN}` },
-                        timeout: 2000
-                    });
-                    const username = res.data?.username;
-                    if (username) {
-                        map[id] = username;
-                        usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
-                        
-                        // Update database for future queries
-                        try {
-                            await conn2.query(
-                                'UPDATE tickets SET username = ? WHERE user_id = ? AND (username IS NULL OR username = "")',
-                                [username, id]
-                            );
-                        } catch (_) {}
-                    }
-                } catch (err) {
-                    // User not found or API error - skip
-                }
+            // Use MySQL getUserTickets instead of PlayerStats
+            const logs = typeof db.getUserTickets === 'function' 
+                ? (await db.getUserTickets(id, { closedOnly: false, limit: 1000 })).reduce((acc, t) => {
+                    acc[t.ticketId] = {
+                        ticketType: t.ticketType,
+                        createdAt: t.createdAt,
+                        transcriptURL: t.transcriptFilename ? `/transcripts/${t.transcriptFilename}` : null,
+                        closeTime: t.closeUser ? Date.now() / 1000 : null
+                    };
+                    return acc;
+                }, {})
+                : {};
+            let username = '';
+            for (const tid of Object.keys(logs)) {
+                if (logs[tid]?.username) { username = logs[tid].username; break; }
             }
-        } finally {
-            conn2.release();
-        }
-        enforceUsernameCacheBound();
+            if (username) {
+                usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
+                enforceUsernameCacheBound();
+                map[id] = username;
+            }
+        } catch (_) {}
     }
-    
     return map;
 }
 async function createGuildChannel({ name, type = 0, topic = '', parentId = '', permissionOverwrites = [] }) {
@@ -1279,35 +1236,29 @@ app.get('/staff', ensureAuth, async (req, res) => {
         const start = (page - 1) * limit;
         const pageTickets = filteredTickets.slice(start, start + limit);
         
-        // Resolve usernames - first use database usernames if available, then fetch missing ones
-        const userIds = Array.from(new Set(pageTickets.map(x => x.userId))).slice(0, 50);
+        // Use usernames from database, fallback to Discord API lookup if missing
+        const userIdsNeedingLookup = Array.from(new Set(
+            pageTickets
+                .filter(x => !x.username || x.username === x.userId)
+                .map(x => x.userId)
+        )).slice(0, 50);
         
-        // Start with usernames from search results (database)
         let nameMap = {};
-        for (const ticket of pageTickets) {
-            if (ticket.username && ticket.userId) {
-                nameMap[ticket.userId] = ticket.username;
-            }
-        }
-        
-        // Fetch any missing usernames
-        const missingIds = userIds.filter(id => !nameMap[id]);
-        if (missingIds.length > 0) {
+        if (userIdsNeedingLookup.length > 0) {
             try {
-                const fetchedNames = await withTimeout(
-                    getUsernamesMap(missingIds),
+                nameMap = await withTimeout(
+                    getUsernamesMap(userIdsNeedingLookup),
                     3000,
                     'Username lookup timeout'
                 );
-                Object.assign(nameMap, fetchedNames);
             } catch (err) {
-                console.error('[web] Username lookup timeout, continuing with available names');
+                console.error('[web] Username lookup timeout, continuing with database usernames');
             }
         }
         
         const tickets = pageTickets.map(x => ({
             userId: x.userId,
-            username: nameMap[x.userId] || x.username || null, // Prefer fetched, fallback to database, then null
+            username: x.username || nameMap[x.userId] || x.userId,
             ticketId: x.ticketId,
             ticketType: x.ticketType || 'Unknown',
             server: x.server || null,
