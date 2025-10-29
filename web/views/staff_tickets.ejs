@@ -26,8 +26,8 @@
     <label>Ticket ID:
       <input type="text" name="ticket" placeholder="e.g., 1234" value="<%= (query && query.ticket) || '' %>">
     </label>
-    <label>User ID:
-      <input type="text" id="userInput" name="user" list="userList" autocomplete="off" value="<%= (query && query.user) || '' %>">
+    <label>User ID or Username:
+      <input type="text" id="userInput" name="user" list="userList" autocomplete="off" placeholder="Discord ID or username" value="<%= (query && query.user) || '' %>">
       <datalist id="userList"></datalist>
     </label>
     <label>Type:

@@ -1216,7 +1216,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         if (!isStaff) return res.status(403).send('Forbidden');
         req.session.staff_ok = true;
 
-        const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
+        const qUser = (req.query.user || '').trim();
         const qTicketId = (req.query.ticket_id || req.query.ticket || '').trim();
         const qType = (req.query.type || '').toLowerCase();
         const qFrom = req.query.from ? new Date(req.query.from) : null;

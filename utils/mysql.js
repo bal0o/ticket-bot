@@ -426,8 +426,17 @@ class MySQLAdapter {
             }
             
             if (userId) {
-                where.push('user_id = ?');
-                params.push(String(userId));
+                // Search by both user_id and username (similar to closed_by search)
+                const userIdStr = String(userId).trim();
+                if (/^\d+$/.test(userIdStr)) {
+                    // It's a numeric ID - search user_id exactly, but also allow partial username match
+                    where.push('(user_id = ? OR LOWER(username) LIKE ?)');
+                    params.push(userIdStr, `%${userIdStr.toLowerCase()}%`);
+                } else {
+                    // It's a username - search username field and also check if it matches a user_id
+                    where.push('(LOWER(username) LIKE ? OR user_id LIKE ?)');
+                    params.push(`%${userIdStr.toLowerCase()}%`, `%${userIdStr}%`);
+                }
             }
             
             if (ticketType) {
