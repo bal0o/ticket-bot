@@ -8,8 +8,6 @@ const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
 const { createDB } = require('../utils/mysql');
-const metrics = require('../utils/metrics');
-const promClient = require('prom-client');
 const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
@@ -518,15 +516,7 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// Expose Prometheus metrics for Grafana/Prometheus scrape
-app.get('/metrics', async (req, res) => {
-    try {
-        res.set('Content-Type', metrics.registry.contentType);
-        res.end(await metrics.registry.metrics());
-    } catch (e) {
-        res.status(500).send('metrics error');
-    }
-});
+// Metrics endpoint removed - Grafana can query MySQL directly
 
 app.get('/', (req, res) => {
     return res.redirect('/my');
@@ -1444,21 +1434,6 @@ app.listen(PORT, HOST, async () => {
     try { await warmTranscriptIndex(); } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
-    // Build staff index in background
-    // Event loop lag instrumentation
-    try {
-        const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
-        metrics.registry.registerMetric(eventLoopLagGauge);
-        const intervalMs = 1000;
-        let last = process.hrtime.bigint();
-        setInterval(() => {
-            const now = process.hrtime.bigint();
-            const diffMs = Number(now - last) / 1e6;
-            const lag = Math.max(0, diffMs - intervalMs);
-            eventLoopLagGauge.set(lag);
-            last = now;
-        }, intervalMs).unref();
-    } catch (_) {}
 });
 
 
