@@ -166,21 +166,21 @@ async function getUsernamesMap(ids = []) {
                         1500,
                         `Username lookup timeout for ${id}`
                     ) || {};
-                    let username = '';
-                    for (const tid of Object.keys(logs)) {
+            let username = '';
+            for (const tid of Object.keys(logs)) {
                         if (logs[tid]?.username) { 
                             username = logs[tid].username; 
                             break; 
                         }
-                    }
-                    if (username) {
-                        usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
-                        enforceUsernameCacheBound();
-                        map[id] = username;
-                    }
+            }
+            if (username) {
+                usernameCache.set(id, { value: username, expiresAt: Date.now() + USERNAME_CACHE_TTL_MS });
+                enforceUsernameCacheBound();
+                map[id] = username;
+            }
                 } catch (_) {
                     // Silently fail - username will remain undefined
-                }
+    }
             }));
         }
     }
@@ -1133,10 +1133,10 @@ let cachedUserIdListExpiresAt = 0;
 const USERID_LIST_TTL_MS = 60 * 1000; // 60s
 async function refreshUserIdList() {
     try {
-        const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) {
-            const uniq = Array.from(new Set(list.map(x => x && x.userId).filter(Boolean)));
-            cachedUserIdList = uniq;
+        // Simple: get user IDs from PlayerStats keys
+        const ps = await db.get('PlayerStats');
+        if (ps && typeof ps === 'object') {
+            cachedUserIdList = Object.keys(ps).filter(Boolean).slice(0, 1000); // Limit to first 1000
             cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
         }
     } catch (_) {}
@@ -1148,219 +1148,70 @@ async function getAllUserIds() {
     return cachedUserIdList || [];
 }
 
-// Short TTL cache for staff page listings keyed by filters + page/limit
-let staffCache = new Map(); // key -> { data, expiresAt }
-const STAFF_CACHE_MAX = 500;
-
-// Indexed cache structure: build once, query efficiently
-let staffIndexCache = { 
-    byUserId: new Map(),      // userId -> [row, row, ...] (sorted desc by createdAt)
-    byType: new Map(),        // ticketType -> [row, row, ...] (sorted desc)
-    byServer: new Map(),      // server -> [row, row, ...] (sorted desc)
-    byCloseUser: new Map(),   // closeUserID -> [row, row, ...] (sorted desc)
-    allTickets: [],          // All tickets sorted desc (fallback)
-    expiresAt: 0 
-};
-const INDEX_TTL_MS = 30 * 1000; // 30s
-let indexRebuildInProgress = false; // Track background rebuilds
-
-async function buildStaffIndex(allowStale = true) {
-    const now = Date.now();
-    if (staffIndexCache.expiresAt > now) return staffIndexCache;
-    
-    // If we have a stale cache and rebuild is in progress, return stale cache immediately
-    // This prevents blocking requests while index rebuilds in background
-    if (allowStale && indexRebuildInProgress && staffIndexCache.allTickets.length > 0) {
-        return staffIndexCache;
-    }
-    
-    // If rebuild is already in progress (e.g., triggered by background function)
-    if (indexRebuildInProgress) {
-        if (allowStale && staffIndexCache.allTickets.length > 0) {
-            return staffIndexCache;
-        }
-        // Wait briefly for rebuild to complete if we need fresh data
-        await new Promise(resolve => setTimeout(resolve, 100));
-        if (staffIndexCache.expiresAt > now || staffIndexCache.allTickets.length > 0) {
-            return staffIndexCache;
-        }
-        // If still not ready and we need fresh, fall through to rebuild
-        // (shouldn't normally happen since background rebuild should handle it)
-    }
-    
-    // Start rebuild (mark as in progress if not already)
-    const wasAlreadyInProgress = indexRebuildInProgress;
-    indexRebuildInProgress = true;
+// Simple staff view - direct queries, no complex indexing
+async function queryTickets({ userId, ticketId, ticketType, limit = 100, offset = 0 }) {
+    const tickets = [];
+    let count = 0;
+    const MAX_SCAN = 500; // Limit how many users we scan
     
     try {
-        // Check memory before loading - skip if we're already high
-        const memUsage = process.memoryUsage();
-        if (memUsage.heapUsed > 1500 * 1024 * 1024) { // > 1.5GB
-            console.warn('[web] Skipping index rebuild due to high memory usage:', Math.round(memUsage.heapUsed / 1024 / 1024), 'MB');
-            indexRebuildInProgress = false;
-            return staffIndexCache;
-        }
+        const playerStats = await db.get('PlayerStats');
+        if (!playerStats || typeof playerStats !== 'object') return { tickets: [], total: 0 };
         
-        const list = await withTimeout(
-            db.get('TicketIndex.staffList'),
-            8000,
-            'Staff index build timeout'
-        );
-        if (!Array.isArray(list)) {
-            indexRebuildInProgress = false;
-            return staffIndexCache;
-        }
+        const userIds = Object.keys(playerStats).slice(0, MAX_SCAN);
         
-        // Only load recent tickets to reduce memory usage (last 1000 tickets)
-        // The index is already sorted by createdAt desc, so take first 1000
-        // IMPORTANT: slice immediately to avoid keeping full list in memory
-        const RECENT_TICKET_LIMIT = 1000;
-        let recentTickets;
-        if (list.length > RECENT_TICKET_LIMIT) {
-            recentTickets = list.slice(0, RECENT_TICKET_LIMIT);
-            // Explicitly null the full list to help GC (though slice creates new array)
-            // Force GC hint by clearing and waiting briefly
-            list.length = 0; // Clear original array
-        } else {
-            recentTickets = list;
-        }
-        
-        // Build indexes only for recent tickets
-        const byUserId = new Map();
-        const byType = new Map();
-        const byServer = new Map();
-        const byCloseUser = new Map();
-        
-        for (const row of recentTickets) {
-            if (!row) continue;
+        for (const uid of userIds) {
+            if (userId && String(uid) !== String(userId)) continue;
             
-            // Index by userId
-            if (row.userId) {
-                if (!byUserId.has(row.userId)) byUserId.set(row.userId, []);
-                byUserId.get(row.userId).push(row);
-            }
-            
-            // Index by type
-            const ttype = String(row.ticketType || '').toLowerCase();
-            if (ttype) {
-                if (!byType.has(ttype)) byType.set(ttype, []);
-                byType.get(ttype).push(row);
-            }
-            
-            // Index by server
-            const server = String(row.server || '').toLowerCase();
-            if (server) {
-                if (!byServer.has(server)) byServer.set(server, []);
-                byServer.get(server).push(row);
-            }
-            
-            // Index by close user
-            const closeUser = String(row.closeUserID || '').toLowerCase();
-            if (closeUser) {
-                if (!byCloseUser.has(closeUser)) byCloseUser.set(closeUser, []);
-                byCloseUser.get(closeUser).push(row);
-            }
-        }
-        
-        // Sort each index by createdAt desc
-        for (const arr of byUserId.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byType.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byServer.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byCloseUser.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        
-        // allTickets is just the recent tickets (already sorted since we took first N from sorted list)
-        const allTickets = recentTickets;
-        
-        staffIndexCache = {
-            byUserId,
-            byType,
-            byServer,
-            byCloseUser,
-            allTickets,
-            expiresAt: now + INDEX_TTL_MS
-        };
-    } catch (_) {
-        // On error, keep existing cache if available
-    } finally {
-        indexRebuildInProgress = false;
-    }
-    
-    return staffIndexCache;
-}
-
-// Background rebuild function (non-blocking)
-function rebuildStaffIndexInBackground() {
-    if (indexRebuildInProgress) return;
-    setImmediate(async () => {
-        try {
-            // This will set the flag internally and perform the rebuild
-            await buildStaffIndex(false);
-        } catch (err) {
-            console.error('[web] Background index rebuild error:', err.message || err);
-            indexRebuildInProgress = false; // Reset on error so retry is possible
-        }
-    });
-}
-
-// Search full DB index for specific criteria when recent tickets don't have matches
-// This allows finding older tickets without loading everything into memory
-// IMPORTANT: Only use when absolutely necessary - avoid loading full 25k list
-async function searchFullIndex({ userId, ticketId, ticketType, limit = 100 }) {
-    // Don't load full index if we're hitting memory limits - return empty
-    // The recent 1000 tickets should cover most use cases
-    if (process.memoryUsage().heapUsed > 1500 * 1024 * 1024) { // > 1.5GB
-        console.warn('[web] Skipping full index search due to high memory usage');
-        return [];
-    }
-    
-    try {
-        // Load with stricter timeout and limited processing
-        const fullList = await withTimeout(
-            db.get('TicketIndex.staffList'),
-            3000,
-            'Full index search timeout'
-        );
-        if (!Array.isArray(fullList)) return [];
-        
-        // For large lists, process in chunks to avoid memory spikes
-        let results = [];
-        const chunkSize = 5000;
-        
-        // Apply filters in chunks
-        for (let i = 0; i < fullList.length; i += chunkSize) {
-            const chunk = fullList.slice(i, i + chunkSize);
-            let chunkResults = chunk;
-            
-            // Apply filters
-            if (userId) {
-                chunkResults = chunkResults.filter(r => r && String(r.userId) === String(userId));
-            }
-            if (ticketId) {
-                const tidStr = String(ticketId);
-                chunkResults = chunkResults.filter(r => {
-                    const t = String(r?.ticketId || '').trim();
-                    return t === tidStr || t === tidStr.padStart(4, '0') || t.includes(tidStr);
+            const logs = playerStats[uid]?.ticketLogs || {};
+            for (const tid of Object.keys(logs)) {
+                const t = logs[tid] || {};
+                
+                // Only closed tickets
+                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
+                
+                // Apply filters
+                if (ticketId && String(tid).trim() !== String(ticketId).trim() && !String(tid).includes(String(ticketId))) continue;
+                if (ticketType && String(t.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) continue;
+                
+                const url = t.transcriptURL || '';
+                let filename = url ? url.split('/').pop() : null;
+                if (filename && filename.endsWith('.full.html')) {
+                    filename = filename.replace(/\.full\.html$/, '.html');
+                }
+                
+                tickets.push({
+                    userId: String(uid),
+                    ticketId: String(tid),
+                    ticketType: t.ticketType || 'Unknown',
+                    server: t.server || null,
+                    createdAt: t.createdAt ? Math.floor(t.createdAt / 1000) : null,
+                    closeUser: t.closeUser || t.closeUserUsername || null,
+                    closeUserID: t.closeUserID || null,
+                    closeReason: t.closeReason || t.closeType || null,
+                    transcriptFilename: filename
                 });
+                
+                count++;
+                if (count >= limit + offset + 100) break; // Get a bit extra for pagination
             }
-            if (ticketType) {
-                const typeLower = String(ticketType).toLowerCase();
-                chunkResults = chunkResults.filter(r => String(r?.ticketType || '').toLowerCase() === typeLower);
-            }
-            
-            results.push(...chunkResults);
-            
-            // Early exit if we have enough results
-            if (results.length >= limit * 2) break;
+            if (count >= limit + offset + 100) break;
         }
         
-        // Sort by createdAt desc and limit
-        results.sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0));
-        return results.slice(0, limit);
+        // Sort by createdAt desc
+        tickets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        
+        return {
+            tickets: tickets.slice(offset, offset + limit),
+            total: tickets.length
+        };
     } catch (err) {
-        console.error('[web] Full index search error:', err.message || err);
-        return [];
+        console.error('[web] Query tickets error:', err.message || err);
+        return { tickets: [], total: 0 };
     }
 }
+
+// Removed all complex indexing functions - using simple direct queries instead
 
 app.get('/staff', ensureAuth, async (req, res) => {
     try {
@@ -1368,333 +1219,85 @@ app.get('/staff', ensureAuth, async (req, res) => {
         const { isStaff, roleIds } = rf;
         if (!isStaff) return res.status(403).send('Forbidden');
         req.session.staff_ok = true;
-
+        
+        // Get query parameters
     const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
-    const qSteam = (req.query.steam || '').replace(/[^0-9]/g, '');
+        const qTicket = (req.query.ticket || '').trim();
     const qType = (req.query.type || '').toLowerCase();
     const qFrom = req.query.from ? new Date(req.query.from) : null;
     const qTo = req.query.to ? new Date(req.query.to) : null;
     const qServer = (req.query.server || '').toLowerCase();
-    const qClosedBy = (req.query.closed_by || '').toLowerCase();
-    const qTicket = (req.query.ticket || '').trim();
 
-    // Build cache key from filters and pagination
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+        const offset = (page - 1) * limit;
+        
+        // Check permissions for ticket types
     const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
-    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, qTicket, page, limit, allowed: Array.from(allowedTypes).sort() });
-    const cached = staffCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-        const { tickets, pagination } = cached.data;
-        return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '', ticket: qTicket }, types: getKnownTicketTypes(), pagination });
-    }
-
-    // Use indexed lookups to get only relevant tickets, never scan all 25k
-    // Allow stale cache for fast response; trigger background rebuild if needed
-    const now = Date.now();
-    const cacheExpired = staffIndexCache.expiresAt <= now;
-    if (cacheExpired && !indexRebuildInProgress) {
-        // Trigger background rebuild immediately (non-blocking)
-        rebuildStaffIndexInBackground();
-    }
-    // Always use allowStale=true to return existing cache immediately if rebuild is in progress
-    // This prevents blocking requests while index rebuilds
-    const index = await buildStaffIndex(true);
-    
-    // Intersect results from multiple indexes if multiple filters
-    let candidateTickets = null;
-    
-    // Start with the most selective filter first (excluding ticket ID which will be applied later)
-    if (qUser) {
-        candidateTickets = index.byUserId.get(qUser) || [];
-        // If no results in recent tickets, search full index for this user
-        if (candidateTickets.length === 0) {
-            candidateTickets = await searchFullIndex({ userId: qUser, limit: 500 });
-        }
-    } else if (qType) {
-        candidateTickets = index.byType.get(qType.toLowerCase()) || [];
-    } else if (qClosedBy) {
-        candidateTickets = index.byCloseUser.get(qClosedBy.toLowerCase()) || [];
-    }
-    
-    // Now apply additional filters as intersections (reduce candidate set)
-    if (candidateTickets && qType && !qUser && !qClosedBy) {
-        // Already filtered by type above
-    } else if (candidateTickets && qType) {
-        // Filter candidates by type
-        candidateTickets = candidateTickets.filter(row => 
-            String(row.ticketType || '').toLowerCase() === qType.toLowerCase()
-        );
-    }
-    
-    // Apply ticket ID filter if set (can be combined with other filters)
-    if (qTicket && candidateTickets) {
-        // Filter existing candidates by ticket ID
-        candidateTickets = candidateTickets.filter(row => {
-            const ticketId = String(row.ticketId || '').trim();
-            // Support both exact match and prefix match (e.g., "1" matches "0001")
-            return ticketId === qTicket || ticketId === qTicket.padStart(4, '0') || ticketId.includes(qTicket);
+        
+        // Simple query - get tickets
+        const { tickets: rawTickets, total } = await queryTickets({
+            userId: qUser || undefined,
+            ticketId: qTicket || undefined,
+            ticketType: qType || undefined,
+            limit: limit * 2, // Get more for filtering
+            offset: 0
         });
-    } else if (qTicket && !candidateTickets) {
-        // Ticket ID is the only filter or primary filter - search recent tickets first
-        candidateTickets = index.allTickets.filter(row => {
-            const ticketId = String(row.ticketId || '').trim();
-            // Support both exact match and prefix match (e.g., "1" matches "0001")
-            return ticketId === qTicket || ticketId === qTicket.padStart(4, '0') || ticketId.includes(qTicket);
+        
+        // Apply additional filters and permissions
+        let filteredTickets = rawTickets.filter(t => {
+            // Permission check
+            const ttype = String(t.ticketType || '').toLowerCase();
+            if (!allowedTypes.has(ttype)) return false;
+            
+            // Date range
+            if (qFrom && t.createdAt && (new Date(t.createdAt * 1000)) < qFrom) return false;
+            if (qTo && t.createdAt && (new Date(t.createdAt * 1000)) > qTo) return false;
+            
+            // Server filter
+            if (qServer && t.server && !String(t.server).toLowerCase().includes(qServer)) return false;
+            
+            return true;
         });
-        // If no results in recent tickets, search full index
-        if (candidateTickets.length === 0) {
-            candidateTickets = await searchFullIndex({ ticketId: qTicket, limit: 100 });
-        }
-    }
-    
-    if (qServer && candidateTickets) {
-        const serverLower = qServer.toLowerCase();
-        candidateTickets = candidateTickets.filter(row =>
-            String(row.server || '').toLowerCase().includes(serverLower)
-        );
-    } else if (qServer && !candidateTickets) {
-        // Only server filter: use server index
-        const serverLower = qServer.toLowerCase();
-        const tickets = [];
-        for (const [server, rows] of index.byServer.entries()) {
-            if (server.includes(serverLower)) tickets.push(...rows);
-        }
-        candidateTickets = tickets;
-        candidateTickets.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-    }
-    
-    // Fallback to all tickets only if no filters
-    if (!candidateTickets) candidateTickets = index.allTickets;
-    
-    // SEARCH first: filter candidate tickets into a new filtered set
-    // Then PAGINATE the filtered set (no need to count separately)
-    const filteredTickets = candidateTickets.filter(row => {
-        if (!row) return false;
         
-        // Permission check
-        const ttype = String(row.ticketType || '').toLowerCase();
-        if (!allowedTypes.has(ttype)) return false;
+        // Paginate
+        const paginatedTickets = filteredTickets.slice(offset, offset + limit);
+        const totalFiltered = filteredTickets.length;
+        const totalPages = Math.max(1, Math.ceil(totalFiltered / limit));
         
-        // Date range filters
-        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) return false;
-        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) return false;
+        // Get usernames for displayed tickets
+        const userIds = Array.from(new Set(paginatedTickets.map(t => t.userId))).slice(0, 50);
+        const nameMap = await getUsernamesMap(userIds);
         
-        return true;
-    });
-    
-    // Now paginate on the filtered subset
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const pageRows = filteredTickets.slice(start, end);
-    const total = filteredTickets.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
-    const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
-    let nameMap = {};
-    try {
-        nameMap = await withTimeout(
-            getUsernamesMap(userIds),
-            3000,
-            'Username lookup timeout'
-        );
-    } catch (err) {
-        console.error('[web] Username lookup timeout, continuing with empty map');
-    }
-    const closureInfo = {};
-    // Optimize: Separate tickets into those needing DB lookup vs just username resolution
-    const needsDBLookup = [];
-    const needsUsernameOnly = new Map(); // closeUserID -> [ticket keys]
-    
-    for (const x of pageRows) {
-        if (!x) continue;
-        const key = `${x.userId}:${x.ticketId}`;
-        // If we already have both, skip
-        if (x.closeReason && x.closeUser) {
-            closureInfo[key] = { closeUser: x.closeUser, closeReason: x.closeReason };
-            continue;
-        }
-        // If we have closeUserID but no closeUser name, just need username lookup
-        if (x.closeUserID && !x.closeUser) {
-            if (!needsUsernameOnly.has(x.closeUserID)) {
-                needsUsernameOnly.set(x.closeUserID, []);
-            }
-            needsUsernameOnly.get(x.closeUserID).push(key);
-            closureInfo[key] = { closeUser: null, closeReason: x.closeReason || null };
-        } else {
-            // Need full DB lookup (missing both or missing reason)
-            needsDBLookup.push({ x, key });
-        }
-    }
-    
-    // Batch username lookups for closeUserIDs (non-blocking if timeout)
-    if (needsUsernameOnly.size > 0) {
-        const usernameLookups = Array.from(needsUsernameOnly.keys()).slice(0, 20); // Limit to 20 concurrent
-        const usernameMap = await Promise.all(
-            usernameLookups.map(async (closeUserID) => {
-                try {
-                    const username = await withTimeout(
-                        metrics.getUsername(String(closeUserID)),
-                        1500,
-                        'Username lookup timeout'
-                    );
-                    return { closeUserID, username: username || null };
-                } catch (_) {
-                    return { closeUserID, username: null };
-                }
-            })
-        );
+        // Format tickets for display
+        const tickets = paginatedTickets.map(t => ({
+            userId: t.userId,
+            username: nameMap[t.userId] || t.userId,
+            ticketId: t.ticketId,
+            ticketType: t.ticketType || 'Unknown',
+            server: t.server || null,
+            closeUser: t.closeUser || null,
+            closeReason: t.closeReason || null,
+            createdAt: t.createdAt ? new Date(t.createdAt * 1000) : null,
+            transcriptFilename: t.transcriptFilename || null,
+            transcriptAvailable: !!t.transcriptFilename
+        }));
         
-        // Map usernames back to tickets
-        for (const { closeUserID, username } of usernameMap) {
-            if (username) {
-                const ticketKeys = needsUsernameOnly.get(closeUserID) || [];
-                for (const key of ticketKeys) {
-                    if (closureInfo[key]) {
-                        closureInfo[key].closeUser = username;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Batch DB lookups for tickets truly missing data (limit concurrent queries to reduce memory)
-    const enrichedTickets = []; // Track which tickets we enriched for index update
-    if (needsDBLookup.length > 0) {
-        const batchSize = 5; // Reduced from 10 to reduce memory pressure
-        const maxBatches = 4; // Limit total batches to avoid memory spikes
-        const limitedLookups = needsDBLookup.slice(0, batchSize * maxBatches);
-        for (let i = 0; i < limitedLookups.length; i += batchSize) {
-            const batch = limitedLookups.slice(i, i + batchSize);
-            await Promise.all(batch.map(async ({ x, key }) => {
-                try {
-                    const t = await withTimeout(
-                        db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`),
-                        1500,
-                        `DB timeout for ticket ${x.userId}:${x.ticketId}`
-                    ) || {};
-                    const cu = x.closeUser || t.closeUser || t.closeUserUsername || closureInfo[key]?.closeUser || null;
-                    const cr = x.closeReason || t.closeReason || t.closeType || null;
-                    closureInfo[key] = { closeUser: cu, closeReason: cr };
-                    // Track if we actually enriched this ticket (got new data)
-                    if ((cu && cu !== x.closeUser) || (cr && cr !== x.closeReason)) {
-                        enrichedTickets.push({ userId: x.userId, ticketId: x.ticketId, closeUser: cu, closeReason: cr });
-                    }
-                } catch (err) {
-                    // Silently fail - use existing data or null
-                    if (!closureInfo[key]) {
-                        closureInfo[key] = { 
-                            closeUser: x.closeUser || null, 
-                            closeReason: x.closeReason || null 
-                        };
-                    }
-                }
-            }));
-        }
-    }
-    
-    // Track enriched usernames for index update
-    for (const closeUserID of needsUsernameOnly.keys()) {
-        const ticketKeys = needsUsernameOnly.get(closeUserID) || [];
-        for (const key of ticketKeys) {
-            const match = key.match(/^(.+):(.+)$/);
-            if (match && closureInfo[key]?.closeUser) {
-                const userId = match[1];
-                const ticketId = match[2];
-                // Find the original row to check if we actually added new data
-                const originalRow = pageRows.find(r => r.userId === userId && r.ticketId === ticketId);
-                if (originalRow && !originalRow.closeUser && closureInfo[key].closeUser) {
-                    enrichedTickets.push({ 
-                        userId, 
-                        ticketId, 
-                        closeUser: closureInfo[key].closeUser, 
-                        closeReason: closureInfo[key].closeReason || originalRow.closeReason || null 
-                    });
-                }
-            }
-        }
-    }
-    
-    // Update in-memory cache only (lightweight, no DB operations)
-    // DB persistence deferred to background job or next index rebuild
-    if (enrichedTickets.length > 0) {
-        // Limit updates to avoid memory issues
-        const ticketsToUpdate = enrichedTickets.slice(0, 100);
-        setImmediate(() => {
-            try {
-                // Update cached index entries directly (no DB load)
-                if (staffIndexCache && staffIndexCache.allTickets && staffIndexCache.allTickets.length > 0) {
-                    const updates = new Map();
-                    for (const et of ticketsToUpdate) {
-                        if (et.userId && et.ticketId) {
-                            updates.set(`${et.userId}:${et.ticketId}`, et);
-                        }
-                    }
-                    
-                    let anyUpdated = false;
-                    for (const [key, data] of updates.entries()) {
-                        const [userId, ticketId] = key.split(':');
-                        // Update in cached allTickets array
-                        const cachedRow = staffIndexCache.allTickets.find(r => 
-                            r && String(r.userId) === userId && String(r.ticketId) === ticketId
-                        );
-                        if (cachedRow) {
-                            if (data.closeUser && !cachedRow.closeUser) {
-                                cachedRow.closeUser = data.closeUser;
-                                anyUpdated = true;
-                            }
-                            if (data.closeReason && !cachedRow.closeReason) {
-                                cachedRow.closeReason = data.closeReason;
-                                anyUpdated = true;
-                            }
-                        }
-                        
-                        // Also update in index maps if they exist (only update specific entries)
-                        // Update byUserId index
-                        const userRows = staffIndexCache.byUserId?.get(userId);
-                        if (userRows) {
-                            for (const row of userRows) {
-                                if (row && String(row.userId) === userId && String(row.ticketId) === ticketId) {
-                                    if (data.closeUser && !row.closeUser) row.closeUser = data.closeUser;
-                                    if (data.closeReason && !row.closeReason) row.closeReason = data.closeReason;
-                                }
-                            }
-                        }
-                        // Note: byType, byServer, byCloseUser share references to same row objects
-                        // So updating allTickets or byUserId updates all references automatically
-                    }
-                    
-                    // Note: DB persistence deferred - will happen on next index rebuild or via background job
-                    // This keeps memory usage low while still improving cache
-                }
-            } catch (err) {
-                // Silently fail - cache update is non-critical
-            }
+        res.render('staff_tickets', {
+            tickets,
+            query: {
+                user: qUser,
+                type: qType,
+                from: req.query.from || '',
+                to: req.query.to || '',
+                server: req.query.server || '',
+                closed_by: req.query.closed_by || '',
+                steam: req.query.steam || '',
+                ticket: qTicket
+            },
+            types: getKnownTicketTypes(),
+            pagination: { page, limit, total: totalFiltered, totalPages }
         });
-    }
-    const tickets = pageRows.map(x => {
-        const key = `${x.userId}:${x.ticketId}`;
-        const enriched = closureInfo[key] || {};
-        return {
-            userId: x.userId,
-            username: nameMap[x.userId] || x.userId,
-            ticketId: x.ticketId,
-            ticketType: x.ticketType || 'Unknown',
-            server: x.server || null,
-            closeUser: enriched.closeUser ?? x.closeUser ?? null,
-            closeReason: enriched.closeReason ?? x.closeReason ?? null,
-            createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
-            transcriptFilename: x.transcriptFilename || null,
-            transcriptAvailable: !!x.transcriptFilename
-        };
-    });
-    const pagination = { page, limit, total, totalPages };
-    if (staffCache.size >= STAFF_CACHE_MAX) {
-        const firstKey = staffCache.keys().next().value;
-        if (firstKey) staffCache.delete(firstKey);
-    }
-    staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '', ticket: qTicket }, types: getKnownTicketTypes(), pagination });
     } catch (err) {
         console.error('[web] /staff error:', err.message || err);
         if (!res.headersSent) {
@@ -1809,13 +1412,7 @@ app.listen(PORT, HOST, async () => {
     try { await warmTranscriptIndex(); } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
-    // Build staff index in background (deferred, non-blocking startup)
-    try { 
-        // Defer index build to avoid blocking startup - do it after a delay
-        setTimeout(() => {
-            rebuildStaffIndexInBackground();
-        }, 2000); // Wait 2 seconds after server starts
-    } catch (_) {}
+    // No index building on startup - queries run on-demand
     // Event loop lag instrumentation
     try {
         const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
