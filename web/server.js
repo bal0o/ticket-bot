@@ -252,60 +252,21 @@ function computeAllowedTicketTypes(roleIds) {
     }
 }
 
-// In-memory transcript context index for O(1) access checks
-let transcriptIndex = new Map(); // lowercased filename -> { ownerId, ticketId, ticketType }
-async function warmTranscriptIndex() {
-    try {
-        // Build from TicketIndex.staffList instead of loading all PlayerStats
-        // This is much more memory efficient
-        const staffList = await db.get('TicketIndex.staffList');
-        if (!Array.isArray(staffList)) return;
-        
-        const idx = new Map();
-        // Only index recent tickets (first 1000) to keep memory usage low
-        const recent = staffList.slice(0, 1000);
-        
-        for (const row of recent) {
-            if (!row || !row.transcriptFilename) continue;
-            const filename = String(row.transcriptFilename);
-            const base = filename.replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
-            const variants = [
-                `${base}.html`,
-                `${base}.full.html`,
-                `${base}.staff.html`
-            ];
-            for (const f of variants) {
-                idx.set(f.toLowerCase(), { 
-                    ownerId: row.userId || null, 
-                    ticketId: row.ticketId || null, 
-                    ticketType: row.ticketType || null 
-                });
-            }
-        }
-        transcriptIndex = idx;
-    } catch (_) {
-        // Leave previous index in place on failure
-    }
-}
+// No in-memory transcript index - query on demand from persistent TicketIndex.byFilename
 
 async function findOwnerByFilename(filename) {
-    // Normalize candidate filenames
+    // Simple lookup from persistent index only (no in-memory index)
     const candidates = new Set([filename]);
     if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
     if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
 
-    // Fast path: in-memory transcript index
-    for (const cand of candidates) {
-        const rec = transcriptIndex.get(String(cand).toLowerCase());
-        if (rec && rec.ownerId) return rec.ownerId;
-    }
-
-    // Try persistent index next (with small cache); be tolerant of case by checking both
     for (const cand of candidates) {
         const cKey = String(cand);
         const cKeyLower = cKey.toLowerCase();
+        // Check small cache first
         const cached = cacheByFilename.get(cKey) || cacheByFilename.get(cKeyLower);
         if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
+        
         try {
             let idx = await db.get(`TicketIndex.byFilename.${cKey}`);
             if (!idx) idx = await db.get(`TicketIndex.byFilename.${cKeyLower}`);
@@ -315,8 +276,6 @@ async function findOwnerByFilename(filename) {
             }
         } catch (_) {}
     }
-
-    // Avoid DB-wide scan on request path; not found
     return null;
 }
 
@@ -325,52 +284,26 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function findTicketContextByFilename(filename) {
-    // Return { ownerId, ticketId, ticketType } using fast in-memory index or lightweight lookups
+    // Simple lookup from persistent index (no in-memory index, no full PlayerStats scan)
     try {
-        // Build candidate filenames we consider equivalent
         const candidates = new Set([filename]);
         if (/\.staff\.html$/i.test(filename)) candidates.add(filename.replace(/\.staff\.html$/i, '.full.html'));
         if (/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.full\.html$/i, '.html'));
         if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candidates.add(filename.replace(/\.html$/i, '.full.html'));
-        const candList = Array.from(candidates).map(c => c.toLowerCase());
-
-        // Fast path: in-memory index
-        for (const c of candList) {
-            const rec = transcriptIndex.get(c);
-            if (rec) return rec;
-        }
-        // Try persistent index
-        for (const c of candList) {
+        
+        // Try persistent index only
+        for (const c of candidates) {
             try {
-                // Try both lower-cased and original-case keys
-                const idx = await db.get(`TicketIndex.byFilename.${c}`) || await db.get(`TicketIndex.byFilename.${filename}`);
-                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) {
-                    // Enrich with ticketType if missing
+                const idx = await db.get(`TicketIndex.byFilename.${c}`) || await db.get(`TicketIndex.byFilename.${c.toLowerCase()}`);
+                if (idx && (idx.ownerId || idx.ticketId)) {
+                    // Get ticketType if missing
                     if (!idx.ticketType && idx.ownerId && idx.ticketId) {
                         try {
                             const t = await db.get(`PlayerStats.${idx.ownerId}.ticketLogs.${idx.ticketId}`) || {};
                             if (t && t.ticketType) return { ownerId: idx.ownerId, ticketId: idx.ticketId, ticketType: t.ticketType };
                         } catch (_) {}
                     }
-                    return idx;
-                }
-            } catch (_) {}
-        }
-        // Last resort: derive ticketId from filename suffix and try direct get without scanning all
-        const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
-        const idMatch = base.match(/-(\d{1,8})$/);
-        if (idMatch) {
-            const ticketId = idMatch[1];
-            try {
-                const ps = await db.get('PlayerStats');
-                if (ps && typeof ps === 'object') {
-                    for (const ownerId of Object.keys(ps)) {
-                        const t = ps[ownerId]?.ticketLogs?.[ticketId];
-                        if (t && (t.ticketType || t.transcriptURL)) {
-                            const ticketType = t.ticketType || null;
-                            return { ownerId, ticketId, ticketType };
-                        }
-                    }
+                    return { ownerId: idx.ownerId || null, ticketId: idx.ticketId || null, ticketType: idx.ticketType || null };
                 }
             } catch (_) {}
         }
@@ -1135,17 +1068,20 @@ let cachedUserIdListExpiresAt = 0;
 const USERID_LIST_TTL_MS = 60 * 1000; // 60s
 async function refreshUserIdList() {
     try {
-        // Get user IDs from TicketIndex.staffList instead of loading all PlayerStats
+        // Get user IDs from TicketIndex.staffList (minimal memory - just extract IDs and release)
         const staffList = await db.get('TicketIndex.staffList');
-        if (Array.isArray(staffList)) {
-            const userIds = new Set();
-            // Only get IDs from recent tickets (first 1000)
-            for (const row of staffList.slice(0, 1000)) {
-                if (row && row.userId) userIds.add(String(row.userId));
-            }
-            cachedUserIdList = Array.from(userIds);
-            cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
+        if (!Array.isArray(staffList)) return;
+        
+        const userIds = new Set();
+        // Process only first 500 to avoid scanning too many
+        const limit = 500;
+        for (let i = 0; i < Math.min(staffList.length, limit); i++) {
+            const row = staffList[i];
+            if (row && row.userId) userIds.add(String(row.userId));
         }
+        cachedUserIdList = Array.from(userIds);
+        cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
+        // Let staffList go out of scope for GC
     } catch (_) {}
 }
 async function getAllUserIds() {
@@ -1155,41 +1091,58 @@ async function getAllUserIds() {
     return cachedUserIdList || [];
 }
 
-// Simple staff view - query TicketIndex.staffList (flat list of closed tickets)
+// Simple staff view - lazy query, minimal memory footprint
 async function queryTickets({ userId, ticketId, ticketType, limit = 100, offset = 0 }) {
+    const results = [];
+    const MAX_SCAN = 1500; // Hard limit to prevent scanning too many
+    
     try {
-        // Load the index - it's already sorted by createdAt desc
+        // Note: quick.db loads entire array, but we process lazily and release quickly
         const staffList = await db.get('TicketIndex.staffList');
         if (!Array.isArray(staffList)) return { tickets: [], total: 0 };
         
-        // Only process recent tickets to avoid memory issues (first 1000 since sorted desc)
-        const RECENT_LIMIT = 1000;
-        const recentTickets = staffList.slice(0, RECENT_LIMIT);
+        // Lazy processing - one ticket at a time, no intermediate arrays
+        const targetCount = offset + limit;
+        let count = 0;
         
-        // Apply filters
-        let filtered = recentTickets.filter(t => {
-            if (!t) return false;
+        for (const t of staffList) {
+            if (count >= MAX_SCAN) break;
+            count++;
             
-            // User filter
-            if (userId && String(t.userId) !== String(userId)) return false;
+            if (!t) continue;
             
-            // Ticket ID filter
+            // Apply filters early to avoid building unnecessary objects
+            if (userId && String(t.userId) !== String(userId)) continue;
+            
             if (ticketId) {
                 const tid = String(t.ticketId || '').trim();
                 const searchTid = String(ticketId).trim();
-                if (tid !== searchTid && tid !== searchTid.padStart(4, '0') && !tid.includes(searchTid)) return false;
+                if (tid !== searchTid && tid !== searchTid.padStart(4, '0') && !tid.includes(searchTid)) continue;
             }
             
-            // Type filter
-            if (ticketType && String(t.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) return false;
+            if (ticketType && String(t.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) continue;
             
-            return true;
-        });
+            // Match found - create minimal ticket object
+            results.push({
+                userId: String(t.userId || ''),
+                ticketId: String(t.ticketId || ''),
+                ticketType: t.ticketType || 'Unknown',
+                server: t.server || null,
+                createdAt: t.createdAt || null,
+                closeUser: t.closeUser || null,
+                closeUserID: t.closeUserID || null,
+                closeReason: t.closeReason || null,
+                transcriptFilename: t.transcriptFilename || null
+            });
+            
+            // Stop early once we have enough
+            if (results.length >= targetCount + 10) break;
+        }
         
-        // Return paginated results
+        // Return only what we need - paginated slice
         return {
-            tickets: filtered.slice(offset, offset + limit),
-            total: filtered.length
+            tickets: results.slice(offset, offset + limit),
+            total: results.length
         };
     } catch (err) {
         console.error('[web] Query tickets error:', err.message || err);
@@ -1394,12 +1347,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
 
 app.listen(PORT, HOST, async () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);
-    // Warm transcript index in background (deferred to avoid blocking startup)
-    try { 
-        setTimeout(() => {
-            warmTranscriptIndex().catch(() => {});
-        }, 3000); // Wait 3 seconds after server starts
-    } catch (_) {}
+    // No transcript index warming - queries happen on-demand from persistent index
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
     // No index building on startup - queries run on-demand
