@@ -79,7 +79,7 @@ class MySQLAdapter {
     async get(key) {
         const conn = await this.pool.getConnection();
         try {
-            // First try exact match
+            // Try exact match first (for aggregated objects like Metrics.total.ticketsOpened)
             const [exactRows] = await conn.query(
                 'SELECT value FROM kv_store WHERE `key` = ?',
                 [key]
@@ -95,46 +95,58 @@ class MySQLAdapter {
                 }
             }
             
-            // If no exact match, check for nested keys (quick.db compatibility)
-            // e.g., if key is "Metrics.total.ticketsOpened", look for keys starting with "Metrics.total.ticketsOpened."
-            const [nestedRows] = await conn.query(
-                'SELECT `key`, value FROM kv_store WHERE `key` LIKE ? ORDER BY `key`',
-                [`${key}.%`]
-            );
-            
-            if (nestedRows.length === 0) return null;
-            
-            // Reconstruct nested object from individual keys
-            // e.g., "Metrics.total.ticketsOpened.bugreport.eu1" = 5
-            // becomes { bugreport: { eu1: 5 } }
-            const result = {};
-            for (const row of nestedRows) {
-                const fullKey = row.key;
-                // Remove the prefix and split by dots to get the nested path
-                const suffix = fullKey.substring(key.length + 1); // +1 to skip the dot
-                const parts = suffix.split('.');
+            // For backwards compatibility: if no exact match and it's a metrics key,
+            // check for old individual leaf keys (from before optimization)
+            // This helps during migration period
+            if (key.startsWith('Metrics.')) {
+                const [nestedRows] = await conn.query(
+                    'SELECT `key`, value FROM kv_store WHERE `key` LIKE ? ORDER BY `key` LIMIT 1000',
+                    [`${key}.%`]
+                );
                 
-                let current = result;
-                for (let i = 0; i < parts.length - 1; i++) {
-                    const part = parts[i];
-                    if (!current[part]) {
-                        current[part] = {};
+                if (nestedRows.length > 0) {
+                    // Reconstruct nested object from individual keys (legacy format)
+                    const result = {};
+                    for (const row of nestedRows) {
+                        const fullKey = row.key;
+                        const suffix = fullKey.substring(key.length + 1);
+                        const parts = suffix.split('.');
+                        
+                        let current = result;
+                        for (let i = 0; i < parts.length - 1; i++) {
+                            const part = parts[i];
+                            if (!current[part]) {
+                                current[part] = {};
+                            }
+                            current = current[part];
+                        }
+                        
+                        const finalKey = parts[parts.length - 1];
+                        let value = row.value;
+                        try {
+                            value = JSON.parse(value);
+                        } catch {
+                            // Keep as-is if not JSON
+                        }
+                        current[finalKey] = value;
                     }
-                    current = current[part];
+                    
+                    // Auto-migrate: save as aggregated object and clean up individual keys
+                    if (Object.keys(result).length > 0) {
+                        const jsonValue = JSON.stringify(result);
+                        await conn.query(
+                            'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
+                            'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
+                            [key, jsonValue, jsonValue]
+                        );
+                        // Note: Don't delete old keys here - let add() handle it incrementally
+                    }
+                    
+                    return result;
                 }
-                
-                // Set the final value
-                const finalKey = parts[parts.length - 1];
-                let value = row.value;
-                try {
-                    value = JSON.parse(value);
-                } catch {
-                    // Keep as-is if not JSON
-                }
-                current[finalKey] = value;
             }
             
-            return result;
+            return null;
         } catch (err) {
             console.error('[mysql] get() error:', {
                 key,
@@ -150,13 +162,55 @@ class MySQLAdapter {
     async set(key, value) {
         const conn = await this.pool.getConnection();
         try {
-            const jsonValue = typeof value === 'object' ? JSON.stringify(value) : value;
+            const keyParts = key.split('.');
             
-            await conn.query(
-                'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
-                'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
-                [key, jsonValue, jsonValue]
-            );
+            // For nested metrics keys (e.g., Metrics.usernames.123456789), store in parent object
+            // This keeps usernames grouped efficiently
+            if (keyParts.length === 3 && key.startsWith('Metrics.usernames.')) {
+                const parentKey = 'Metrics.usernames';
+                const userId = keyParts[2];
+                
+                // Get existing usernames object
+                const [parentRows] = await conn.query(
+                    'SELECT value FROM kv_store WHERE `key` = ?',
+                    [parentKey]
+                );
+                
+                let usernamesObj = {};
+                if (parentRows.length > 0) {
+                    try {
+                        usernamesObj = JSON.parse(parentRows[0].value);
+                        if (typeof usernamesObj !== 'object' || usernamesObj === null) {
+                            usernamesObj = {};
+                        }
+                    } catch {
+                        usernamesObj = {};
+                    }
+                }
+                
+                // Update nested value
+                usernamesObj[userId] = value;
+                
+                // Save entire object
+                const jsonValue = JSON.stringify(usernamesObj);
+                await conn.query(
+                    'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
+                    'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
+                    [parentKey, jsonValue, jsonValue]
+                );
+                
+                // Cleanup old individual key
+                await conn.query('DELETE FROM kv_store WHERE `key` = ?', [key]);
+            } else {
+                // For non-nested keys, store directly
+                const jsonValue = typeof value === 'object' ? JSON.stringify(value) : value;
+                
+                await conn.query(
+                    'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
+                    'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
+                    [key, jsonValue, jsonValue]
+                );
+            }
         } catch (err) {
             console.error('[mysql] set() error:', {
                 key,
@@ -179,38 +233,99 @@ class MySQLAdapter {
     }
     
     async add(key, value = 0) {
-        // Add/increment numeric value (compatible with quick.db add method)
+        // Optimized: Store metrics as aggregated objects instead of individual leaf keys
+        // e.g., Metrics.total.ticketsOpened.bugreport.eu1 increments the nested object
         const conn = await this.pool.getConnection();
         try {
             const numericValue = Number(value) || 0;
+            const keyParts = key.split('.');
             
-            // Get current value
-            const [rows] = await conn.query(
+            // For simple keys (no dots) or usernames, use direct increment
+            if (keyParts.length <= 2 || !key.startsWith('Metrics.total.')) {
+                // Get current value
+                const [rows] = await conn.query(
+                    'SELECT value FROM kv_store WHERE `key` = ?',
+                    [key]
+                );
+                
+                let currentValue = 0;
+                if (rows.length > 0) {
+                    try {
+                        const parsed = JSON.parse(rows[0].value);
+                        currentValue = typeof parsed === 'number' ? parsed : 0;
+                    } catch {
+                        currentValue = Number(rows[0].value) || 0;
+                    }
+                }
+                
+                const newValue = currentValue + numericValue;
+                const jsonValue = JSON.stringify(newValue);
+                
+                await conn.query(
+                    'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
+                    'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
+                    [key, jsonValue, jsonValue]
+                );
+                
+                return newValue;
+            }
+            
+            // For nested metrics keys (e.g., Metrics.total.ticketsOpened.bugreport.eu1):
+            // Store aggregated object at parent key (e.g., Metrics.total.ticketsOpened)
+            // This is much more efficient than thousands of individual keys
+            
+            // Extract parent key (e.g., "Metrics.total.ticketsOpened") and nested path (e.g., ["bugreport", "eu1"])
+            const parentKey = keyParts.slice(0, 3).join('.'); // Metrics.total.ticketsOpened
+            const nestedPath = keyParts.slice(3); // ["bugreport", "eu1"]
+            
+            // Get or create parent object
+            const [parentRows] = await conn.query(
                 'SELECT value FROM kv_store WHERE `key` = ?',
-                [key]
+                [parentKey]
             );
             
-            let currentValue = 0;
-            if (rows.length > 0) {
+            let parentObj = {};
+            if (parentRows.length > 0) {
                 try {
-                    const parsed = JSON.parse(rows[0].value);
-                    currentValue = typeof parsed === 'number' ? parsed : 0;
+                    parentObj = JSON.parse(parentRows[0].value);
+                    if (typeof parentObj !== 'object' || parentObj === null) {
+                        parentObj = {};
+                    }
                 } catch {
-                    // If not JSON, try to parse as number
-                    currentValue = Number(rows[0].value) || 0;
+                    parentObj = {};
                 }
             }
             
-            const newValue = currentValue + numericValue;
-            const jsonValue = JSON.stringify(newValue);
+            // Navigate/create nested structure
+            let current = parentObj;
+            for (let i = 0; i < nestedPath.length - 1; i++) {
+                const part = nestedPath[i];
+                if (!current[part] || typeof current[part] !== 'object') {
+                    current[part] = {};
+                }
+                current = current[part];
+            }
             
+            // Increment final value
+            const finalKey = nestedPath[nestedPath.length - 1];
+            const currentVal = typeof current[finalKey] === 'number' ? current[finalKey] : 0;
+            current[finalKey] = currentVal + numericValue;
+            
+            // Save entire parent object back
+            const jsonValue = JSON.stringify(parentObj);
             await conn.query(
                 'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
                 'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
-                [key, jsonValue, jsonValue]
+                [parentKey, jsonValue, jsonValue]
             );
             
-            return newValue;
+            // Delete any old individual leaf keys (cleanup from migration)
+            await conn.query(
+                'DELETE FROM kv_store WHERE `key` = ?',
+                [key]
+            );
+            
+            return current[finalKey];
         } catch (err) {
             console.error('[mysql] add() error:', {
                 key,
