@@ -1225,11 +1225,16 @@ app.get('/staff', ensureAuth, async (req, res) => {
         const qClosedBy = (req.query.closed_by || '').toLowerCase();
 
         const page = Math.max(1, parseInt(req.query.page) || 1);
-        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
         const offset = (page - 1) * limit;
         const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
 
+        // Check if there are any search filters
+        const hasSearchFilters = !!(qUser || qTicketId || qType || qServer || qClosedBy || qFrom || qTo);
+
         // Use MySQL searchTickets for efficient querying
+        // If no filters, get the most recent 1000 tickets
+        const searchLimit = hasSearchFilters ? limit * 3 : 1000;
         const searchResults = await searchTickets({
             ticketId: qTicketId || null,
             userId: qUser || null,
@@ -1238,7 +1243,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
             closedBy: qClosedBy || null,
             fromDate: qFrom,
             toDate: qTo,
-            limit: limit * 3, // Get more results for filtering
+            limit: searchLimit,
             offset: 0
         });
 
@@ -1299,7 +1304,8 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }));
         
         const pagination = { page, limit, total, totalPages };
-        const hasSearchResults = !!(qUser || qTicketId || qType || qServer || qClosedBy || qFrom || qTo);
+        // Show results if we have search filters OR if showing default recent tickets
+        const hasSearchResults = hasSearchFilters || tickets.length > 0;
         
         res.render('staff_tickets', { 
             tickets, 

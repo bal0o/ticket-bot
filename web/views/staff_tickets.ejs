@@ -19,10 +19,8 @@
   </header>
   <main class="container">
   <h1>Ticket Search</h1>
-  <% if (!hasSearchResults) { %>
-    <p style="margin-bottom: 16px; color: #666;">Enter search criteria below and click "Search" to find tickets. No data is loaded until you search.</p>
-  <% } else { %>
-    <p style="margin-bottom: 16px; color: #666;">Found <strong><%= resultCount %></strong> ticket<%= resultCount !== 1 ? 's' : '' %> (max <%= maxResults %>)</p>
+  <% if (hasSearchResults && pagination) { %>
+    <p style="margin-bottom: 16px; color: #666;">Showing page <strong><%= pagination.page %></strong> of <strong><%= pagination.totalPages %></strong> (<strong><%= resultCount %></strong> total ticket<%= resultCount !== 1 ? 's' : '' %>)</p>
   <% } %>
   <form method="get" action="/staff" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
     <label>Ticket ID:
@@ -48,16 +46,16 @@
     </label>
     <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
     <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
-    <label>Max Results:
+    <label>Page Size:
       <select name="limit">
-        <option value="50" <%= String(query && query.limit || '100') === '50' ? 'selected' : '' %>>50</option>
-        <option value="100" <%= String(query && query.limit || '100') === '100' ? 'selected' : '' %>>100</option>
-        <option value="150" <%= String(query && query.limit || '100') === '150' ? 'selected' : '' %>>150</option>
-        <option value="200" <%= String(query && query.limit || '100') === '200' ? 'selected' : '' %>>200</option>
+        <option value="10" <%= String(query && query.limit || '10') === '10' ? 'selected' : '' %>>10</option>
+        <option value="25" <%= String(query && query.limit || '10') === '25' ? 'selected' : '' %>>25</option>
+        <option value="50" <%= String(query && query.limit || '10') === '50' ? 'selected' : '' %>>50</option>
+        <option value="100" <%= String(query && query.limit || '10') === '100' ? 'selected' : '' %>>100</option>
       </select>
     </label>
     <button type="submit" class="btn primary">Search</button>
-    <% if (hasSearchResults) { %>
+    <% if (hasSearchResults && (query && (query.ticket || query.user || query.type || query.server || query.closed_by || query.from || query.to))) { %>
       <a href="/staff" class="btn">Clear</a>
     <% } %>
   </form>
@@ -104,6 +102,40 @@
   </div>
   <% if (hasSearchResults && tickets.length === 0) { %>
     <p style="text-align: center; color: #999; margin-top: 20px;">No tickets found matching your search criteria.</p>
+  <% } %>
+  <% if (hasSearchResults && pagination && pagination.totalPages > 1) { %>
+    <nav class="pagination" style="margin-top: 20px; display: flex; justify-content: center; gap: 8px; align-items: center;">
+      <% 
+        const prev = Math.max(1, pagination.page - 1);
+        const next = Math.min(pagination.totalPages, pagination.page + 1);
+        function buildQuery(pageNum) {
+          const params = new URLSearchParams();
+          if (query && query.ticket) params.set('ticket', query.ticket);
+          if (query && query.user) params.set('user', query.user);
+          if (query && query.type) params.set('type', query.type);
+          if (query && query.server) params.set('server', query.server);
+          if (query && query.closed_by) params.set('closed_by', query.closed_by);
+          if (query && query.from) params.set('from', query.from);
+          if (query && query.to) params.set('to', query.to);
+          params.set('page', pageNum);
+          params.set('limit', pagination.limit);
+          return params.toString();
+        }
+      %>
+      <% if (pagination.page > 1) { %>
+        <a href="?<%= buildQuery(prev) %>" class="btn">Previous</a>
+      <% } else { %>
+        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Previous</span>
+      <% } %>
+      <span style="color: #666;">
+        Page <%= pagination.page %> of <%= pagination.totalPages %>
+      </span>
+      <% if (pagination.page < pagination.totalPages) { %>
+        <a href="?<%= buildQuery(next) %>" class="btn">Next</a>
+      <% } else { %>
+        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Next</span>
+      <% } %>
+    </nav>
   <% } %>
   </main>
   <script>
