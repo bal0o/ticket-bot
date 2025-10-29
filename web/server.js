@@ -81,13 +81,28 @@ passport.use(new DiscordStrategy({
 
 // --- Helpers ---
 async function fetchGuildMemberRoles(userId) {
-    if (!BOT_TOKEN || !STAFF_GUILD_ID) return [];
+    if (!BOT_TOKEN) {
+        console.warn('[web] BOT_TOKEN not configured, cannot fetch roles');
+        return [];
+    }
+    if (!STAFF_GUILD_ID) {
+        console.warn('[web] STAFF_GUILD_ID not configured, cannot fetch roles');
+        return [];
+    }
     try {
         const res = await axios.get(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${userId}` , {
             headers: { Authorization: `Bot ${BOT_TOKEN}` }
         });
-        return Array.isArray(res.data?.roles) ? res.data.roles : [];
+        const roles = Array.isArray(res.data?.roles) ? res.data.roles : [];
+        console.log('[web] Fetched roles for user', { userId, roleCount: roles.length });
+        return roles;
     } catch (e) {
+        console.error('[web] Error fetching guild member roles:', {
+            userId,
+            message: e.message,
+            status: e.response?.status,
+            statusText: e.response?.statusText
+        });
         return [];
     }
 }
@@ -107,6 +122,16 @@ async function getRoleFlags(userId) {
             const roles = new Set(fetchedRoles);
             let isStaff = false;
             let isAdmin = false;
+            
+            // Debug logging
+            console.log('[web] getRoleFlags:', {
+                userId,
+                fetchedRoleCount: fetchedRoles.length,
+                adminRoleIds: Array.from(ADMIN_ROLE_IDS),
+                staffRoleIds: Array.from(STAFF_ROLE_IDS),
+                userRoles: Array.from(roles)
+            });
+            
             for (const rid of roles) {
                 // Check both as string and convert to ensure type matching
                 const ridStr = String(rid);
@@ -115,6 +140,9 @@ async function getRoleFlags(userId) {
             }
             if (isAdmin) isStaff = true;
             const flags = { isStaff, isAdmin, roleIds: Array.from(roles) };
+            
+            console.log('[web] Role flags computed:', { userId, flags });
+            
             roleCache.set(userId, { flags, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
             return flags;
         })().finally(() => {
@@ -122,7 +150,8 @@ async function getRoleFlags(userId) {
         });
         roleInFlight.set(userId, p);
         return await p;
-    } catch (_) {
+    } catch (err) {
+        console.error('[web] getRoleFlags error:', { userId, error: err.message });
         const cached = roleCache.get(userId);
         if (cached) return cached.flags;
         return { isStaff: false, isAdmin: false, roleIds: [] };
