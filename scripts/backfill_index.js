@@ -1,4 +1,4 @@
-const { createDB } = require('../utils/quickdb');
+const { createDB } = require('../utils/mysql');
 
 (async () => {
 	const db = createDB();

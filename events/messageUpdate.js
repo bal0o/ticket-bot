@@ -1,4 +1,4 @@
-const { createDB } = require('../utils/quickdb');
+const { createDB } = require('../utils/mysql');
 const db = createDB();
 const func = require("../utils/functions.js");
 

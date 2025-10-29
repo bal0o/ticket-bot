@@ -18,10 +18,16 @@
     </div>
   </header>
   <main class="container">
-  <h1>All Tickets</h1>
+  <h1>Ticket Search</h1>
+  <% if (hasSearchResults && pagination) { %>
+    <p style="margin-bottom: 16px; color: #666;">Showing page <strong><%= pagination.page %></strong> of <strong><%= pagination.totalPages %></strong> (<strong><%= resultCount %></strong> total ticket<%= resultCount !== 1 ? 's' : '' %>)</p>
+  <% } %>
   <form method="get" action="/staff" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
-    <label>User ID:
-      <input type="text" id="userInput" name="user" list="userList" autocomplete="off" value="<%= (query && query.user) || '' %>">
+    <label>Ticket ID:
+      <input type="text" name="ticket" placeholder="e.g., 1234" value="<%= (query && query.ticket) || '' %>">
+    </label>
+    <label>User ID or Username:
+      <input type="text" id="userInput" name="user" list="userList" autocomplete="off" placeholder="Discord ID or username" value="<%= (query && query.user) || '' %>">
       <datalist id="userList"></datalist>
     </label>
     <label>Type:
@@ -32,9 +38,6 @@
         <% }) %>
       </select>
     </label>
-    <label>SteamID:
-      <input type="text" name="steam" value="<%= (query && query.steam) || '' %>">
-    </label>
     <label>Server:
       <input type="text" name="server" value="<%= (query && query.server) || '' %>">
     </label>
@@ -43,18 +46,18 @@
     </label>
     <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
     <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
-    <% if (pagination) { %>
-    <label>Page size:
+    <label>Page Size:
       <select name="limit">
-        <option value="10" <%= String(pagination.limit) === '10' ? 'selected' : '' %>>10</option>
-        <option value="25" <%= String(pagination.limit) === '25' ? 'selected' : '' %>>25</option>
-        <option value="50" <%= String(pagination.limit) === '50' ? 'selected' : '' %>>50</option>
-        <option value="100" <%= String(pagination.limit) === '100' ? 'selected' : '' %>>100</option>
+        <option value="10" <%= String(query && query.limit || '10') === '10' ? 'selected' : '' %>>10</option>
+        <option value="25" <%= String(query && query.limit || '10') === '25' ? 'selected' : '' %>>25</option>
+        <option value="50" <%= String(query && query.limit || '10') === '50' ? 'selected' : '' %>>50</option>
+        <option value="100" <%= String(query && query.limit || '10') === '100' ? 'selected' : '' %>>100</option>
       </select>
     </label>
-    <input type="hidden" name="page" value="1">
+    <button type="submit" class="btn primary">Search</button>
+    <% if (hasSearchResults && (query && (query.ticket || query.user || query.type || query.server || query.closed_by || query.from || query.to))) { %>
+      <a href="/staff" class="btn">Clear</a>
     <% } %>
-    <button type="submit" class="btn primary">Filter</button>
   </form>
   <div class="table-scroll">
   <table class="with-filter">
@@ -97,28 +100,62 @@
     </tbody>
   </table>
   </div>
-  <% if (pagination && pagination.totalPages > 1) { %>
-    <nav class="pagination">
-      <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
-      <% const next = Math.min(pagination.totalPages, (pagination.page || 1) + 1); %>
-      <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Prev</a>
-      <% const p = pagination.page || 1; const tp = pagination.totalPages || 1; const start = Math.max(1, p - 2); const end = Math.min(tp, p + 2); %>
+  <% if (hasSearchResults && tickets.length === 0) { %>
+    <p style="text-align: center; color: #999; margin-top: 20px;">No tickets found matching your search criteria.</p>
+  <% } %>
+  <% if (hasSearchResults && pagination && pagination.totalPages > 1) { %>
+    <nav class="pagination" style="margin-top: 20px; display: flex; justify-content: center; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <% 
+        const prev = Math.max(1, pagination.page - 1);
+        const next = Math.min(pagination.totalPages, pagination.page + 1);
+        const p = pagination.page || 1;
+        const tp = pagination.totalPages || 1;
+        const start = Math.max(1, p - 2);
+        const end = Math.min(tp, p + 2);
+        
+        function buildQuery(pageNum) {
+          const params = new URLSearchParams();
+          if (query && query.ticket) params.set('ticket', query.ticket);
+          if (query && query.user) params.set('user', query.user);
+          if (query && query.type) params.set('type', query.type);
+          if (query && query.server) params.set('server', query.server);
+          if (query && query.closed_by) params.set('closed_by', query.closed_by);
+          if (query && query.from) params.set('from', query.from);
+          if (query && query.to) params.set('to', query.to);
+          params.set('page', pageNum);
+          params.set('limit', pagination.limit);
+          return params.toString();
+        }
+      %>
+      <% if (pagination.page > 1) { %>
+        <a href="?<%= buildQuery(prev) %>" class="btn">Prev</a>
+      <% } else { %>
+        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Prev</span>
+      <% } %>
       <% if (start > 1) { %>
-        <a class="btn" href="?page=1&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">1</a>
-        <% if (start > 2) { %><span class="muted">…</span><% } %>
+        <a href="?<%= buildQuery(1) %>" class="btn">1</a>
+        <% if (start > 2) { %>
+          <span class="muted" style="padding: 0 4px;">…</span>
+        <% } %>
       <% } %>
       <% for (let i = start; i <= end; i++) { %>
         <% if (i === p) { %>
-          <span class="btn active"><%= i %></span>
+          <span class="btn active" style="background: #4a5568; color: white; cursor: default;"><%= i %></span>
         <% } else { %>
-          <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= i %></a>
+          <a href="?<%= buildQuery(i) %>" class="btn"><%= i %></a>
         <% } %>
       <% } %>
       <% if (end < tp) { %>
-        <% if (end < tp - 1) { %><span class="muted">…</span><% } %>
-        <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= tp %></a>
+        <% if (end < tp - 1) { %>
+          <span class="muted" style="padding: 0 4px;">…</span>
+        <% } %>
+        <a href="?<%= buildQuery(tp) %>" class="btn"><%= tp %></a>
       <% } %>
-      <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Next</a>
+      <% if (pagination.page < pagination.totalPages) { %>
+        <a href="?<%= buildQuery(next) %>" class="btn">Next</a>
+      <% } else { %>
+        <span class="btn" style="opacity: 0.5; cursor: not-allowed;">Next</span>
+      <% } %>
     </nav>
   <% } %>
   </main>

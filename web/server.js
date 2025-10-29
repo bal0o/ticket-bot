@@ -7,9 +7,7 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
-const { createDB } = require('../utils/quickdb');
-const metrics = require('../utils/metrics');
-const promClient = require('prom-client');
+const { createDB } = require('../utils/mysql');
 const permissions = require('../utils/permissions');
 
 const config = require('../config/config.json');
@@ -56,7 +54,7 @@ if (!BOT_TOKEN) {
 }
 
 // --- Databases ---
-const db = createDB(); // persist to ./data/json.sqlite
+const db = createDB(); // MySQL database via utils/mysql.js
 // Admin overrides removed per requirements; no external permissions DB
 
 // --- Auth setup ---
@@ -81,13 +79,28 @@ passport.use(new DiscordStrategy({
 
 // --- Helpers ---
 async function fetchGuildMemberRoles(userId) {
-    if (!BOT_TOKEN || !STAFF_GUILD_ID) return [];
+    if (!BOT_TOKEN) {
+        console.warn('[web] BOT_TOKEN not configured, cannot fetch roles');
+        return [];
+    }
+    if (!STAFF_GUILD_ID) {
+        console.warn('[web] STAFF_GUILD_ID not configured, cannot fetch roles');
+        return [];
+    }
     try {
         const res = await axios.get(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${userId}` , {
             headers: { Authorization: `Bot ${BOT_TOKEN}` }
         });
-        return Array.isArray(res.data?.roles) ? res.data.roles : [];
+        const roles = Array.isArray(res.data?.roles) ? res.data.roles : [];
+        console.log('[web] Fetched roles for user', { userId, roleCount: roles.length });
+        return roles;
     } catch (e) {
+        console.error('[web] Error fetching guild member roles:', {
+            userId,
+            message: e.message,
+            status: e.response?.status,
+            statusText: e.response?.statusText
+        });
         return [];
     }
 }
@@ -107,6 +120,16 @@ async function getRoleFlags(userId) {
             const roles = new Set(fetchedRoles);
             let isStaff = false;
             let isAdmin = false;
+            
+            // Debug logging
+            console.log('[web] getRoleFlags:', {
+                userId,
+                fetchedRoleCount: fetchedRoles.length,
+                adminRoleIds: Array.from(ADMIN_ROLE_IDS),
+                staffRoleIds: Array.from(STAFF_ROLE_IDS),
+                userRoles: Array.from(roles)
+            });
+            
             for (const rid of roles) {
                 // Check both as string and convert to ensure type matching
                 const ridStr = String(rid);
@@ -115,6 +138,9 @@ async function getRoleFlags(userId) {
             }
             if (isAdmin) isStaff = true;
             const flags = { isStaff, isAdmin, roleIds: Array.from(roles) };
+            
+            console.log('[web] Role flags computed:', { userId, flags });
+            
             roleCache.set(userId, { flags, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
             return flags;
         })().finally(() => {
@@ -122,7 +148,8 @@ async function getRoleFlags(userId) {
         });
         roleInFlight.set(userId, p);
         return await p;
-    } catch (_) {
+    } catch (err) {
+        console.error('[web] getRoleFlags error:', { userId, error: err.message });
         const cached = roleCache.get(userId);
         if (cached) return cached.flags;
         return { isStaff: false, isAdmin: false, roleIds: [] };
@@ -149,7 +176,18 @@ async function getUsernamesMap(ids = []) {
             continue;
         }
         try {
-            const logs = await db.get(`PlayerStats.${id}.ticketLogs`) || {};
+            // Use MySQL getUserTickets instead of PlayerStats
+            const logs = typeof db.getUserTickets === 'function' 
+                ? (await db.getUserTickets(id, { closedOnly: false, limit: 1000 })).reduce((acc, t) => {
+                    acc[t.ticketId] = {
+                        ticketType: t.ticketType,
+                        createdAt: t.createdAt,
+                        transcriptURL: t.transcriptFilename ? `/transcripts/${t.transcriptFilename}` : null,
+                        closeTime: t.closeUser ? Date.now() / 1000 : null
+                    };
+                    return acc;
+                }, {})
+                : {};
             let username = '';
             for (const tid of Object.keys(logs)) {
                 if (logs[tid]?.username) { username = logs[tid].username; break; }
@@ -232,31 +270,30 @@ function computeAllowedTicketTypes(roleIds) {
 let transcriptIndex = new Map(); // lowercased filename -> { ownerId, ticketId, ticketType }
 async function warmTranscriptIndex() {
     try {
-        const ps = await db.get('PlayerStats');
-        const idx = new Map();
-        if (ps && typeof ps === 'object') {
-            for (const ownerId of Object.keys(ps)) {
-                const logs = ps[ownerId]?.ticketLogs || {};
-                for (const ticketId of Object.keys(logs)) {
-                    const t = logs[ticketId];
-                    const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
-                    if (!url) continue;
-                    const ticketType = t.ticketType || null;
-                    const file = url.split('/').pop();
-                    if (!file) continue;
-                    const base = String(file).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
-                    const variants = [
-                        `${base}.html`,
-                        `${base}.full.html`,
-                        `${base}.staff.html`
-                    ];
-                    for (const f of variants) {
-                        idx.set(f.toLowerCase(), { ownerId, ticketId, ticketType });
-                    }
+        // Query MySQL transcript_index table
+        if (typeof db.query === 'function') {
+            const [rows] = await db.query('SELECT filename, user_id, ticket_id, ticket_type FROM transcript_index LIMIT 1000');
+            const idx = new Map();
+            for (const row of rows || []) {
+                const filename = row.filename || '';
+                const ownerId = String(row.user_id || '');
+                const ticketId = String(row.ticket_id || '');
+                const ticketType = row.ticket_type || null;
+                
+                if (!filename || !ownerId) continue;
+                
+                const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+                const variants = [
+                    `${base}.html`,
+                    `${base}.full.html`,
+                    `${base}.staff.html`
+                ];
+                for (const f of variants) {
+                    idx.set(f.toLowerCase(), { ownerId, ticketId, ticketType });
                 }
             }
+            transcriptIndex = idx;
         }
-        transcriptIndex = idx;
     } catch (_) {
         // Leave previous index in place on failure
     }
@@ -274,23 +311,25 @@ async function findOwnerByFilename(filename) {
         if (rec && rec.ownerId) return rec.ownerId;
     }
 
-    // Try persistent index next (with small cache); be tolerant of case by checking both
+    // Try MySQL transcript_index table
     for (const cand of candidates) {
         const cKey = String(cand);
         const cKeyLower = cKey.toLowerCase();
         const cached = cacheByFilename.get(cKey) || cacheByFilename.get(cKeyLower);
         if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
+        
         try {
-            let idx = await db.get(`TicketIndex.byFilename.${cKey}`);
-            if (!idx) idx = await db.get(`TicketIndex.byFilename.${cKeyLower}`);
-            if (idx && idx.ownerId) {
-                cacheByFilename.set(cKeyLower, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
-                return idx.ownerId;
+            if (typeof db.getTranscriptIndex === 'function') {
+                const idx = await db.getTranscriptIndex(cKey);
+                if (idx && idx.ownerId) {
+                    cacheByFilename.set(cKeyLower, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
+                    return idx.ownerId;
+                }
             }
         } catch (_) {}
     }
 
-    // Avoid DB-wide scan on request path; not found
+    // Not found
     return null;
 }
 
@@ -299,7 +338,7 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function findTicketContextByFilename(filename) {
-    // Return { ownerId, ticketId, ticketType } using fast in-memory index or lightweight lookups
+    // Return { ownerId, ticketId, ticketType } using fast in-memory index or MySQL lookup
     try {
         // Build candidate filenames we consider equivalent
         const candidates = new Set([filename]);
@@ -313,37 +352,47 @@ async function findTicketContextByFilename(filename) {
             const rec = transcriptIndex.get(c);
             if (rec) return rec;
         }
-        // Try persistent index
+        
+        // Try MySQL transcript_index table
         for (const c of candList) {
             try {
-                // Try both lower-cased and original-case keys
-                const idx = await db.get(`TicketIndex.byFilename.${c}`) || await db.get(`TicketIndex.byFilename.${filename}`);
-                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) {
-                    // Enrich with ticketType if missing
-                    if (!idx.ticketType && idx.ownerId && idx.ticketId) {
-                        try {
-                            const t = await db.get(`PlayerStats.${idx.ownerId}.ticketLogs.${idx.ticketId}`) || {};
-                            if (t && t.ticketType) return { ownerId: idx.ownerId, ticketId: idx.ticketId, ticketType: t.ticketType };
-                        } catch (_) {}
+                if (typeof db.getTranscriptIndex === 'function') {
+                    const idx = await db.getTranscriptIndex(c);
+                    if (idx && (idx.ownerId || idx.ticketId)) {
+                        // Enrich with ticketType from tickets table if missing
+                        if (!idx.ticketType && idx.ownerId && idx.ticketId) {
+                            try {
+                                const [tickets] = await db.query(
+                                    'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                                    [idx.ownerId, idx.ticketId]
+                                );
+                                if (tickets && tickets.length > 0 && tickets[0].ticket_type) {
+                                    idx.ticketType = tickets[0].ticket_type;
+                                }
+                            } catch (_) {}
+                        }
+                        return idx;
                     }
-                    return idx;
                 }
             } catch (_) {}
         }
-        // Last resort: derive ticketId from filename suffix and try direct get without scanning all
+        // Last resort: derive ticketId from filename suffix and query MySQL directly
         const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
         const idMatch = base.match(/-(\d{1,8})$/);
         if (idMatch) {
             const ticketId = idMatch[1];
             try {
-                const ps = await db.get('PlayerStats');
-                if (ps && typeof ps === 'object') {
-                    for (const ownerId of Object.keys(ps)) {
-                        const t = ps[ownerId]?.ticketLogs?.[ticketId];
-                        if (t && (t.ticketType || t.transcriptURL)) {
-                            const ticketType = t.ticketType || null;
-                            return { ownerId, ticketId, ticketType };
-                        }
+                if (typeof db.query === 'function') {
+                    const [rows] = await db.query(
+                        'SELECT user_id, ticket_type FROM tickets WHERE ticket_id = ? LIMIT 1',
+                        [ticketId]
+                    );
+                    if (rows && rows.length > 0) {
+                        return {
+                            ownerId: String(rows[0].user_id || ''),
+                            ticketId: ticketId,
+                            ticketType: rows[0].ticket_type || null
+                        };
                     }
                 }
             } catch (_) {}
@@ -360,22 +409,27 @@ async function canViewTranscript(userId, filename, roleFlags) {
     console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
     if (isAdmin) { console.log('[auth] allow: admin', { ms: Date.now() - t0 }); return true; }
     if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override', { ms: Date.now() - t0 }); return true; }
-    // Fast-path: check the current user's own ticket logs directly
+    // Fast-path: check the current user's own tickets via MySQL
     try {
         const candList = [filename];
         if (/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.full\.html$/i, '.html'));
         if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.html$/i, '.full.html'));
-        const myLogs = await db.get(`PlayerStats.${userId}.ticketLogs`) || {};
-        for (const tid of Object.keys(myLogs)) {
-            const t = myLogs[tid];
-            const url = t?.transcriptURL;
-            if (typeof url !== 'string') continue;
-            if (candList.some(c => url.endsWith(c) || url.endsWith('/' + c) || url === c)) {
-                console.log('[auth] allow: owner via own logs', { ticketId: tid, url, ms: Date.now() - t0 });
-                return true;
+        
+        if (typeof db.getUserTickets === 'function') {
+            const userTickets = await db.getUserTickets(userId, { closedOnly: false, limit: 1000 });
+            for (const t of userTickets) {
+                // Check transcriptFilename directly, or reconstruct URL from transcriptFilename
+                const urlFilename = t.transcriptFilename || '';
+                if (candList.some(c => {
+                    if (!urlFilename) return false;
+                    return urlFilename === c || urlFilename.replace(/\.html$/i, '.full.html') === c || urlFilename.replace(/\.full\.html$/i, '.html') === c;
+                })) {
+                    console.log('[auth] allow: owner via MySQL tickets', { ticketId: t.ticketId, filename: urlFilename, ms: Date.now() - t0 });
+                    return true;
+                }
             }
         }
-    } catch (e) { console.log('[auth] own logs check error', e?.message || e); }
+    } catch (e) { console.log('[auth] own tickets check error', e?.message || e); }
     const ownerId = await findOwnerByFilename(filename);
     console.log('[auth] owner lookup', { ownerId });
     if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup', { ms: Date.now() - t0 }); return true; }
@@ -462,15 +516,7 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// Expose Prometheus metrics for Grafana/Prometheus scrape
-app.get('/metrics', async (req, res) => {
-    try {
-        res.set('Content-Type', metrics.registry.contentType);
-        res.end(await metrics.registry.metrics());
-    } catch (e) {
-        res.status(500).send('metrics error');
-    }
-});
+// Metrics endpoint removed - Grafana can query MySQL directly
 
 app.get('/', (req, res) => {
     return res.redirect('/my');
@@ -508,33 +554,47 @@ app.get('/logout', (req, res) => {
 });
 
 app.get('/my', ensureAuth, async (req, res) => {
-    const ticketLogs = await db.get(`PlayerStats.${req.user.id}.ticketLogs`) || {};
-    const list = Object.keys(ticketLogs)
-        .map(tid => {
-            const t = ticketLogs[tid] || {};
-            const url = t.transcriptURL || '';
-            let filename = url ? url.split('/').pop() : null;
-            if (filename && filename.endsWith('.full.html')) {
-                filename = filename.replace(/\.full\.html$/, '.html');
-            }
-            return {
-                ticketId: tid,
-                ticketType: t.ticketType || 'Unknown',
+    try {
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+        const offset = (page - 1) * limit;
+        
+        let tickets = [];
+        let total = 0;
+        
+        // Use MySQL getUserTickets if available
+        if (typeof db.getUserTickets === 'function') {
+            // Get tickets for this page
+            tickets = await db.getUserTickets(req.user.id, { closedOnly: true, limit, offset });
+            
+            // Get total count
+            const [countRows] = await db.query(
+                'SELECT COUNT(*) as total FROM tickets WHERE user_id = ? AND (close_time IS NOT NULL OR close_type IS NOT NULL OR transcript_url IS NOT NULL)',
+                [String(req.user.id)]
+            );
+            total = countRows[0]?.total || 0;
+            
+            // Map to view format
+            tickets = tickets.map(t => ({
+                ticketId: t.ticketId,
+                ticketType: t.ticketType,
                 createdAt: t.createdAt ? new Date(t.createdAt * 1000) : null,
-                transcriptFilename: filename,
-                transcriptAvailable: !!filename,
-                isClosed: !!(t.closeTime || t.closeType || filename)
-            };
-        })
-        .filter(x => x.isClosed)
-        .sort((a,b) => (b.createdAt?.getTime()||0) - (a.createdAt?.getTime()||0));
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
-    const total = list.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const start = (page - 1) * limit;
-    const tickets = list.slice(start, start + limit);
-    res.render('my_tickets', { tickets, pagination: { page, limit, total, totalPages }, query: req.query });
+                transcriptFilename: t.transcriptFilename,
+                transcriptAvailable: !!t.transcriptFilename,
+                isClosed: true
+            }));
+        } else {
+            // Fallback (shouldn't happen with MySQL-only)
+            tickets = [];
+            total = 0;
+        }
+        
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        res.render('my_tickets', { tickets, pagination: { page, limit, total, totalPages }, query: req.query });
+    } catch (err) {
+        console.error('[web] /my error:', err);
+        res.status(500).send('Error loading tickets');
+    }
 });
 
 // Health check
@@ -1109,10 +1169,9 @@ let cachedUserIdListExpiresAt = 0;
 const USERID_LIST_TTL_MS = 60 * 1000; // 60s
 async function refreshUserIdList() {
     try {
-        const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) {
-            const uniq = Array.from(new Set(list.map(x => x && x.userId).filter(Boolean)));
-            cachedUserIdList = uniq;
+        if (typeof db.getUserIds === 'function') {
+            const userIds = await db.getUserIds(500);
+            cachedUserIdList = userIds;
             cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
         }
     } catch (_) {}
@@ -1124,90 +1183,20 @@ async function getAllUserIds() {
     return cachedUserIdList || [];
 }
 
-// Short TTL cache for staff page listings keyed by filters + page/limit
-let staffCache = new Map(); // key -> { data, expiresAt }
-const STAFF_CACHE_MAX = 500;
-
-// Indexed cache structure: build once, query efficiently
-let staffIndexCache = { 
-    byUserId: new Map(),      // userId -> [row, row, ...] (sorted desc by createdAt)
-    byType: new Map(),        // ticketType -> [row, row, ...] (sorted desc)
-    byServer: new Map(),      // server -> [row, row, ...] (sorted desc)
-    byCloseUser: new Map(),   // closeUserID -> [row, row, ...] (sorted desc)
-    allTickets: [],          // All tickets sorted desc (fallback)
-    expiresAt: 0 
-};
-const INDEX_TTL_MS = 30 * 1000; // 30s
-
-async function buildStaffIndex() {
-    const now = Date.now();
-    if (staffIndexCache.expiresAt > now) return staffIndexCache;
-    
+// Efficient ticket search using SQL queries
+async function searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit = 100 }) {
     try {
-        const list = await withTimeout(
-            db.get('TicketIndex.staffList'),
-            8000,
-            'Staff index build timeout'
-        );
-        if (!Array.isArray(list)) return staffIndexCache;
-        
-        // Build indexes
-        const byUserId = new Map();
-        const byType = new Map();
-        const byServer = new Map();
-        const byCloseUser = new Map();
-        
-        for (const row of list) {
-            if (!row) continue;
-            
-            // Index by userId
-            if (row.userId) {
-                if (!byUserId.has(row.userId)) byUserId.set(row.userId, []);
-                byUserId.get(row.userId).push(row);
-            }
-            
-            // Index by type
-            const ttype = String(row.ticketType || '').toLowerCase();
-            if (ttype) {
-                if (!byType.has(ttype)) byType.set(ttype, []);
-                byType.get(ttype).push(row);
-            }
-            
-            // Index by server
-            const server = String(row.server || '').toLowerCase();
-            if (server) {
-                if (!byServer.has(server)) byServer.set(server, []);
-                byServer.get(server).push(row);
-            }
-            
-            // Index by close user
-            const closeUser = String(row.closeUserID || '').toLowerCase();
-            if (closeUser) {
-                if (!byCloseUser.has(closeUser)) byCloseUser.set(closeUser, []);
-                byCloseUser.get(closeUser).push(row);
-            }
+        if (typeof db.searchTickets === 'function') {
+            return await db.searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit });
         }
         
-        // Sort each index by createdAt desc
-        for (const arr of byUserId.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byType.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byServer.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byCloseUser.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        
-        // Sort all tickets too
-        const allTickets = list.slice().sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        
-        staffIndexCache = {
-            byUserId,
-            byType,
-            byServer,
-            byCloseUser,
-            allTickets,
-            expiresAt: now + INDEX_TTL_MS
-        };
-    } catch (_) {}
-    
-    return staffIndexCache;
+        // MySQL adapter should always have searchTickets method
+        console.error('[web] MySQL searchTickets method not available');
+        return [];
+    } catch (err) {
+        console.error('[web] Search tickets error:', err.message || err);
+        return [];
+    }
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {
@@ -1217,149 +1206,115 @@ app.get('/staff', ensureAuth, async (req, res) => {
         if (!isStaff) return res.status(403).send('Forbidden');
         req.session.staff_ok = true;
 
-    const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
-    const qSteam = (req.query.steam || '').replace(/[^0-9]/g, '');
-    const qType = (req.query.type || '').toLowerCase();
-    const qFrom = req.query.from ? new Date(req.query.from) : null;
-    const qTo = req.query.to ? new Date(req.query.to) : null;
-    const qServer = (req.query.server || '').toLowerCase();
-    const qClosedBy = (req.query.closed_by || '').toLowerCase();
+        const qUser = (req.query.user || '').trim();
+        const qTicketId = (req.query.ticket_id || req.query.ticket || '').trim();
+        const qType = (req.query.type || '').toLowerCase();
+        const qFrom = req.query.from ? new Date(req.query.from) : null;
+        const qTo = req.query.to ? new Date(req.query.to) : null;
+        const qServer = (req.query.server || '').toLowerCase();
+        const qClosedBy = (req.query.closed_by || '').toLowerCase();
 
-    // Build cache key from filters and pagination
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
-    const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
-    const cacheKey = JSON.stringify({ qUser, qSteam, qType, qFrom: qFrom ? qFrom.toISOString() : '', qTo: qTo ? qTo.toISOString() : '', qServer, qClosedBy, page, limit, allowed: Array.from(allowedTypes).sort() });
-    const cached = staffCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-        const { tickets, pagination } = cached.data;
-        return res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
-    }
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
+        const offset = (page - 1) * limit;
+        const allowedTypes = new Set((req.session.allowedTicketTypes || []).map(x => String(x).toLowerCase()));
 
-    // Use indexed lookups to get only relevant tickets, never scan all 25k
-    const index = await buildStaffIndex();
-    
-    // Intersect results from multiple indexes if multiple filters
-    let candidateTickets = null;
-    
-    // Start with the most selective filter first
-    if (qUser) {
-        candidateTickets = index.byUserId.get(qUser) || [];
-    } else if (qType) {
-        candidateTickets = index.byType.get(qType.toLowerCase()) || [];
-    } else if (qClosedBy) {
-        candidateTickets = index.byCloseUser.get(qClosedBy.toLowerCase()) || [];
-    }
-    
-    // Now apply additional filters as intersections (reduce candidate set)
-    if (candidateTickets && qType && !qUser && !qClosedBy) {
-        // Already filtered by type above
-    } else if (candidateTickets && qType) {
-        // Filter candidates by type
-        candidateTickets = candidateTickets.filter(row => 
-            String(row.ticketType || '').toLowerCase() === qType.toLowerCase()
-        );
-    }
-    
-    if (qServer && candidateTickets) {
-        const serverLower = qServer.toLowerCase();
-        candidateTickets = candidateTickets.filter(row =>
-            String(row.server || '').toLowerCase().includes(serverLower)
-        );
-    } else if (qServer && !candidateTickets) {
-        // Only server filter: use server index
-        const serverLower = qServer.toLowerCase();
-        const tickets = [];
-        for (const [server, rows] of index.byServer.entries()) {
-            if (server.includes(serverLower)) tickets.push(...rows);
-        }
-        candidateTickets = tickets;
-        candidateTickets.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-    }
-    
-    // Fallback to all tickets only if no filters
-    if (!candidateTickets) candidateTickets = index.allTickets;
-    
-    // SEARCH first: filter candidate tickets into a new filtered set
-    // Then PAGINATE the filtered set (no need to count separately)
-    const filteredTickets = candidateTickets.filter(row => {
-        if (!row) return false;
+        // Check if there are any search filters
+        const hasSearchFilters = !!(qUser || qTicketId || qType || qServer || qClosedBy || qFrom || qTo);
+
+        // Use MySQL searchTickets for efficient querying
+        // If no filters, get the most recent 1000 tickets
+        const searchLimit = hasSearchFilters ? limit * 3 : 1000;
+        const searchResults = await searchTickets({
+            ticketId: qTicketId || null,
+            userId: qUser || null,
+            ticketType: qType || null,
+            server: qServer || null,
+            closedBy: qClosedBy || null,
+            fromDate: qFrom,
+            toDate: qTo,
+            limit: searchLimit,
+            offset: 0
+        });
+
+        // Filter by allowed ticket types and date ranges
+        let filteredTickets = searchResults.filter(row => {
+            if (!row) return false;
+            
+            // Permission check
+            const ttype = String(row.ticketType || '').toLowerCase();
+            if (!allowedTypes.has(ttype)) return false;
+            
+            // Date range filters (already applied in SQL but double-check)
+            if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) return false;
+            if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) return false;
+            
+            return true;
+        });
+
+        // Get total count
+        const total = filteredTickets.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
         
-        // Permission check
-        const ttype = String(row.ticketType || '').toLowerCase();
-        if (!allowedTypes.has(ttype)) return false;
+        // Paginate
+        const start = (page - 1) * limit;
+        const pageTickets = filteredTickets.slice(start, start + limit);
         
-        // Date range filters
-        if (qFrom && row.createdAt && (new Date(row.createdAt * 1000)) < qFrom) return false;
-        if (qTo && row.createdAt && (new Date(row.createdAt * 1000)) > qTo) return false;
+        // Use usernames from database, fallback to Discord API lookup if missing
+        const userIdsNeedingLookup = Array.from(new Set(
+            pageTickets
+                .filter(x => !x.username || x.username === x.userId)
+                .map(x => x.userId)
+        )).slice(0, 50);
         
-        return true;
-    });
-    
-    // Now paginate on the filtered subset
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const pageRows = filteredTickets.slice(start, end);
-    const total = filteredTickets.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    // Map to view model and resolve usernames in small batch; enrich missing close fields from DB
-    const userIds = Array.from(new Set(pageRows.map(x => x.userId))).slice(0, 50);
-    let nameMap = {};
-    try {
-        nameMap = await withTimeout(
-            getUsernamesMap(userIds),
-            3000,
-            'Username lookup timeout'
-        );
-    } catch (err) {
-        console.error('[web] Username lookup timeout, continuing with empty map');
-    }
-    const closureInfo = {};
-    // Batch DB queries for tickets missing closure info (with timeout)
-    const missingClosure = pageRows.filter(x => x && !(x.closeReason && x.closeUser));
-    const closurePromises = missingClosure.map(async (x) => {
-        try {
-            const t = await withTimeout(
-                db.get(`PlayerStats.${x.userId}.ticketLogs.${x.ticketId}`),
-                2000,
-                `DB timeout for ticket ${x.userId}:${x.ticketId}`
-            ) || {};
-            let cu = x.closeUser || t.closeUser || t.closeUserUsername || null;
-            let cr = x.closeReason || t.closeReason || t.closeType || null;
-            if (!cu && x.closeUserID) {
-                try { cu = await metrics.getUsername(String(x.closeUserID)); } catch (_) {}
-            }
-            if (cu || cr) closureInfo[`${x.userId}:${x.ticketId}`] = { closeUser: cu || null, closeReason: cr || null };
-        } catch (err) {
-            if (err.message && err.message.includes('timeout')) {
-                console.error('[web] Closure info fetch timeout', x);
+        let nameMap = {};
+        if (userIdsNeedingLookup.length > 0) {
+            try {
+                nameMap = await withTimeout(
+                    getUsernamesMap(userIdsNeedingLookup),
+                    3000,
+                    'Username lookup timeout'
+                );
+            } catch (err) {
+                console.error('[web] Username lookup timeout, continuing with database usernames');
             }
         }
-    });
-    await Promise.all(closurePromises);
-    const tickets = pageRows.map(x => {
-        const key = `${x.userId}:${x.ticketId}`;
-        const enriched = closureInfo[key] || {};
-        return {
+        
+        const tickets = pageTickets.map(x => ({
             userId: x.userId,
-            username: nameMap[x.userId] || x.userId,
+            username: x.username || nameMap[x.userId] || x.userId,
             ticketId: x.ticketId,
             ticketType: x.ticketType || 'Unknown',
             server: x.server || null,
-            closeUser: enriched.closeUser ?? x.closeUser ?? null,
-            closeReason: enriched.closeReason ?? x.closeReason ?? null,
+            closeUser: x.closeUser || null,
+            closeReason: x.closeReason || null,
             createdAt: x.createdAt ? new Date(x.createdAt * 1000) : null,
             transcriptFilename: x.transcriptFilename || null,
             transcriptAvailable: !!x.transcriptFilename
-        };
-    });
-    const pagination = { page, limit, total, totalPages };
-    if (staffCache.size >= STAFF_CACHE_MAX) {
-        const firstKey = staffCache.keys().next().value;
-        if (firstKey) staffCache.delete(firstKey);
-    }
-    staffCache.set(cacheKey, { data: { tickets, pagination }, expiresAt: Date.now() + CACHE_TTL_MS });
-    res.render('staff_tickets', { tickets, query: { user: qUser, type: qType, from: req.query.from || '', to: req.query.to || '', server: req.query.server || '', closed_by: req.query.closed_by || '', steam: req.query.steam || '' }, types: getKnownTicketTypes(), pagination });
+        }));
+        
+        const pagination = { page, limit, total, totalPages };
+        // Show results if we have search filters OR if showing default recent tickets
+        const hasSearchResults = hasSearchFilters || tickets.length > 0;
+        
+        res.render('staff_tickets', { 
+            tickets, 
+            hasSearchResults,
+            resultCount: total,
+            maxResults: limit,
+            query: { 
+                user: qUser, 
+                ticket_id: qTicketId,
+                ticket: qTicketId, // Also support 'ticket' query param
+                type: qType, 
+                from: req.query.from || '', 
+                to: req.query.to || '', 
+                server: req.query.server || '', 
+                closed_by: req.query.closed_by || '' 
+            }, 
+            types: getKnownTicketTypes(), 
+            pagination 
+        });
     } catch (err) {
         console.error('[web] /staff error:', err.message || err);
         if (!res.headersSent) {
@@ -1442,8 +1397,13 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
         if (ctx) {
             ownerId = ctx.ownerId || null;
             ticketId = ctx.ticketId || null;
-            const t = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}`) || {};
-            steamId = t.steamId || null;
+            // Query MySQL tickets table for ticket details
+            if (typeof db.query === 'function') {
+                const [rows] = await db.query('SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1', [ownerId, ticketId]);
+                if (rows && rows.length > 0) {
+                    steamId = rows[0].steam_id || null;
+                }
+            }
         }
     } catch (_) {}
     res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
@@ -1474,22 +1434,6 @@ app.listen(PORT, HOST, async () => {
     try { await warmTranscriptIndex(); } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
-    // Build staff index in background
-    try { await buildStaffIndex(); } catch (_) {}
-    // Event loop lag instrumentation
-    try {
-        const eventLoopLagGauge = new promClient.Gauge({ name: 'ticketbot_event_loop_lag_ms', help: 'Event loop lag over 1s interval' });
-        metrics.registry.registerMetric(eventLoopLagGauge);
-        const intervalMs = 1000;
-        let last = process.hrtime.bigint();
-        setInterval(() => {
-            const now = process.hrtime.bigint();
-            const diffMs = Number(now - last) / 1e6;
-            const lag = Math.max(0, diffMs - intervalMs);
-            eventLoopLagGauge.set(lag);
-            last = now;
-        }, intervalMs).unref();
-    } catch (_) {}
 });
 
 

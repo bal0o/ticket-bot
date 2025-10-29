@@ -4,7 +4,7 @@ let unirest = require('unirest');
 const func = require("./functions.js")
 const logger = require('./logger');
 const lang = require("../content/handler/lang.json");
-const { createDB } = require('./quickdb');
+const { createDB } = require('./mysql');
 const db = createDB();
 
 
@@ -249,8 +249,22 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		? `${user.username} (${SteamID})`
 		: user.username;
 
-		// Get the global ticket counter
-		let globalTicketCount = await db.get('globalTicketCount') || 0;
+		// Get the global ticket counter from MySQL
+		let globalTicketCount = await db.get('globalTicketCount');
+		if (globalTicketCount === null || globalTicketCount === undefined) {
+			// Initialize to highest existing ticket number if tickets exist
+			try {
+				if (typeof db.query === 'function') {
+					const [rows] = await db.query('SELECT MAX(CAST(ticket_id AS UNSIGNED)) as maxId FROM tickets WHERE ticket_id REGEXP "^[0-9]+$"');
+					globalTicketCount = rows[0]?.maxId || 0;
+				} else {
+					globalTicketCount = 0;
+				}
+			} catch (_) {
+				globalTicketCount = 0;
+			}
+		}
+		globalTicketCount = Number(globalTicketCount) || 0;
 		globalTicketCount++;
 		await db.set('globalTicketCount', globalTicketCount);
 
@@ -419,23 +433,49 @@ try {
 
 	}
 
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketUniqueID`, formattedTicketNumber)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.userID`, user.id)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.username`, user.username)
-	if (SteamID && SteamID.toString().startsWith('7656119')) {
-		await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.steamId`, String(SteamID))
-	}
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.responses`, responses)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, Date.now() / 1000)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketType`, ticketType)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.globalTicketNumber`, formattedTicketNumber)
+	const createdAt = Math.floor(Date.now() / 1000);
 	// Save parsed server for reporting
+	let server = null;
 	try {
 		const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
 		if (m && m[1]) {
-			await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.server`, m[1]);
+			server = m[1];
 		}
 	} catch (_) {}
+	
+	// Write to MySQL tickets table (PlayerStats removed - all data in MySQL now)
+	try {
+		if (typeof db.writeTicket === 'function') {
+			console.log('[backbone] Writing ticket to MySQL', { 
+				ticketId: formattedTicketNumber, 
+				userId: user.id, 
+				ticketType: ticketType 
+			});
+			await db.writeTicket({
+				userId: String(user.id),
+				ticketId: String(formattedTicketNumber),
+				ticketType: ticketType || null,
+				server: server || null,
+				username: user.username || null,
+				steamId: SteamID && SteamID.toString().startsWith('7656119') ? String(SteamID) : null,
+				responses: responses || null,
+				createdAt: createdAt,
+				globalTicketNumber: formattedTicketNumber
+			});
+			console.log('[backbone] Successfully wrote ticket to MySQL', { ticketId: formattedTicketNumber });
+		} else {
+			console.warn('[backbone] writeTicket method not available on db adapter');
+		}
+	} catch (err) {
+		console.error('[backbone] Error writing ticket to MySQL:', {
+			message: err.message,
+			code: err.code,
+			stack: err.stack,
+			ticketId: formattedTicketNumber,
+			userId: user.id
+		});
+		// Don't throw - ticket creation should continue even if MySQL write fails
+	}
 
 	// After creating the ticket channel and sending the DM, update the bot's status
 	await func.updateTicketStatus(client);
