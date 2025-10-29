@@ -256,28 +256,30 @@ function computeAllowedTicketTypes(roleIds) {
 let transcriptIndex = new Map(); // lowercased filename -> { ownerId, ticketId, ticketType }
 async function warmTranscriptIndex() {
     try {
-        const ps = await db.get('PlayerStats');
+        // Build from TicketIndex.staffList instead of loading all PlayerStats
+        // This is much more memory efficient
+        const staffList = await db.get('TicketIndex.staffList');
+        if (!Array.isArray(staffList)) return;
+        
         const idx = new Map();
-        if (ps && typeof ps === 'object') {
-            for (const ownerId of Object.keys(ps)) {
-                const logs = ps[ownerId]?.ticketLogs || {};
-                for (const ticketId of Object.keys(logs)) {
-                    const t = logs[ticketId];
-                    const url = (t && t.transcriptURL) ? String(t.transcriptURL) : '';
-                    if (!url) continue;
-                    const ticketType = t.ticketType || null;
-                    const file = url.split('/').pop();
-                    if (!file) continue;
-                    const base = String(file).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
-                    const variants = [
-                        `${base}.html`,
-                        `${base}.full.html`,
-                        `${base}.staff.html`
-                    ];
-                    for (const f of variants) {
-                        idx.set(f.toLowerCase(), { ownerId, ticketId, ticketType });
-                    }
-                }
+        // Only index recent tickets (first 1000) to keep memory usage low
+        const recent = staffList.slice(0, 1000);
+        
+        for (const row of recent) {
+            if (!row || !row.transcriptFilename) continue;
+            const filename = String(row.transcriptFilename);
+            const base = filename.replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+            const variants = [
+                `${base}.html`,
+                `${base}.full.html`,
+                `${base}.staff.html`
+            ];
+            for (const f of variants) {
+                idx.set(f.toLowerCase(), { 
+                    ownerId: row.userId || null, 
+                    ticketId: row.ticketId || null, 
+                    ticketType: row.ticketType || null 
+                });
             }
         }
         transcriptIndex = idx;
@@ -1133,10 +1135,15 @@ let cachedUserIdListExpiresAt = 0;
 const USERID_LIST_TTL_MS = 60 * 1000; // 60s
 async function refreshUserIdList() {
     try {
-        // Simple: get user IDs from PlayerStats keys
-        const ps = await db.get('PlayerStats');
-        if (ps && typeof ps === 'object') {
-            cachedUserIdList = Object.keys(ps).filter(Boolean).slice(0, 1000); // Limit to first 1000
+        // Get user IDs from TicketIndex.staffList instead of loading all PlayerStats
+        const staffList = await db.get('TicketIndex.staffList');
+        if (Array.isArray(staffList)) {
+            const userIds = new Set();
+            // Only get IDs from recent tickets (first 1000)
+            for (const row of staffList.slice(0, 1000)) {
+                if (row && row.userId) userIds.add(String(row.userId));
+            }
+            cachedUserIdList = Array.from(userIds);
             cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
         }
     } catch (_) {}
@@ -1387,8 +1394,12 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
 
 app.listen(PORT, HOST, async () => {
     console.log(`[web] Listening on http://${HOST}:${PORT}`);
-    // Warm transcript index in background
-    try { await warmTranscriptIndex(); } catch (_) {}
+    // Warm transcript index in background (deferred to avoid blocking startup)
+    try { 
+        setTimeout(() => {
+            warmTranscriptIndex().catch(() => {});
+        }, 3000); // Wait 3 seconds after server starts
+    } catch (_) {}
     // Prime the user ID list cache without blocking
     try { refreshUserIdList(); } catch (_) {}
     // No index building on startup - queries run on-demand
