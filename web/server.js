@@ -149,7 +149,18 @@ async function getUsernamesMap(ids = []) {
             continue;
         }
         try {
-            const logs = await db.get(`PlayerStats.${id}.ticketLogs`) || {};
+            // Use MySQL getUserTickets instead of PlayerStats
+            const logs = typeof db.getUserTickets === 'function' 
+                ? (await db.getUserTickets(id, { closedOnly: false, limit: 1000 })).reduce((acc, t) => {
+                    acc[t.ticketId] = {
+                        ticketType: t.ticketType,
+                        createdAt: t.createdAt,
+                        transcriptURL: t.transcriptFilename ? `/transcripts/${t.transcriptFilename}` : null,
+                        closeTime: t.closeUser ? Date.now() / 1000 : null
+                    };
+                    return acc;
+                }, {})
+                : {};
             let username = '';
             for (const tid of Object.keys(logs)) {
                 if (logs[tid]?.username) { username = logs[tid].username; break; }
@@ -1348,8 +1359,13 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
         if (ctx) {
             ownerId = ctx.ownerId || null;
             ticketId = ctx.ticketId || null;
-            const t = await db.get(`PlayerStats.${ownerId}.ticketLogs.${ticketId}`) || {};
-            steamId = t.steamId || null;
+            // Query MySQL tickets table for ticket details
+            if (typeof db.query === 'function') {
+                const [rows] = await db.query('SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1', [ownerId, ticketId]);
+                if (rows && rows.length > 0) {
+                    steamId = rows[0].steam_id || null;
+                }
+            }
         }
     } catch (_) {}
     res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
