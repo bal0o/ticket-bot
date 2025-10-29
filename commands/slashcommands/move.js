@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const func = require('../../utils/functions.js');
 const perms = require('../../utils/permissions.js');
-const { createDB } = require('../../utils/quickdb');
+const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
 const { Modal, TextInputComponent, MessageActionRow } = require('discord.js');

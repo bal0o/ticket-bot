@@ -44,7 +44,7 @@ client.login(config.tokens.bot_token).then(() => {
 
 	// Start application interview scheduler loop
 	try {
-		const { createDB } = require('./utils/quickdb');
+		const { createDB } = require('./utils/mysql');
 		const db = createDB();
 		const cfg = require('./config/config.json');
 		const guildId = cfg.channel_ids.public_guild_id; // Use public guild for interview channels

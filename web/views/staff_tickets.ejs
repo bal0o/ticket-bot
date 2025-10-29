@@ -18,8 +18,16 @@
     </div>
   </header>
   <main class="container">
-  <h1>All Tickets</h1>
+  <h1>Ticket Search</h1>
+  <% if (!hasSearchResults) { %>
+    <p style="margin-bottom: 16px; color: #666;">Enter search criteria below and click "Search" to find tickets. No data is loaded until you search.</p>
+  <% } else { %>
+    <p style="margin-bottom: 16px; color: #666;">Found <strong><%= resultCount %></strong> ticket<%= resultCount !== 1 ? 's' : '' %> (max <%= maxResults %>)</p>
+  <% } %>
   <form method="get" action="/staff" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+    <label>Ticket ID:
+      <input type="text" name="ticket" placeholder="e.g., 1234" value="<%= (query && query.ticket) || '' %>">
+    </label>
     <label>User ID:
       <input type="text" id="userInput" name="user" list="userList" autocomplete="off" value="<%= (query && query.user) || '' %>">
       <datalist id="userList"></datalist>
@@ -32,9 +40,6 @@
         <% }) %>
       </select>
     </label>
-    <label>SteamID:
-      <input type="text" name="steam" value="<%= (query && query.steam) || '' %>">
-    </label>
     <label>Server:
       <input type="text" name="server" value="<%= (query && query.server) || '' %>">
     </label>
@@ -43,18 +48,18 @@
     </label>
     <label>From: <input type="date" name="from" value="<%= (query && query.from) || '' %>"></label>
     <label>To: <input type="date" name="to" value="<%= (query && query.to) || '' %>"></label>
-    <% if (pagination) { %>
-    <label>Page size:
+    <label>Max Results:
       <select name="limit">
-        <option value="10" <%= String(pagination.limit) === '10' ? 'selected' : '' %>>10</option>
-        <option value="25" <%= String(pagination.limit) === '25' ? 'selected' : '' %>>25</option>
-        <option value="50" <%= String(pagination.limit) === '50' ? 'selected' : '' %>>50</option>
-        <option value="100" <%= String(pagination.limit) === '100' ? 'selected' : '' %>>100</option>
+        <option value="50" <%= String(query && query.limit || '100') === '50' ? 'selected' : '' %>>50</option>
+        <option value="100" <%= String(query && query.limit || '100') === '100' ? 'selected' : '' %>>100</option>
+        <option value="150" <%= String(query && query.limit || '100') === '150' ? 'selected' : '' %>>150</option>
+        <option value="200" <%= String(query && query.limit || '100') === '200' ? 'selected' : '' %>>200</option>
       </select>
     </label>
-    <input type="hidden" name="page" value="1">
+    <button type="submit" class="btn primary">Search</button>
+    <% if (hasSearchResults) { %>
+      <a href="/staff" class="btn">Clear</a>
     <% } %>
-    <button type="submit" class="btn primary">Filter</button>
   </form>
   <div class="table-scroll">
   <table class="with-filter">
@@ -97,29 +102,8 @@
     </tbody>
   </table>
   </div>
-  <% if (pagination && pagination.totalPages > 1) { %>
-    <nav class="pagination">
-      <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
-      <% const next = Math.min(pagination.totalPages, (pagination.page || 1) + 1); %>
-      <a class="btn" href="?page=<%= prev %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Prev</a>
-      <% const p = pagination.page || 1; const tp = pagination.totalPages || 1; const start = Math.max(1, p - 2); const end = Math.min(tp, p + 2); %>
-      <% if (start > 1) { %>
-        <a class="btn" href="?page=1&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">1</a>
-        <% if (start > 2) { %><span class="muted">…</span><% } %>
-      <% } %>
-      <% for (let i = start; i <= end; i++) { %>
-        <% if (i === p) { %>
-          <span class="btn active"><%= i %></span>
-        <% } else { %>
-          <a class="btn" href="?page=<%= i %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= i %></a>
-        <% } %>
-      <% } %>
-      <% if (end < tp) { %>
-        <% if (end < tp - 1) { %><span class="muted">…</span><% } %>
-        <a class="btn" href="?page=<%= tp %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>"><%= tp %></a>
-      <% } %>
-      <a class="btn" href="?page=<%= next %>&limit=<%= pagination.limit %>&user=<%= encodeURIComponent((query && query.user) || '') %>&type=<%= encodeURIComponent((query && query.type) || '') %>&from=<%= encodeURIComponent((query && query.from) || '') %>&to=<%= encodeURIComponent((query && query.to) || '') %>&server=<%= encodeURIComponent((query && query.server) || '') %>&closed_by=<%= encodeURIComponent((query && query.closed_by) || '') %>&steam=<%= encodeURIComponent((query && query.steam) || '') %>">Next</a>
-    </nav>
+  <% if (hasSearchResults && tickets.length === 0) { %>
+    <p style="text-align: center; color: #999; margin-top: 20px;">No tickets found matching your search criteria.</p>
   <% } %>
   </main>
   <script>

@@ -1,6 +1,6 @@
 const Discord = require("discord.js");
 const metrics = require('./metrics');
-const { createDB } = require('./quickdb')
+const { createDB } = require('./mysql')
 const db = createDB();
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
@@ -1002,38 +1002,48 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             });
             
             await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, savedTranscriptURL);
-            // Indexes for fast lookups
-            try {
-                const fnameFull = `${channel.name}.full.html`;
-                const fnameUser = `${channel.name}.html`;
-                await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-                await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-            } catch (_) {}
+            
+            // Write ticket data - use MySQL tickets table if available, otherwise quick.db
             try {
                 const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
-                    const row = {
+                const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
+                const serverMatch = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+                const server = serverMatch && serverMatch[1] ? serverMatch[1] : null;
+                
+                const ticketRow = {
                     userId: String(DiscordID),
                     ticketId: String(globalTicketNumber),
                     ticketType: ticketType,
-                    server: await (async () => {
-                        const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
-                        const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-                        return m && m[1] ? m[1] : null;
-                    })(),
-                    createdAt,
+                    server: server,
+                    createdAt: createdAt,
                     closeTime: Math.floor(Date.now() / 1000),
                     closeUserID: String(staffMember.id || staffMember.user?.id || ''),
-                        closeUser: String(staffMember.user?.username || staffMember.username || ''),
-                        closeReason: String(reason || ''),
-                    transcriptFilename: `${channel.name}.html`
+                    closeUser: String(staffMember.user?.username || staffMember.username || ''),
+                    closeReason: String(reason || ''),
+                    transcriptFilename: `${channel.name}.html`,
+                    transcriptURL: savedTranscriptURL || null
                 };
-                const key = `TicketIndex.staffList`;
-                const list = (await db.get(key)) || [];
-                list.push(row);
-                const MAX_INDEX = 25000;
-                const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
-                await db.set(key, trimmed);
-            } catch (_) {}
+                
+                // If MySQL adapter has writeTicket method, use it (direct to tickets table)
+                if (typeof db.writeTicket === 'function') {
+                    await db.writeTicket(ticketRow);
+                } else {
+                    // Fallback: use quick.db structure
+                    const fnameFull = `${channel.name}.full.html`;
+                    const fnameUser = `${channel.name}.html`;
+                    await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+                    await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
+                    
+                    const key = `TicketIndex.staffList`;
+                    const list = (await db.get(key)) || [];
+                    list.push(ticketRow);
+                    const MAX_INDEX = 25000;
+                    const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
+                    await db.set(key, trimmed);
+                }
+            } catch (err) {
+                console.error('[closeTicket] Error writing ticket data:', err.message);
+            }
             try { 
                 const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
                 metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 

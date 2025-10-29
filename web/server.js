@@ -7,7 +7,7 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const axios = require('axios');
-const { createDB } = require('../utils/quickdb');
+const { createDB } = require('../utils/mysql');
 const metrics = require('../utils/metrics');
 const promClient = require('prom-client');
 const permissions = require('../utils/permissions');
@@ -1124,90 +1124,71 @@ async function getAllUserIds() {
     return cachedUserIdList || [];
 }
 
-// Short TTL cache for staff page listings keyed by filters + page/limit
-let staffCache = new Map(); // key -> { data, expiresAt }
-const STAFF_CACHE_MAX = 500;
-
-// Indexed cache structure: build once, query efficiently
-let staffIndexCache = { 
-    byUserId: new Map(),      // userId -> [row, row, ...] (sorted desc by createdAt)
-    byType: new Map(),        // ticketType -> [row, row, ...] (sorted desc)
-    byServer: new Map(),      // server -> [row, row, ...] (sorted desc)
-    byCloseUser: new Map(),   // closeUserID -> [row, row, ...] (sorted desc)
-    allTickets: [],          // All tickets sorted desc (fallback)
-    expiresAt: 0 
-};
-const INDEX_TTL_MS = 30 * 1000; // 30s
-
-async function buildStaffIndex() {
-    const now = Date.now();
-    if (staffIndexCache.expiresAt > now) return staffIndexCache;
-    
+// Efficient ticket search using SQL queries
+async function searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit = 100 }) {
     try {
-        const list = await withTimeout(
-            db.get('TicketIndex.staffList'),
-            8000,
-            'Staff index build timeout'
-        );
-        if (!Array.isArray(list)) return staffIndexCache;
-        
-        // Build indexes
-        const byUserId = new Map();
-        const byType = new Map();
-        const byServer = new Map();
-        const byCloseUser = new Map();
-        
-        for (const row of list) {
-            if (!row) continue;
-            
-            // Index by userId
-            if (row.userId) {
-                if (!byUserId.has(row.userId)) byUserId.set(row.userId, []);
-                byUserId.get(row.userId).push(row);
-            }
-            
-            // Index by type
-            const ttype = String(row.ticketType || '').toLowerCase();
-            if (ttype) {
-                if (!byType.has(ttype)) byType.set(ttype, []);
-                byType.get(ttype).push(row);
-            }
-            
-            // Index by server
-            const server = String(row.server || '').toLowerCase();
-            if (server) {
-                if (!byServer.has(server)) byServer.set(server, []);
-                byServer.get(server).push(row);
-            }
-            
-            // Index by close user
-            const closeUser = String(row.closeUserID || '').toLowerCase();
-            if (closeUser) {
-                if (!byCloseUser.has(closeUser)) byCloseUser.set(closeUser, []);
-                byCloseUser.get(closeUser).push(row);
-            }
+        // If MySQL adapter with searchTickets method, use it
+        if (typeof db.searchTickets === 'function') {
+            return await db.searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit });
         }
         
-        // Sort each index by createdAt desc
-        for (const arr of byUserId.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byType.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byServer.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
-        for (const arr of byCloseUser.values()) arr.sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        // Fallback for quick.db (legacy support)
+        const staffList = await db.get('TicketIndex.staffList');
+        if (!Array.isArray(staffList)) return [];
         
-        // Sort all tickets too
-        const allTickets = list.slice().sort((a,b) => (b?.createdAt||0) - (a?.createdAt||0));
+        const results = [];
+        const maxScan = Math.min(limit * 20, 1500);
+        let scanned = 0;
         
-        staffIndexCache = {
-            byUserId,
-            byType,
-            byServer,
-            byCloseUser,
-            allTickets,
-            expiresAt: now + INDEX_TTL_MS
-        };
-    } catch (_) {}
-    
-    return staffIndexCache;
+        for (const ticket of staffList) {
+            if (scanned >= maxScan || results.length >= limit) break;
+            scanned++;
+            
+            if (!ticket) continue;
+            
+            if (ticketId) {
+                const tid = String(ticket.ticketId || '').trim();
+                const searchTid = String(ticketId).trim();
+                if (tid !== searchTid && !tid.includes(searchTid) && !tid.includes(searchTid.padStart(4, '0'))) continue;
+            }
+            
+            if (userId && String(ticket.userId || '') !== String(userId)) continue;
+            if (ticketType && String(ticket.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) continue;
+            
+            if (server) {
+                const ticketServer = String(ticket.server || '').toLowerCase();
+                if (!ticketServer.includes(String(server).toLowerCase())) continue;
+            }
+            
+            if (closedBy) {
+                const searchTerm = String(closedBy).toLowerCase();
+                const closeUser = String(ticket.closeUser || '').toLowerCase();
+                const closeUserId = String(ticket.closeUserID || '').toLowerCase();
+                if (!closeUser.includes(searchTerm) && !closeUserId.includes(searchTerm)) continue;
+            }
+            
+            if (fromDate && ticket.createdAt && ticket.createdAt * 1000 < fromDate.getTime()) continue;
+            if (toDate && ticket.createdAt && ticket.createdAt * 1000 > toDate.getTime()) continue;
+            
+            results.push({
+                userId: String(ticket.userId || ''),
+                ticketId: String(ticket.ticketId || ''),
+                ticketType: ticket.ticketType || 'Unknown',
+                server: ticket.server || null,
+                createdAt: ticket.createdAt || null,
+                closeUser: ticket.closeUser || null,
+                closeUserID: ticket.closeUserID || null,
+                closeReason: ticket.closeReason || null,
+                transcriptFilename: ticket.transcriptFilename || null
+            });
+        }
+        
+        results.sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0));
+        return results.slice(0, limit);
+    } catch (err) {
+        console.error('[web] Search tickets error:', err.message || err);
+        return [];
+    }
 }
 
 app.get('/staff', ensureAuth, async (req, res) => {

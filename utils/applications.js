@@ -1,4 +1,4 @@
-const { createDB } = require('./quickdb');
+const { createDB } = require('./mysql');
 const db = createDB();
 
 const APPLICATIONS_KEY = 'Applications';

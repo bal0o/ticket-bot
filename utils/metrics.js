@@ -1,5 +1,5 @@
 const client = require('prom-client');
-const { createDB } = require('./quickdb');
+const { createDB } = require('./mysql');
 const kv = createDB();
 
 // Create a singleton registry

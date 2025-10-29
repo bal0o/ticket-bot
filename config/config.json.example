@@ -76,8 +76,17 @@
 },
 
 "misc": {
-"bm_org_id": "",
-"cheetos_requestor_id": ""
+	"bm_org_id": "",
+	"cheetos_requestor_id": ""
+},
+
+"database": {
+	"type": "mysql",
+	"host": "localhost",
+	"port": 3306,
+	"user": "root",
+	"password": "",
+	"database": "ticketbot"
 },
 
 "web": {

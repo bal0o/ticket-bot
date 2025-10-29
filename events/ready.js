@@ -14,7 +14,7 @@ try {
 }
 const fs = require("fs");
 const func = require("../utils/functions.js");
-const { createDB } = require('../utils/quickdb')
+const { createDB } = require('../utils/mysql')
 
 module.exports = async function (client, message) {
     // Initialize the ticket status

@@ -1,7 +1,7 @@
 const config = require("../config/config.json");
 const Discord = require("discord.js");
 const func = require("../utils/functions.js");
-const { createDB } = require('../utils/quickdb');
+const { createDB } = require('../utils/mysql');
 const db = createDB();
 const metrics = require('../utils/metrics');
 const lang = require("../content/handler/lang.json");

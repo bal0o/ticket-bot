@@ -4,7 +4,7 @@ let unirest = require('unirest');
 const func = require("./functions.js")
 const logger = require('./logger');
 const lang = require("../content/handler/lang.json");
-const { createDB } = require('./quickdb');
+const { createDB } = require('./mysql');
 const db = createDB();
 
 
