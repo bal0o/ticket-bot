@@ -1148,62 +1148,41 @@ async function getAllUserIds() {
     return cachedUserIdList || [];
 }
 
-// Simple staff view - direct queries, no complex indexing
+// Simple staff view - query TicketIndex.staffList (flat list of closed tickets)
 async function queryTickets({ userId, ticketId, ticketType, limit = 100, offset = 0 }) {
-    const tickets = [];
-    let count = 0;
-    const MAX_SCAN = 500; // Limit how many users we scan
-    
     try {
-        const playerStats = await db.get('PlayerStats');
-        if (!playerStats || typeof playerStats !== 'object') return { tickets: [], total: 0 };
+        // Load the index - it's already sorted by createdAt desc
+        const staffList = await db.get('TicketIndex.staffList');
+        if (!Array.isArray(staffList)) return { tickets: [], total: 0 };
         
-        const userIds = Object.keys(playerStats).slice(0, MAX_SCAN);
+        // Only process recent tickets to avoid memory issues (first 1000 since sorted desc)
+        const RECENT_LIMIT = 1000;
+        const recentTickets = staffList.slice(0, RECENT_LIMIT);
         
-        for (const uid of userIds) {
-            if (userId && String(uid) !== String(userId)) continue;
+        // Apply filters
+        let filtered = recentTickets.filter(t => {
+            if (!t) return false;
             
-            const logs = playerStats[uid]?.ticketLogs || {};
-            for (const tid of Object.keys(logs)) {
-                const t = logs[tid] || {};
-                
-                // Only closed tickets
-                if (!t.closeTime && !t.closeType && !t.transcriptURL) continue;
-                
-                // Apply filters
-                if (ticketId && String(tid).trim() !== String(ticketId).trim() && !String(tid).includes(String(ticketId))) continue;
-                if (ticketType && String(t.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) continue;
-                
-                const url = t.transcriptURL || '';
-                let filename = url ? url.split('/').pop() : null;
-                if (filename && filename.endsWith('.full.html')) {
-                    filename = filename.replace(/\.full\.html$/, '.html');
-                }
-                
-                tickets.push({
-                    userId: String(uid),
-                    ticketId: String(tid),
-                    ticketType: t.ticketType || 'Unknown',
-                    server: t.server || null,
-                    createdAt: t.createdAt ? Math.floor(t.createdAt / 1000) : null,
-                    closeUser: t.closeUser || t.closeUserUsername || null,
-                    closeUserID: t.closeUserID || null,
-                    closeReason: t.closeReason || t.closeType || null,
-                    transcriptFilename: filename
-                });
-                
-                count++;
-                if (count >= limit + offset + 100) break; // Get a bit extra for pagination
+            // User filter
+            if (userId && String(t.userId) !== String(userId)) return false;
+            
+            // Ticket ID filter
+            if (ticketId) {
+                const tid = String(t.ticketId || '').trim();
+                const searchTid = String(ticketId).trim();
+                if (tid !== searchTid && tid !== searchTid.padStart(4, '0') && !tid.includes(searchTid)) return false;
             }
-            if (count >= limit + offset + 100) break;
-        }
+            
+            // Type filter
+            if (ticketType && String(t.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) return false;
+            
+            return true;
+        });
         
-        // Sort by createdAt desc
-        tickets.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        
+        // Return paginated results
         return {
-            tickets: tickets.slice(offset, offset + limit),
-            total: tickets.length
+            tickets: filtered.slice(offset, offset + limit),
+            total: filtered.length
         };
     } catch (err) {
         console.error('[web] Query tickets error:', err.message || err);
