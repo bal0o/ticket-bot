@@ -457,6 +457,11 @@ try {
 	// Also write to MySQL tickets table if MySQL adapter is available
 	try {
 		if (typeof db.writeTicket === 'function') {
+			console.log('[backbone] Writing ticket to MySQL', { 
+				ticketId: formattedTicketNumber, 
+				userId: user.id, 
+				ticketType: ticketType 
+			});
 			await db.writeTicket({
 				userId: String(user.id),
 				ticketId: String(formattedTicketNumber),
@@ -468,9 +473,19 @@ try {
 				createdAt: createdAt,
 				globalTicketNumber: formattedTicketNumber
 			});
+			console.log('[backbone] Successfully wrote ticket to MySQL', { ticketId: formattedTicketNumber });
+		} else {
+			console.warn('[backbone] writeTicket method not available on db adapter');
 		}
 	} catch (err) {
-		console.error('[backbone] Error writing ticket to MySQL:', err.message);
+		console.error('[backbone] Error writing ticket to MySQL:', {
+			message: err.message,
+			code: err.code,
+			stack: err.stack,
+			ticketId: formattedTicketNumber,
+			userId: user.id
+		});
+		// Don't throw - ticket creation should continue even if MySQL write fails
 	}
 
 	// After creating the ticket channel and sending the DM, update the bot's status

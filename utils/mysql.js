@@ -228,7 +228,33 @@ class MySQLAdapter {
     async writeTicket(ticketData) {
         const conn = await this.pool.getConnection();
         try {
-            await conn.query(`
+            const params = [
+                ticketData.userId || ticketData.user_id,
+                ticketData.ticketId || ticketData.ticket_id,
+                ticketData.ticketType || ticketData.ticket_type || null,
+                ticketData.server || null,
+                ticketData.username || null,
+                ticketData.steamId || ticketData.steam_id || null,
+                ticketData.responses || null,
+                ticketData.createdAt || ticketData.created_at || null,
+                ticketData.closeTime || ticketData.close_time || null,
+                ticketData.closeType || ticketData.close_type || null,
+                ticketData.closeUser || ticketData.close_user || null,
+                ticketData.closeUserID || ticketData.close_user_id || null,
+                ticketData.closeReason || ticketData.close_reason || null,
+                ticketData.transcriptURL || ticketData.transcript_url || null,
+                ticketData.globalTicketNumber || ticketData.global_ticket_number || null
+            ];
+            
+            console.log('[mysql] writeTicket called', { 
+                userId: params[0], 
+                ticketId: params[1], 
+                ticketType: params[2],
+                hasResponses: !!params[6],
+                createdAt: params[7]
+            });
+            
+            const [result] = await conn.query(`
                 INSERT INTO tickets (
                     user_id, ticket_id, ticket_type, server, username, steam_id,
                     responses, created_at, close_time, close_type, close_user,
@@ -246,23 +272,13 @@ class MySQLAdapter {
                     close_reason = COALESCE(VALUES(close_reason), close_reason),
                     transcript_url = COALESCE(VALUES(transcript_url), transcript_url),
                     global_ticket_number = COALESCE(VALUES(global_ticket_number), global_ticket_number)
-            `, [
-                ticketData.userId || ticketData.user_id,
-                ticketData.ticketId || ticketData.ticket_id,
-                ticketData.ticketType || ticketData.ticket_type || null,
-                ticketData.server || null,
-                ticketData.username || null,
-                ticketData.steamId || ticketData.steam_id || null,
-                ticketData.responses || null,
-                ticketData.createdAt || ticketData.created_at || null,
-                ticketData.closeTime || ticketData.close_time || null,
-                ticketData.closeType || ticketData.close_type || null,
-                ticketData.closeUser || ticketData.close_user || null,
-                ticketData.closeUserID || ticketData.close_user_id || null,
-                ticketData.closeReason || ticketData.close_reason || null,
-                ticketData.transcriptURL || ticketData.transcript_url || null,
-                ticketData.globalTicketNumber || ticketData.global_ticket_number || null
-            ]);
+            `, params);
+            
+            console.log('[mysql] writeTicket result', { 
+                affectedRows: result.affectedRows,
+                insertId: result.insertId,
+                changedRows: result.changedRows
+            });
             
             // Also update transcript index
             if (ticketData.transcriptURL || ticketData.transcriptFilename) {
@@ -291,6 +307,16 @@ class MySQLAdapter {
                     }
                 }
             }
+        } catch (err) {
+            console.error('[mysql] writeTicket error:', {
+                message: err.message,
+                code: err.code,
+                sqlState: err.sqlState,
+                sqlMessage: err.sqlMessage,
+                ticketId: ticketData.ticketId || ticketData.ticket_id,
+                userId: ticketData.userId || ticketData.user_id
+            });
+            throw err; // Re-throw so caller can handle it
         } finally {
             conn.release();
         }
