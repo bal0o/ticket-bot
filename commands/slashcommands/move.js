@@ -89,14 +89,17 @@ module.exports = {
             embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
             await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
 
-            // Update stored ticket type in DB for web permission consistency
+            // Update stored ticket type in MySQL tickets table for web permission consistency
             try {
                 const userId = idParts[0];
                 const ticketNum = idParts[1];
-                if (userId && ticketNum) {
-                    await db.set(`PlayerStats.${userId}.ticketLogs.${ticketNum}.ticketType`, ticketType);
+                if (userId && ticketNum && typeof db.query === 'function') {
+                    await db.query(
+                        'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
+                        [ticketType, userId, ticketNum]
+                    );
                 }
-            } catch (e) { func.handle_errors(e, client, 'move.js', 'Failed to update DB ticketType on move'); }
+            } catch (e) { func.handle_errors(e, client, 'move.js', 'Failed to update MySQL ticketType on move'); }
         }
         // Check for required fields in the new ticket type (e.g., server selection)
         if (questionFilesystem.server_selection && questionFilesystem.server_selection.enabled) {

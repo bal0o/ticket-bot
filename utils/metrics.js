@@ -118,19 +118,14 @@ module.exports = {
 		const obu = String(openedByUsername || 'unknown');
 		ticketsOpenedCounter.inc({ type: t, server: s, scope });
 		userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s, scope });
-		kv.add(`Metrics.total.ticketsOpened.${t}.${s}`, 1).catch(()=>{});
-		kv.add(`Metrics.total.user.ticketsOpened.${ob}.${t}.${s}`, 1).catch(()=>{});
-		// Store username alongside ID
-		kv.set(`Metrics.usernames.${ob}`, obu).catch(()=>{});
+		// Metrics no longer stored in kv_store - Grafana queries MySQL tickets table directly
 	},
 	ticketClosed: (type, closedBy, closedByUsername, scope = 'public') => {
 		const t = type || 'unknown';
 		const cb = String(closedBy || 'unknown');
 		const cbu = String(closedByUsername || 'unknown');
 		ticketsClosedCounter.inc({ type: t, closed_by: cb, closed_by_name: cbu, scope });
-		kv.add(`Metrics.total.ticketsClosed.${t}.${cb}`, 1).catch(()=>{});
-		// Store username alongside ID
-		kv.set(`Metrics.usernames.${cb}`, cbu).catch(()=>{});
+		// Metrics no longer stored in kv_store - Grafana queries MySQL tickets table directly
 	},
 	staffAction: (action, type, staffId, staffUsername, scope = 'public') => {
 		const a = action || 'unknown';
@@ -138,14 +133,12 @@ module.exports = {
 		const s = String(staffId || 'unknown');
 		const su = String(staffUsername || 'unknown');
 		staffActionsCounter.inc({ action: a, type: t, staff_id: s, staff_name: su, scope });
-		kv.add(`Metrics.total.staffActions.${a}.${t}.${s}`, 1).catch(()=>{});
-		// Store username alongside ID
-		kv.set(`Metrics.usernames.${s}`, su).catch(()=>{});
+		// Metrics no longer stored in kv_store - Grafana queries MySQL tickets table directly
 	},
 	ticketClaimed: (type, scope = 'public') => {
 		const t = type || 'unknown';
 		ticketsClaimedCounter.inc({ type: t, scope });
-		kv.add(`Metrics.total.ticketsClaimed.${t}`, 1).catch(()=>{});
+		// Metrics no longer stored in kv_store - Grafana queries MySQL tickets table directly
 	},
 	// Record per-ticket aggregates for duration and message totals
 	recordTicketAggregates: (type, server, durationSeconds, messageCount, userMessages, staffMessages, openedBy, openedByUsername, scope = 'public') => {
@@ -158,56 +151,62 @@ module.exports = {
 		if (dur > 0) ticketDurationSumCounter.inc({ type: t, server: s, scope }, dur);
 		ticketDurationCountCounter.inc({ type: t, server: s, scope }, 1);
 		if (msgs > 0) ticketMessagesTotalCounter.inc({ type: t, server: s, scope }, msgs);
-		kv.add(`Metrics.total.duration.sum.${t}.${s}`, dur).catch(()=>{});
-		kv.add(`Metrics.total.duration.count.${t}.${s}`, 1).catch(()=>{});
-		kv.add(`Metrics.total.messages.${t}.${s}`, msgs).catch(()=>{});
 		const um = Math.max(0, Math.floor(userMessages || 0));
 		const sm = Math.max(0, Math.floor(staffMessages || 0));
 		if (um > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: s, scope }, um);
 		if (sm > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: s, scope }, sm);
-		kv.add(`Metrics.total.messages.user.${t}.${s}`, um).catch(()=>{});
-		kv.add(`Metrics.total.messages.staff.${t}.${s}`, sm).catch(()=>{});
 		// Per-user aggregates
 		if (dur > 0) {
 			userTicketDurationSumCounter.inc({ opened_by: ob, type: t, server: s, scope }, dur);
-			kv.add(`Metrics.total.user.duration.sum.${ob}.${t}.${s}`, dur).catch(()=>{});
 		}
 		userTicketDurationCountCounter.inc({ opened_by: ob, type: t, server: s, scope }, 1);
-		kv.add(`Metrics.total.user.duration.count.${ob}.${t}.${s}`, 1).catch(()=>{});
 		if (msgs > 0) {
 			userTicketMessagesTotalCounter.inc({ opened_by: ob, type: t, server: s, scope }, msgs);
-			kv.add(`Metrics.total.user.messages.${ob}.${t}.${s}`, msgs).catch(()=>{});
 		}
-		// Store username alongside ID
-		kv.set(`Metrics.usernames.${ob}`, obu).catch(()=>{});
+		// Metrics no longer stored in kv_store - Grafana queries MySQL tickets table directly
+		// Duration and message data not used, so not stored
 	},
 	
 	// Helper function to get username for a Discord ID
+	// Usernames now come from tickets table - query MySQL directly
 	getUsername: async (discordId) => {
 		if (!discordId) return 'unknown';
 		try {
-			const username = await kv.get(`Metrics.usernames.${discordId}`);
-			return username || 'unknown';
+			// Query tickets table for username instead of kv_store
+			const [rows] = await kv.query(
+				'SELECT username FROM tickets WHERE user_id = ? AND username IS NOT NULL ORDER BY created_at DESC LIMIT 1',
+				[String(discordId)]
+			);
+			return rows[0]?.username || 'unknown';
 		} catch (_) {
 			return 'unknown';
 		}
 	},
 	
-	// Get all stored usernames
+	// Get all stored usernames - now from tickets table
 	getAllUsernames: async () => {
 		try {
-			const usernames = await kv.get('Metrics.usernames');
-			return usernames || {};
+			const [rows] = await kv.query(
+				'SELECT DISTINCT user_id, username FROM tickets WHERE username IS NOT NULL'
+			);
+			const usernames = {};
+			for (const row of rows) {
+				usernames[row.user_id] = row.username;
+			}
+			return usernames;
 		} catch (_) {
 			return {};
 		}
 	},
 	
-	// Update username for a Discord ID (useful when usernames change)
+	// Update username for a Discord ID (updates tickets table)
 	updateUsername: async (discordId, newUsername) => {
 		if (!discordId || !newUsername) return false;
 		try {
-			await kv.set(`Metrics.usernames.${discordId}`, String(newUsername));
+			await kv.query(
+				'UPDATE tickets SET username = ? WHERE user_id = ?',
+				[String(newUsername), String(discordId)]
+			);
 			return true;
 		} catch (_) {
 			return false;
@@ -215,61 +214,67 @@ module.exports = {
 	},
 	
 	// Get metrics data with usernames for better readability
+	// Now queries MySQL tickets table directly - no longer uses kv_store
 	getMetricsWithUsernames: async () => {
 		try {
-			const usernames = await kv.get('Metrics.usernames') || {};
-			const ticketsOpened = await kv.get('Metrics.total.ticketsOpened') || {};
-			const ticketsClosed = await kv.get('Metrics.total.ticketsClosed') || {};
-			const staffActions = await kv.get('Metrics.total.staffActions') || {};
+			// Query tickets table directly for all metrics
+			const [ticketsRows] = await kv.query(`
+				SELECT 
+					ticket_type,
+					server,
+					user_id,
+					username,
+					close_user_id,
+					close_user
+				FROM tickets
+				WHERE (close_time IS NOT NULL OR close_type IS NOT NULL OR transcript_url IS NOT NULL)
+			`);
 			
-			// Enhance data with usernames
-			const enhanced = {
-				ticketsOpened: {},
-				ticketsClosed: {},
-				staffActions: {},
-				usernames: usernames
+			const ticketsOpened = {};
+			const ticketsClosed = {};
+			const usernames = {};
+			
+			for (const row of ticketsRows) {
+				const type = row.ticket_type || 'unknown';
+				const server = row.server || 'none';
+				const userId = String(row.user_id || '');
+				const username = row.username || 'unknown';
+				const closedBy = String(row.close_user_id || row.close_user || '');
+				
+				// Collect usernames
+				if (userId) usernames[userId] = username;
+				if (closedBy) {
+					// Try to get username for closer from tickets table
+					const [closerRows] = await kv.query(
+						'SELECT username FROM tickets WHERE user_id = ? AND username IS NOT NULL ORDER BY created_at DESC LIMIT 1',
+						[closedBy]
+					);
+					if (closerRows[0]) usernames[closedBy] = closerRows[0].username;
+				}
+				
+				// Count opened
+				if (!ticketsOpened[type]) ticketsOpened[type] = {};
+				ticketsOpened[type][server] = (ticketsOpened[type][server] || 0) + 1;
+				
+				// Count closed
+				if (closedBy) {
+					if (!ticketsClosed[type]) ticketsClosed[type] = {};
+					ticketsClosed[type][closedBy] = (ticketsClosed[type][closedBy] || 0) + 1;
+				}
+			}
+			
+			return {
+				ticketsOpened,
+				ticketsClosed,
+				staffActions: {}, // Not tracked in tickets table
+				usernames
 			};
-			
-			// Add usernames to ticketsOpened data
-			for (const [type, servers] of Object.entries(ticketsOpened)) {
-				enhanced.ticketsOpened[type] = {};
-				for (const [server, count] of Object.entries(servers)) {
-					enhanced.ticketsOpened[type][server] = count;
-				}
-			}
-			
-			// Add usernames to ticketsClosed data
-			for (const [type, users] of Object.entries(ticketsClosed)) {
-				enhanced.ticketsClosed[type] = {};
-				for (const [userId, count] of Object.entries(users)) {
-					enhanced.ticketsClosed[type][userId] = {
-						count: count,
-						username: usernames[userId] || 'unknown'
-					};
-				}
-			}
-			
-			// Add usernames to staffActions data
-			for (const [action, types] of Object.entries(staffActions)) {
-				enhanced.staffActions[action] = {};
-				for (const [type, users] of Object.entries(types)) {
-					enhanced.staffActions[action][type] = {};
-					for (const [userId, count] of Object.entries(users)) {
-						enhanced.staffActions[action][type][userId] = {
-							count: count,
-							username: usernames[userId] || 'unknown'
-						};
-					}
-				}
-			}
-			
-			return enhanced;
 		} catch (_) {
 			return {};
 		}
 	},
 	
-	// Update usernames for existing users (useful for periodic updates)
+	// Update usernames for existing users (updates tickets table)
 	updateExistingUsernames: async (client) => {
 		try {
 			if (!client || !client.guilds) {
@@ -284,19 +289,24 @@ module.exports = {
 			}
 			
 			console.log('[Metrics] Updating usernames for existing users...');
-			const usernames = await kv.get('Metrics.usernames') || {};
-			let updated = 0;
 			
-			for (const [userId, oldUsername] of Object.entries(usernames)) {
+			// Get distinct user IDs from tickets table
+			const [userRows] = await kv.query(
+				'SELECT DISTINCT user_id FROM tickets WHERE user_id IS NOT NULL'
+			);
+			
+			let updated = 0;
+			for (const row of userRows) {
+				const userId = String(row.user_id);
 				try {
 					const member = staffGuild.members.cache.get(userId);
 					if (member && member.user) {
 						const newUsername = member.user.username || member.user.tag || 'unknown';
-						if (newUsername !== oldUsername) {
-							await kv.set(`Metrics.usernames.${userId}`, newUsername);
-							console.log(`[Metrics] Updated username for ${userId}: ${oldUsername} -> ${newUsername}`);
-							updated++;
-						}
+						await kv.query(
+							'UPDATE tickets SET username = ? WHERE user_id = ?',
+							[newUsername, userId]
+						);
+						updated++;
 					}
 				} catch (error) {
 					console.error(`[Metrics] Error updating username for ${userId}:`, error);
@@ -310,79 +320,56 @@ module.exports = {
 	},
 	
 	// Get a summary of metrics with usernames for reporting
+	// Now queries MySQL tickets table directly - no longer uses kv_store
 	getMetricsSummary: async () => {
 		try {
-			const usernames = await kv.get('Metrics.usernames') || {};
-			const ticketsOpened = await kv.get('Metrics.total.ticketsOpened') || {};
-			const ticketsClosed = await kv.get('Metrics.total.ticketsClosed') || {};
-			const staffActions = await kv.get('Metrics.total.staffActions') || {};
+			// Query tickets table for statistics
+			const [ticketsRows] = await kv.query(`
+				SELECT 
+					COUNT(*) as total_tickets,
+					COUNT(CASE WHEN close_time IS NOT NULL OR close_type IS NOT NULL OR transcript_url IS NOT NULL THEN 1 END) as closed_tickets,
+					COUNT(DISTINCT user_id) as unique_users,
+					COUNT(DISTINCT close_user_id) as unique_closers
+				FROM tickets
+			`);
 			
-			// Calculate totals
-			let totalTicketsOpened = 0;
-			let totalTicketsClosed = 0;
-			let totalStaffActions = 0;
+			const totals = ticketsRows[0] || {};
 			
-			// Count opened tickets
-			for (const [type, servers] of Object.entries(ticketsOpened)) {
-				for (const [server, count] of Object.entries(servers)) {
-					totalTicketsOpened += count || 0;
-				}
+			// Get top closers
+			const [closerRows] = await kv.query(`
+				SELECT 
+					close_user_id as user_id,
+					MAX(username) as username,
+					COUNT(*) as closed_count
+				FROM tickets
+				WHERE close_user_id IS NOT NULL
+				GROUP BY close_user_id
+				ORDER BY closed_count DESC
+				LIMIT 10
+			`);
+			
+			const topStaff = closerRows.map(row => ({
+				userId: String(row.user_id),
+				username: row.username || 'unknown',
+				totalActions: row.closed_count,
+				actions: { closeticket: row.closed_count }
+			}));
+			
+			// Get username map
+			const [usernameRows] = await kv.query(
+				'SELECT DISTINCT user_id, username FROM tickets WHERE username IS NOT NULL'
+			);
+			const usernames = {};
+			for (const row of usernameRows) {
+				usernames[String(row.user_id)] = row.username;
 			}
-			
-			// Count closed tickets
-			for (const [type, users] of Object.entries(ticketsClosed)) {
-				for (const [userId, count] of Object.entries(users)) {
-					totalTicketsClosed += count || 0;
-				}
-			}
-			
-			// Count staff actions
-			for (const [action, types] of Object.entries(staffActions)) {
-				for (const [type, users] of Object.entries(types)) {
-					for (const [userId, count] of Object.entries(users)) {
-						totalStaffActions += count || 0;
-					}
-				}
-			}
-			
-			// Get top performers
-			const staffPerformance = {};
-			for (const [action, types] of Object.entries(staffActions)) {
-				for (const [type, users] of Object.entries(types)) {
-					for (const [userId, count] of Object.entries(users)) {
-						if (!staffPerformance[userId]) {
-							staffPerformance[userId] = {
-								username: usernames[userId] || 'unknown',
-								totalActions: 0,
-								actions: {}
-							};
-						}
-						staffPerformance[userId].totalActions += count || 0;
-						if (!staffPerformance[userId].actions[action]) {
-							staffPerformance[userId].actions[action] = {};
-						}
-						staffPerformance[userId].actions[action][type] = count || 0;
-					}
-				}
-			}
-			
-			// Sort by total actions
-			const topStaff = Object.entries(staffPerformance)
-				.sort(([,a], [,b]) => b.totalActions - a.totalActions)
-				.slice(0, 10)
-				.map(([userId, data]) => ({
-					userId,
-					username: data.username,
-					totalActions: data.totalActions,
-					actions: data.actions
-				}));
 			
 			return {
-				totalTicketsOpened,
-				totalTicketsClosed,
-				totalStaffActions,
+				totalTicketsOpened: totals.total_tickets || 0,
+				totalTicketsClosed: totals.closed_tickets || 0,
+				totalStaffActions: totals.closed_tickets || 0, // Approximate from closed tickets
 				topStaff,
-				usernames: usernames
+				usernames
 			};
 		} catch (_) {
 			return {};
@@ -433,7 +420,9 @@ module.exports = {
 		}
 	},
 	
-	// Hydrate counters from persisted totals on startup to avoid resets breaking graphs
+	// Initialize Prometheus counters on startup
+	// Note: Metrics no longer persisted to kv_store - Grafana queries MySQL tickets table directly
+	// This function now just initializes counters to 0 for proper label initialization
 	initPersisted: async () => {
 		try {
 			// Get all available ticket types and servers from configuration
@@ -465,157 +454,8 @@ module.exports = {
 				ticketsClaimedCounter.inc({ type: ticketType }, 0);
 			}
 			
-			let opened = await kv.get('Metrics.total.ticketsOpened') || {};
-			for (const t of Object.keys(opened)) {
-				const byServer = opened[t] || {};
-				for (const s of Object.keys(byServer)) {
-					const v = byServer[s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketsOpenedCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			let userOpened = await kv.get('Metrics.total.user.ticketsOpened') || {};
-			for (const ob of Object.keys(userOpened)) {
-				const byType = userOpened[ob] || {};
-				for (const t of Object.keys(byType)) {
-					const byServer = byType[t] || {};
-					for (const s of Object.keys(byServer)) {
-						const v = byServer[s] || 0;
-						const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-						if (v > 0) userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: sl }, v);
-					}
-				}
-			}
-			let closed = await kv.get('Metrics.total.ticketsClosed') || {};
-			for (const t of Object.keys(closed)) {
-				const byCloser = closed[t] || {};
-				for (const cb of Object.keys(byCloser)) {
-					const v = byCloser[cb] || 0;
-					if (v > 0) {
-						// Get username for this user ID
-						const username = await kv.get(`Metrics.usernames.${cb}`) || 'unknown';
-						ticketsClosedCounter.inc({ type: t, closed_by: cb, closed_by_name: username }, v);
-					}
-				}
-			}
-			let actions = await kv.get('Metrics.total.staffActions') || {};
-			for (const a of Object.keys(actions)) {
-				const byType = actions[a] || {};
-				for (const t of Object.keys(byType)) {
-					const byStaff = byType[t] || {};
-					for (const s of Object.keys(byStaff)) {
-						const v = byStaff[s] || 0;
-						if (v > 0) {
-							// Get username for this staff ID
-							const username = await kv.get(`Metrics.usernames.${s}`) || 'unknown';
-							staffActionsCounter.inc({ action: a, type: t, staff_id: s, staff_name: username }, v);
-						}
-					}
-				}
-			}
-			let claimed = await kv.get('Metrics.total.ticketsClaimed') || {};
-			for (const t of Object.keys(claimed)) {
-				const v = claimed[t] || 0;
-				if (v > 0) ticketsClaimedCounter.inc({ type: t }, v);
-			}
-			// Duration and messages aggregates
-			let durSum = await kv.get('Metrics.total.duration.sum') || {};
-			for (const t of Object.keys(durSum)) {
-				for (const s of Object.keys(durSum[t] || {})) {
-					const v = durSum[t][s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketDurationSumCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			let durCount = await kv.get('Metrics.total.duration.count') || {};
-			for (const t of Object.keys(durCount)) {
-				for (const s of Object.keys(durCount[t] || {})) {
-					const v = durCount[t][s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketDurationCountCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			let msgsTotal = await kv.get('Metrics.total.messages') || {};
-			for (const t of Object.keys(msgsTotal)) {
-				for (const s of Object.keys(msgsTotal[t] || {})) {
-					const v = msgsTotal[t][s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketMessagesTotalCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			let userMsgs = await kv.get('Metrics.total.messages.user') || {};
-			for (const t of Object.keys(userMsgs)) {
-				for (const s of Object.keys(userMsgs[t] || {})) {
-					const v = userMsgs[t][s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketUserMessagesTotalCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			let staffMsgs = await kv.get('Metrics.total.messages.staff') || {};
-			for (const t of Object.keys(staffMsgs)) {
-				for (const s of Object.keys(staffMsgs[t] || {})) {
-					const v = staffMsgs[t][s] || 0;
-					const sl = (s && s.toLowerCase && s.toLowerCase() === 'unknown') ? 'none' : s;
-					if (v > 0) ticketStaffMessagesTotalCounter.inc({ type: t, server: sl }, v);
-				}
-			}
-			// If totals are empty (first run), rebuild from existing DB so counters are not zeroed on restart
-			const needRebuild = (Object.keys(opened).length === 0) && (Object.keys(closed).length === 0) && (Object.keys(actions).length === 0) && (Object.keys(claimed).length === 0);
-			if (needRebuild) {
-				const ps = await kv.get('PlayerStats');
-				const openedAgg = {};
-				const userOpenedAgg = {};
-				const closedAgg = {};
-				if (ps && typeof ps === 'object') {
-					for (const userId of Object.keys(ps)) {
-						const logs = ps[userId]?.ticketLogs || {};
-						for (const ticketId of Object.keys(logs)) {
-							const t = logs[ticketId] || {};
-							const type = (t.ticketType || 'unknown');
-							const server = (t.server || 'none');
-							openedAgg[type] = openedAgg[type] || {};
-							openedAgg[type][server] = (openedAgg[type][server] || 0) + 1;
-							userOpenedAgg[userId] = userOpenedAgg[userId] || {};
-							userOpenedAgg[userId][type] = userOpenedAgg[userId][type] || {};
-							userOpenedAgg[userId][type][server] = (userOpenedAgg[userId][type][server] || 0) + 1;
-							if (t.closeUserID || t.closeUser) {
-								const cb = String(t.closeUserID || t.closeUser || 'unknown');
-								const cbu = String(t.closeUserUsername || 'unknown'); // Assuming closeUserUsername is available
-								closedAgg[type] = closedAgg[type] || {};
-								closedAgg[type][cb] = (closedAgg[type][cb] || 0) + 1;
-							}
-						}
-					}
-				}
-				await kv.set('Metrics.total.ticketsOpened', openedAgg).catch(()=>{});
-				await kv.set('Metrics.total.user.ticketsOpened', userOpenedAgg).catch(()=>{});
-				await kv.set('Metrics.total.ticketsClosed', closedAgg).catch(()=>{});
-				// hydrate the counters
-				for (const t of Object.keys(openedAgg)) {
-					for (const s of Object.keys(openedAgg[t])) {
-						const v = openedAgg[t][s];
-						if (v > 0) ticketsOpenedCounter.inc({ type: t, server: s }, v);
-					}
-				}
-				for (const ob of Object.keys(userOpenedAgg)) {
-					for (const t of Object.keys(userOpenedAgg[ob] || {})) {
-						for (const s of Object.keys(userOpenedAgg[ob][t] || {})) {
-							const v = userOpenedAgg[ob][t][s] || 0;
-							if (v > 0) userTicketsOpenedCounter.inc({ opened_by: ob, type: t, server: s }, v);
-						}
-					}
-				}
-				for (const t of Object.keys(closedAgg)) {
-					for (const cb of Object.keys(closedAgg[t])) {
-						const v = closedAgg[t][cb];
-						if (v > 0) {
-							const username = await kv.get(`Metrics.usernames.${cb}`) || 'unknown';
-							ticketsClosedCounter.inc({ type: t, closed_by: cb, closed_by_name: username }, v);
-						}
-					}
-				}
-				// Staff actions/claims are optional to rebuild; skip to avoid heavy scans
-			}
+			// Metrics no longer persisted - counters start at 0 on each restart
+			// Grafana queries MySQL tickets table directly for historical metrics
 		} catch (_) {}
 	},
 	
@@ -744,20 +584,8 @@ module.exports = {
 				ticketsClaimedCounter.inc({ type: ticketType }, 0);
 			}
 			
-			// Store usernames for all staff members
-			console.log('[Metrics] Storing usernames for staff members...');
-			for (const staffId of allStaffUserIds) {
-				try {
-					const member = staffGuild.members.cache.get(staffId);
-					if (member && member.user) {
-						const username = member.user.username || member.user.tag || 'unknown';
-						await kv.set(`Metrics.usernames.${staffId}`, username);
-						console.log(`[Metrics] Stored username for ${staffId}: ${username}`);
-					}
-				} catch (error) {
-					console.error(`[Metrics] Error storing username for ${staffId}:`, error);
-				}
-			}
+			// Usernames are now stored in tickets table - no need to store separately
+			console.log('[Metrics] Staff usernames will be updated from tickets table as needed');
 			
 			console.log(`[Metrics] Staff metrics initialization complete`);
 		} catch (error) {
@@ -766,100 +594,11 @@ module.exports = {
 	},
 	
 	// Clean up incorrect role IDs from metrics database and replace with actual user IDs
+	// Note: This function is deprecated since metrics are no longer stored in kv_store
+	// Metrics now come directly from MySQL tickets table
 	cleanupRoleIds: async (client) => {
-		try {
-			if (!client || !client.guilds) {
-				console.log('[Metrics] Client not ready, cannot cleanup role IDs');
-				return;
-			}
-			
-			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
-			if (!staffGuild) {
-				console.log('[Metrics] Staff guild not found, cannot cleanup role IDs');
-				return;
-			}
-			
-			console.log('[Metrics] Starting cleanup of incorrect role IDs from metrics database...');
-			
-			// Get all access role IDs from question files
-			const handlerRaw = require("../content/handler/options.json");
-			const allTicketTypes = Object.keys(handlerRaw.options);
-			const roleIdsToClean = new Set();
-			
-			for (const ticketType of allTicketTypes) {
-				try {
-					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
-					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
-						questionFile["access-role-id"].forEach(roleId => {
-							if (roleId) roleIdsToClean.add(roleId);
-						});
-					}
-				} catch (_) {}
-			}
-			
-			console.log(`[Metrics] Found ${roleIdsToClean.size} role IDs to clean up`);
-			
-			// Clean up ticketsClosedCounter - remove role IDs and add actual user IDs
-			let cleaned = 0;
-			for (const ticketType of allTicketTypes) {
-				for (const roleId of roleIdsToClean) {
-					// Check if this role ID exists in the database
-					const existingValue = await kv.get(`Metrics.total.ticketsClosed.${ticketType}.${roleId}`);
-					if (existingValue && existingValue > 0) {
-						console.log(`[Metrics] Cleaning up ticketsClosed for ${ticketType} - role ${roleId} (value: ${existingValue})`);
-						
-						// Get actual user IDs from this role
-						const role = staffGuild.roles.cache.get(roleId);
-						if (role && role.members && role.members.size > 0) {
-							// Distribute the value among actual users (simple approach: give to first user)
-							const firstUserId = role.members.firstKey();
-							if (firstUserId) {
-								await kv.set(`Metrics.total.ticketsClosed.${ticketType}.${firstUserId}`, existingValue);
-								console.log(`[Metrics] Moved ${existingValue} closed tickets from role ${roleId} to user ${firstUserId}`);
-							}
-						}
-						
-						// Remove the role ID entry
-						await kv.delete(`Metrics.total.ticketsClosed.${ticketType}.${roleId}`);
-						cleaned++;
-					}
-				}
-			}
-			
-			// Clean up staffActionsCounter - remove role IDs and add actual user IDs
-			for (const action of ['openticket', 'closeticket', 'moveticket', 'claimticket']) {
-				for (const ticketType of allTicketTypes) {
-					for (const roleId of roleIdsToClean) {
-						const existingValue = await kv.get(`Metrics.total.staffActions.${action}.${ticketType}.${roleId}`);
-						if (existingValue && existingValue > 0) {
-							console.log(`[Metrics] Cleaning up staffActions for ${action} ${ticketType} - role ${roleId} (value: ${existingValue})`);
-							
-							// Get actual user IDs from this role
-							const role = staffGuild.roles.cache.get(roleId);
-							if (role && role.members && role.members.size > 0) {
-								// Distribute the value among actual users (simple approach: give to first user)
-								const firstUserId = role.members.firstKey();
-								if (firstUserId) {
-									await kv.set(`Metrics.total.staffActions.${action}.${ticketType}.${firstUserId}`, existingValue);
-									console.log(`[Metrics] Moved ${existingValue} ${action} actions from role ${roleId} to user ${firstUserId}`);
-								}
-							}
-							
-							// Remove the role ID entry
-							await kv.delete(`Metrics.total.staffActions.${action}.${ticketType}.${roleId}`);
-							cleaned++;
-						}
-					}
-				}
-			}
-			
-			console.log(`[Metrics] Cleanup complete! Cleaned up ${cleaned} incorrect role ID entries`);
-			console.log('[Metrics] Note: Role ID values were distributed to the first user in each role');
-			console.log('[Metrics] You may want to manually adjust these values if needed');
-			
-		} catch (error) {
-			console.error(`[Metrics] Error during role ID cleanup:`, error);
-		}
+		console.log('[Metrics] cleanupRoleIds() is deprecated - metrics come from MySQL tickets table');
+		// All metrics now come from MySQL tickets table which doesn't have role ID issues
 	},
 };
 

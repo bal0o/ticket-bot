@@ -433,28 +433,17 @@ try {
 
 	}
 
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketUniqueID`, formattedTicketNumber)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.userID`, user.id)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.username`, user.username)
-	if (SteamID && SteamID.toString().startsWith('7656119')) {
-		await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.steamId`, String(SteamID))
-	}
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.responses`, responses)
 	const createdAt = Math.floor(Date.now() / 1000);
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, createdAt)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketType`, ticketType)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.globalTicketNumber`, formattedTicketNumber)
 	// Save parsed server for reporting
 	let server = null;
 	try {
 		const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
 		if (m && m[1]) {
 			server = m[1];
-			await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.server`, server);
 		}
 	} catch (_) {}
 	
-	// Also write to MySQL tickets table if MySQL adapter is available
+	// Write to MySQL tickets table (PlayerStats removed - all data in MySQL now)
 	try {
 		if (typeof db.writeTicket === 'function') {
 			console.log('[backbone] Writing ticket to MySQL', { 

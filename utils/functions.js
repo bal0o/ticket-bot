@@ -199,31 +199,28 @@ module.exports.CombineActionCountsUser = async (userid, actiontype) => {
 }
 
 module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL = null) => {
-
-	// Batch write close metadata in a single object set to reduce write amplification
+	// Update MySQL tickets table instead of PlayerStats (PlayerStats removed)
 	try {
-		const baseKey = `PlayerStats.${userid}.ticketLogs.${ticketUniqueID}`;
-		const existing = (await db.get(baseKey)) || {};
-		const updated = {
-			...existing,
-			closeType: closeType,
-			closeUser: closeUser,
-			closeUserID: closeUserID,
-			closeTime: closeTime,
-			closeReason: closeReason
-		};
-		if (transcriptURL) updated.transcriptURL = transcriptURL;
-		await db.set(baseKey, updated);
-	} catch (_) {
-		// Fallback to per-field sets if needed
-		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeType`, closeType)
-		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUser`, closeUser)
-		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeUserID`, closeUserID)
-		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeTime`, closeTime)
-		await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.closeReason`, closeReason)
-		if (transcriptURL) {
-			await db.set(`PlayerStats.${userid}.ticketLogs.${ticketUniqueID}.transcriptURL`, transcriptURL)
+		if (typeof db.query === 'function') {
+			await db.query(
+				`UPDATE tickets SET 
+					close_type = ?, 
+					close_user = ?, 
+					close_user_id = ?, 
+					close_time = ?, 
+					close_reason = ?,
+					transcript_url = COALESCE(?, transcript_url)
+				WHERE user_id = ? AND ticket_id = ?`,
+				[closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL, String(userid), String(ticketUniqueID)]
+			);
 		}
+	} catch (err) {
+		console.error('[functions] Error updating ticket close data in MySQL:', {
+			message: err.message,
+			userId: userid,
+			ticketId: ticketUniqueID
+		});
+		// Don't throw - ticket closing should continue even if MySQL update fails
 	}
 }
 
@@ -1006,9 +1003,19 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             // Write ticket data to MySQL
             try {
                 const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
-                const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
-                const serverMatch = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-                const server = serverMatch && serverMatch[1] ? serverMatch[1] : null;
+                // Get responses and server from MySQL tickets table instead of PlayerStats
+                let server = null;
+                if (typeof db.query === 'function') {
+                    const [rows] = await db.query(
+                        'SELECT responses, server FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                        [String(DiscordID), String(globalTicketNumber)]
+                    );
+                    if (rows && rows[0]) {
+                        const responsesText = rows[0].responses || '';
+                        const serverMatch = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+                        server = (serverMatch && serverMatch[1]) ? serverMatch[1] : (rows[0].server || null);
+                    }
+                }
                 
                 const ticketRow = {
                     userId: String(DiscordID),
@@ -1049,10 +1056,19 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             const footerParts = embed.footer.text.split("|");
             let ticketType = footerParts[1]?.trim() || 'Unknown';
             if (ticketType.includes('#')) ticketType = ticketType.split('#')[0].trim();
-            const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
+            // Get responses and server from MySQL tickets table instead of PlayerStats
             let server = 'none';
-            const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-            if (m && m[1]) server = m[1];
+            if (typeof db.query === 'function') {
+                const [rows] = await db.query(
+                    'SELECT responses, server FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                    [String(DiscordID), String(globalTicketNumber)]
+                );
+                if (rows && rows[0]) {
+                    const responsesText = rows[0].responses || '';
+                    const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
+                    server = (m && m[1]) ? m[1] : (rows[0].server || 'none');
+                }
+            }
             const openedAt = embed.timestamp ? new Date(embed.timestamp).getTime() : null;
             const durationSec = openedAt ? Math.floor((Date.now() - openedAt) / 1000) : 0;
             let messageCount = 0;

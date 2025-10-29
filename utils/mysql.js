@@ -422,7 +422,8 @@ class MySQLAdapter {
             
             const sql = `
                 SELECT user_id, ticket_id, ticket_type, server, created_at,
-                       close_user, close_user_id, close_reason, transcript_url
+                       close_user, close_user_id, close_reason, transcript_url,
+                       close_time, global_ticket_number
                 FROM tickets
                 WHERE ${where.join(' AND ')}
                 ORDER BY created_at DESC
@@ -442,9 +443,11 @@ class MySQLAdapter {
                 return {
                     userId: String(row.user_id || ''),
                     ticketId: String(row.ticket_id || ''),
+                    globalTicketNumber: row.global_ticket_number || row.ticket_id || '',
                     ticketType: row.ticket_type || 'Unknown',
                     server: row.server || null,
                     createdAt: row.created_at || null,
+                    closeTime: row.close_time || null,
                     closeUser: row.close_user || null,
                     closeUserID: row.close_user_id || null,
                     closeReason: row.close_reason || null,
@@ -658,6 +661,16 @@ class MySQLAdapter {
                     transcriptFilename: filename
                 };
             });
+        } finally {
+            conn.release();
+        }
+    }
+    
+    // Public query method for direct SQL queries
+    async query(sql, params = []) {
+        const conn = await this.pool.getConnection();
+        try {
+            return await conn.query(sql, params);
         } finally {
             conn.release();
         }

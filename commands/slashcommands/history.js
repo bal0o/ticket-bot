@@ -34,13 +34,25 @@ module.exports = {
                 return interaction.editReply({ content: "Could not find a user with that ID. Please provide a valid Discord User ID." });
             }
 
-            const userTickets = await db.get(`PlayerStats.${user.id}.ticketLogs`);
+            // Get tickets from MySQL instead of PlayerStats
+            let ticketArray = [];
+            if (typeof db.getUserTickets === 'function') {
+                const tickets = await db.getUserTickets(userId, { closedOnly: false, limit: 1000 });
+                ticketArray = tickets.map(t => ({
+                    globalTicketNumber: t.globalTicketNumber || t.ticketId || 'N/A',
+                    ticketType: t.ticketType || 'N/A',
+                    createdAt: t.createdAt || null,
+                    closeTime: t.closeTime || (t.closeUser ? Date.now() / 1000 : null),
+                    closeUser: t.closeUser || 'N/A',
+                    closeReason: t.closeReason || 'N/A',
+                    transcriptURL: t.transcriptFilename ? `/transcripts/${t.transcriptFilename}` : null
+                })).reverse(); // Most recent first
+            }
 
-            if (!userTickets) {
+            if (!ticketArray || ticketArray.length === 0) {
                 return interaction.editReply({ content: "This user has no ticket history." });
             }
 
-            const ticketArray = Object.values(userTickets).reverse();
             const embeds = [];
 
             for (const [index, ticket] of ticketArray.entries()) {
@@ -51,7 +63,7 @@ module.exports = {
                     .addFields(
                         { name: "Ticket Type", value: ticket.ticketType || 'N/A', inline: true },
                         { name: "Opened At", value: ticket.createdAt ? `<t:${Math.floor(ticket.createdAt)}:f>` : 'N/A', inline: true },
-                        { name: "Closed At", value: ticket.closeTime ? `<t:${Math.floor(ticket.closeTime / 1000)}:f>` : 'N/A', inline: true },
+                        { name: "Closed At", value: ticket.closeTime ? `<t:${Math.floor(ticket.closeTime)}:f>` : 'N/A', inline: true },
                         { name: "Closed By", value: ticket.closeUser || 'N/A', inline: true },
                         { name: "Close Reason", value: ticket.closeReason || 'N/A', inline: false }
                     );

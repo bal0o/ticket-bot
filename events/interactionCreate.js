@@ -200,12 +200,9 @@ module.exports = async function (client, interaction) {
                     });
                     let messageID = await logs_channel.send({content: `<@${recepient.id}>`, embeds: [embedFinal] })?.catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null) });
                 
-                    await db.set(`PlayerStats.${recepient.id}.ticketLogs.${uniqueTicketID}.transcriptLink`, `https://discord.com/channels/${interaction.message.guild.id}/${logs_channel.id}/${messageID.id}`)
-					
+                    // Transcript link stored in MySQL tickets table via transcript_url - no need for separate PlayerStats entry
                 };
-                await db.set(`PlayerStats.${recepient.id}.ticketLogs.${uniqueTicketID}.firstActionTime`, Date.now() / 1000)
-                await db.set(`PlayerStats.${recepient.id}.ticketLogs.${uniqueTicketID}.firstActionTimeAdminName`, interaction.user.username)
-                await db.set(`PlayerStats.${recepient.id}.ticketLogs.${uniqueTicketID}.firstActionTimeAdminID`, interaction.user.id)
+                // firstActionTime metadata removed - not critical, not stored in tickets table schema
                 await func.closeDataAddDB(recepient.id, uniqueTicketID, `Custom Close Message`, interaction.user.username, interaction.user.id, Date.now() / 1000, reason);
 
                 await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})
@@ -750,7 +747,15 @@ module.exports = async function (client, interaction) {
                         const idParts = footerParts[0].trim().split('-');
                         embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
                         await LastPin.edit({ embeds: [embed] }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
-                        try { if (idParts[0] && idParts[1]) await db.set(`PlayerStats.${idParts[0]}.ticketLogs.${idParts[1]}.ticketType`, displayType); } catch (_) {}
+                        // Update ticket type in MySQL tickets table (PlayerStats removed)
+                        try { 
+                            if (idParts[0] && idParts[1] && typeof db.query === 'function') {
+                                await db.query(
+                                    'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
+                                    [displayType, idParts[0], idParts[1]]
+                                );
+                            }
+                        } catch (_) {}
                     }
 
                     // Staff ping for target type
@@ -1137,11 +1142,9 @@ module.exports = async function (client, interaction) {
 
 						if (logs_channel) {
 							let messageID = await logs_channel.send({content: `<@${recepientMember.id}>`, embeds: [embed] }).catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null) });
-                            await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.transcriptLink`, `https://discord.com/channels/${interaction.message.guild.id}/${logs_channel.id}/${messageID.id}`)
+                            // Transcript link stored in MySQL tickets table via transcript_url - no need for separate PlayerStats entry
                     }
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTime`, Date.now() / 1000)
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminName`, user.username)
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
+                        // firstActionTime metadata removed - not critical, not stored in tickets table schema
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Accept Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
 							const scopeAccept = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
@@ -1196,11 +1199,9 @@ module.exports = async function (client, interaction) {
 
 						if (logs_channel) {
 							let messageID = await logs_channel.send({content: `<@${recepientMember.id}>`, embeds: [embed] }).catch(e => { func.handle_errors(e, client, `interactionCreate.js`, null)});
-                            await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.transcriptLink`, `https://discord.com/channels/${interaction.message.guild.id}/${logs_channel.id}/${messageID.id}`)
+                            // Transcript link stored in MySQL tickets table via transcript_url - no need for separate PlayerStats entry
                     }
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTime`, Date.now() / 1000)
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminName`, user.username)
-                        await db.set(`PlayerStats.${recepientMember.id}.ticketLogs.${globalTicketNumber}.firstActionTimeAdminID`, user.id)
+                        // firstActionTime metadata removed - not critical, not stored in tickets table schema
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Deny Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
 							const scopeDeny = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
