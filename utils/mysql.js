@@ -136,6 +136,51 @@ class MySQLAdapter {
         }
     }
     
+    async add(key, value = 0) {
+        // Add/increment numeric value (compatible with quick.db add method)
+        const conn = await this.pool.getConnection();
+        try {
+            const numericValue = Number(value) || 0;
+            
+            // Get current value
+            const [rows] = await conn.query(
+                'SELECT value FROM kv_store WHERE `key` = ?',
+                [key]
+            );
+            
+            let currentValue = 0;
+            if (rows.length > 0) {
+                try {
+                    const parsed = JSON.parse(rows[0].value);
+                    currentValue = typeof parsed === 'number' ? parsed : 0;
+                } catch {
+                    // If not JSON, try to parse as number
+                    currentValue = Number(rows[0].value) || 0;
+                }
+            }
+            
+            const newValue = currentValue + numericValue;
+            const jsonValue = JSON.stringify(newValue);
+            
+            await conn.query(
+                'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
+                'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
+                [key, jsonValue, jsonValue]
+            );
+            
+            return newValue;
+        } catch (err) {
+            console.error('[mysql] add() error:', {
+                key,
+                message: err.message,
+                code: err.code
+            });
+            throw new Error(`MySQL query failed: ${err.message}`);
+        } finally {
+            conn.release();
+        }
+    }
+    
     async all() {
         const conn = await this.pool.getConnection();
         try {
