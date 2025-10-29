@@ -93,6 +93,13 @@ class MySQLAdapter {
             } catch {
                 return value;
             }
+        } catch (err) {
+            console.error('[mysql] get() error:', {
+                key,
+                message: err.message,
+                code: err.code
+            });
+            throw new Error(`MySQL query failed: ${err.message}. Please ensure MySQL is configured and running.`);
         } finally {
             conn.release();
         }
@@ -108,6 +115,13 @@ class MySQLAdapter {
                 'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
                 [key, jsonValue, jsonValue]
             );
+        } catch (err) {
+            console.error('[mysql] set() error:', {
+                key,
+                message: err.message,
+                code: err.code
+            });
+            throw new Error(`MySQL query failed: ${err.message}. Please ensure MySQL is configured and running.`);
         } finally {
             conn.release();
         }
