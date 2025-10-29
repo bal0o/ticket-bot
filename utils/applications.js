@@ -42,14 +42,14 @@ async function loadApplication(appId) {
         
         // Get history
         const [historyRows] = await conn.query(
-            'SELECT stage, changed_at as at, changed_by as by, note ' +
+            'SELECT stage, changed_at as `at`, changed_by as `by`, note ' +
             'FROM application_history WHERE application_id = ? ORDER BY changed_at ASC',
             [appId]
         );
         
         // Get comments
         const [commentRows] = await conn.query(
-            'SELECT created_by as by, created_at as at, comment ' +
+            'SELECT created_by as `by`, created_at as `at`, comment ' +
             'FROM application_comments WHERE application_id = ? ORDER BY created_at ASC',
             [appId]
         );
