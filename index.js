@@ -46,6 +46,7 @@ client.login(config.tokens.bot_token).then(() => {
 	try {
 		const { createDB } = require('./utils/mysql');
 		const db = createDB();
+		const applications = require('./utils/applications');
 		const cfg = require('./config/config.json');
 		const guildId = cfg.channel_ids.public_guild_id; // Use public guild for interview channels
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;
@@ -55,44 +56,23 @@ client.login(config.tokens.bot_token).then(() => {
         debugLog(`[Interview Scheduler] Initialized with guildId: ${guildId}, adminRoleId: ${adminRoleId}, interviewCategory: ${interviewCategory}, duration: ${interviewDuration} minutes`);
 		async function runScheduler() {
 			try {
-				const jobs = await db.get('ApplicationSchedules') || {};
+				const schedules = await applications.listSchedules();
+				const entries = Object.entries(schedules);
 				const now = Date.now();
-                debugLog(`[Interview Scheduler] Checking ${Object.keys(jobs).length} jobs at ${new Date(now).toISOString()}`);
-				
-				// Immediate cleanup of completed/invalid jobs to avoid log spam
-				let mutated = false;
-				for (const jobId of Object.keys(jobs)) {
-					const job = jobs[jobId];
-					if (!job) { delete jobs[jobId]; mutated = true; continue; }
-					if (job.status && job.status !== 'scheduled') {
-						// Remove jobs that are done/skipped immediately; keep 'error' for visibility
-						if (job.status === 'done' || job.status === 'skipped') {
-							delete jobs[jobId];
-							mutated = true;
-						}
-					}
-				}
-				if (mutated) await db.set('ApplicationSchedules', jobs);
-				
-				for (const jobId of Object.keys(jobs)) {
-					const job = jobs[jobId];
-					if (!job || job.status !== 'scheduled') {
-						continue;
-					}
-					
+				debugLog(`[Interview Scheduler] Checking ${entries.length} jobs at ${new Date(now).toISOString()}`);
+				for (const [jobId, job] of entries) {
+					if (!job || job.status !== 'scheduled') continue;
 					debugLog(`[Interview Scheduler] Job ${jobId} scheduled for ${new Date(job.at).toISOString()}, current time: ${new Date(now).toISOString()}`);
-					
 					if (now >= job.at) {
 						// Create voice channel
 						try {
 							debugLog(`[Interview Scheduler] Processing job ${jobId} for app ${job.appId}`);
 							debugLog(`[Interview Scheduler] Job scheduled for: ${new Date(job.at).toISOString()} (${new Date(job.at).toLocaleString()})`);
 							debugLog(`[Interview Scheduler] Current time: ${new Date().toISOString()} (${new Date().toLocaleString()})`);
-							const appRec = await db.get(`Applications.${job.appId}`);
+							const appRec = await applications.getApplication(job.appId);
 							if (!appRec) { 
-								debugLog(`[Interview Scheduler] Application ${job.appId} not found, removing job ${jobId}`);
-								delete jobs[jobId];
-								await db.set('ApplicationSchedules', jobs);
+								debugLog(`[Interview Scheduler] Application ${job.appId} not found, marking job ${jobId} error`);
+								await applications.completeSchedule(jobId, 'error', { reason: 'application_not_found' });
 								continue; 
 							}
 							debugLog(`[Interview Scheduler] Looking for guild ${guildId} in ${client.guilds.cache.size} available guilds`);
@@ -102,9 +82,7 @@ client.login(config.tokens.bot_token).then(() => {
 							if (!guild) { 
 								debugLog(`[Interview Scheduler] Guild ${guildId} not found, erroring job ${jobId}`);
 								debugLog(`[Interview Scheduler] Guild cache keys:`, Array.from(client.guilds.cache.keys()));
-								job.status = 'error'; 
-								job.error = `Guild ${guildId} not found in bot's guild cache`;
-								await db.set(`ApplicationSchedules.${jobId}`, job); 
+								await applications.completeSchedule(jobId, 'error', { reason: 'guild_not_found', guildId });
 								continue; 
 							}
 							
@@ -158,9 +136,8 @@ client.login(config.tokens.bot_token).then(() => {
                             debugLog(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId} with options:`, JSON.stringify(createOpts, null, 2));
 							const vc = await guild.channels.create(name, createOpts);
 							debugLog(`[Interview Scheduler] Successfully created voice channel ${vc.id} for job ${jobId}`);
-							// Remove job immediately to prevent repeated logs
-							delete jobs[jobId];
-							await db.set('ApplicationSchedules', jobs);
+							// Mark job as done in MySQL schedules
+							await applications.completeSchedule(jobId, 'done', { channelId: vc.id });
 							
 							// Schedule auto-cleanup for the voice channel
 							const cleanupTime = Date.now() + (interviewDuration * 60 * 1000); // Convert minutes to milliseconds
@@ -225,9 +202,7 @@ client.login(config.tokens.bot_token).then(() => {
 								errorMessage = 'Unknown Guild: The specified guild does not exist';
 							}
 							
-							job.status = 'error'; 
-							job.error = errorMessage;
-							await db.set(`ApplicationSchedules.${jobId}`, job);
+							await applications.completeSchedule(jobId, 'error', { message: errorMessage });
 						}
 					}
 				}

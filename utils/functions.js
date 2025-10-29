@@ -697,29 +697,57 @@ try {
 module.exports.updateTicketStatus = async function(client) {
     try {
         const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
-        if (!staffGuild) return;
+        if (!staffGuild) {
+            console.warn('[updateTicketStatus] Staff guild not found');
+            return;
+        }
+
+        // Fetch channels to ensure cache is up to date
+        try {
+            await staffGuild.channels.fetch();
+        } catch (fetchError) {
+            console.warn('[updateTicketStatus] Could not fetch channels:', fetchError.message);
+            // Continue with cached channels as fallback
+        }
 
         // Get all channels in the staff guild
         const channels = staffGuild.channels.cache;
         
-        // Count channels that have a topic (indicating they are ticket channels)
-        const ticketCount = channels.filter(channel => 
-            channel.type === 'GUILD_TEXT' && 
-            channel.topic && 
-            channel.topic.match(/^\d{17,19}$/) // Check if topic is a Discord ID
-        ).size;
+        // Count channels that have a topic matching Discord ID pattern (indicating they are ticket channels)
+        const ticketCount = channels.filter(channel => {
+            // Discord.js v13 uses string constants
+            const isTextChannel = channel.type === 'GUILD_TEXT' || channel.type === 0;
+            const hasTicketTopic = channel.topic && /^\d{17,19}$/.test(channel.topic);
+            return isTextChannel && hasTicketTopic;
+        }).size;
 
-        // Set metrics gauge
-        try { metrics.setOpenTickets(ticketCount); } catch (_) {}
+        console.log(`[updateTicketStatus] Found ${ticketCount} open ticket channels`);
+
+        // Update Prometheus metrics gauge (if available)
+        try { 
+            metrics.setOpenTickets(ticketCount); 
+        } catch (metricsError) {
+            // Metrics not critical - continue even if it fails
+        }
 
         // Get activity configuration from config
-        const activityConfig = client.config.activityInfo;
+        const activityConfig = client.config?.activityInfo;
+        if (!activityConfig || !activityConfig.messages || activityConfig.messages.length === 0) {
+            console.warn('[updateTicketStatus] Activity config not found or invalid, skipping status update');
+            return;
+        }
+
         const activityType = activityConfig.type || 'WATCHING';
         
         // If there's only one message, use it directly
         if (activityConfig.messages.length === 1) {
             const message = activityConfig.messages[0].replace(/{count}/g, ticketCount);
-            await client.user.setActivity(message, { type: activityType });
+            try {
+                await client.user.setActivity(message, { type: activityType });
+                console.log(`[updateTicketStatus] Status updated: "${message}"`);
+            } catch (activityError) {
+                console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
+            }
             return;
         }
 
@@ -730,7 +758,12 @@ module.exports.updateTicketStatus = async function(client) {
 
         // Get current message and replace {count} with actual count
         const currentMessage = activityConfig.messages[client.currentStatusIndex].replace(/{count}/g, ticketCount);
-        await client.user.setActivity(currentMessage, { type: activityType });
+        try {
+            await client.user.setActivity(currentMessage, { type: activityType });
+            console.log(`[updateTicketStatus] Status updated: "${currentMessage}"`);
+        } catch (activityError) {
+            console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
+        }
 
         // Move to next message
         client.currentStatusIndex = (client.currentStatusIndex + 1) % activityConfig.messages.length;

@@ -15,7 +15,7 @@
     <div class="nav-right"><a class="btn" href="/logout">Logout</a></div>
   </header>
   <main class="container">
-    <h1>Interview Management: <%= app.username %></h1>
+    <h1>Interview Management: <%= app.displayUsername || app.username %></h1>
     <p class="muted">Application Type: <%= app.type %> • Current Stage: <%= app.stage %></p>
     
          <section>
@@ -36,7 +36,7 @@
               <div class="interview-info">
                 <h4>Interview #<%= schedule.jobId %></h4>
                                  <p><strong>Date & Time:</strong> <span class="dt" data-iso-time="<%= schedule.isoTime %>"><%= schedule.localTime %></span> (Your Local Time)</p>
-                <p><strong>Staff Member:</strong> <code><%= schedule.staffId %></code></p>
+                <p><strong>Staff Member:</strong> <%= (userNames && userNames[String(schedule.staffId)]) ? userNames[String(schedule.staffId)] : ('<code>' + schedule.staffId + '</code>') %></p>
                 <p><strong>Status:</strong> 
                   <span class="status-badge <%= schedule.status %>">
                     <%= schedule.status.charAt(0).toUpperCase() + schedule.status.slice(1) %>
