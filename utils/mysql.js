@@ -79,20 +79,62 @@ class MySQLAdapter {
     async get(key) {
         const conn = await this.pool.getConnection();
         try {
-            const [rows] = await conn.query(
+            // First try exact match
+            const [exactRows] = await conn.query(
                 'SELECT value FROM kv_store WHERE `key` = ?',
                 [key]
             );
             
-            if (rows.length === 0) return null;
-            const value = rows[0].value;
-            
-            // Parse JSON if it's a string
-            try {
-                return JSON.parse(value);
-            } catch {
-                return value;
+            if (exactRows.length > 0) {
+                const value = exactRows[0].value;
+                // Parse JSON if it's a string
+                try {
+                    return JSON.parse(value);
+                } catch {
+                    return value;
+                }
             }
+            
+            // If no exact match, check for nested keys (quick.db compatibility)
+            // e.g., if key is "Metrics.total.ticketsOpened", look for keys starting with "Metrics.total.ticketsOpened."
+            const [nestedRows] = await conn.query(
+                'SELECT `key`, value FROM kv_store WHERE `key` LIKE ? ORDER BY `key`',
+                [`${key}.%`]
+            );
+            
+            if (nestedRows.length === 0) return null;
+            
+            // Reconstruct nested object from individual keys
+            // e.g., "Metrics.total.ticketsOpened.bugreport.eu1" = 5
+            // becomes { bugreport: { eu1: 5 } }
+            const result = {};
+            for (const row of nestedRows) {
+                const fullKey = row.key;
+                // Remove the prefix and split by dots to get the nested path
+                const suffix = fullKey.substring(key.length + 1); // +1 to skip the dot
+                const parts = suffix.split('.');
+                
+                let current = result;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    const part = parts[i];
+                    if (!current[part]) {
+                        current[part] = {};
+                    }
+                    current = current[part];
+                }
+                
+                // Set the final value
+                const finalKey = parts[parts.length - 1];
+                let value = row.value;
+                try {
+                    value = JSON.parse(value);
+                } catch {
+                    // Keep as-is if not JSON
+                }
+                current[finalKey] = value;
+            }
+            
+            return result;
         } catch (err) {
             console.error('[mysql] get() error:', {
                 key,
