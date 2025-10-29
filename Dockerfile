@@ -11,7 +11,8 @@ RUN apk add --no-cache \
     g++ \
     sqlite \
     curl \
-    mariadb-connector-c-dev
+    mariadb-connector-c-dev \
+    su-exec
 
 # Copy package files
 COPY package*.json ./
@@ -22,15 +23,19 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
+# Copy and set up entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Create necessary directories
 RUN mkdir -p /app/config /app/content /app/transcripts /app/data
 
-# Set proper permissions
+# Set proper permissions (entrypoint needs to be root for chown, then switch to node)
+RUN chown root:root /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 RUN chown -R node:node /app
-USER node
 
 # Expose port for web interface (web image only)
 EXPOSE 3050
 
-# Start mode decided via RUN_MODE env ('bot' | 'web' | 'all')
-CMD ["sh", "-lc", "if [ \"$RUN_MODE\" = web ]; then node web/server.js; else node index.js; fi"]
+# Use entrypoint script for startup logic
+ENTRYPOINT ["/docker-entrypoint.sh"]

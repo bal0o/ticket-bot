@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     environment:
       - RUN_MODE=bot
+      # Set RUN_MIGRATION=true on first deployment to run migration
+      # - RUN_MIGRATION=true
     volumes:
       - ./config:/app/config:rw
       - ./content:/app/content:rw
@@ -24,6 +26,8 @@ services:
     restart: unless-stopped
     environment:
       - RUN_MODE=web
+      # Set RUN_MIGRATION=true on first deployment to run migration
+      # - RUN_MIGRATION=true
     ports:
       - "3050:3050"
     volumes:
