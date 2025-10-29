@@ -78,7 +78,7 @@
     <tbody>
       <% tickets.forEach(t => { %>
         <tr>
-          <td title="<%= t.userId %>"><%= t.username || t.userId %></td>
+          <td title="User ID: <%= t.userId %>"><%= t.username ? t.username + ' (' + t.userId + ')' : t.userId %></td>
           <td><%= t.ticketId %></td>
           <td><%= t.ticketType %></td>
           <td><%= t.server || '' %></td>

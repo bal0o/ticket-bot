@@ -415,7 +415,7 @@ class MySQLAdapter {
             where.push('(close_time IS NOT NULL OR close_type IS NOT NULL OR transcript_url IS NOT NULL)');
             
             const sql = `
-                SELECT user_id, ticket_id, ticket_type, server, created_at,
+                SELECT user_id, ticket_id, ticket_type, server, username, created_at,
                        close_user, close_user_id, close_reason, transcript_url
                 FROM tickets
                 WHERE ${where.join(' AND ')}
@@ -439,6 +439,7 @@ class MySQLAdapter {
                     ticketId: String(row.ticket_id || ''),
                     ticketType: row.ticket_type || 'Unknown',
                     server: row.server || null,
+                    username: row.username || null,
                     createdAt: row.created_at || null,
                     closeUser: row.close_user || null,
                     closeUserID: row.close_user_id || null,
