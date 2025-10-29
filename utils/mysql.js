@@ -15,14 +15,16 @@ let __adapter = null;
 function createDB() {
     const dbConfig = config.database || {};
     
-    // MySQL is now required - throw error if not configured
-    if (!dbConfig.host && dbConfig.type !== 'mysql') {
-        throw new Error('MySQL configuration required. Please set config.database.host and other MySQL settings in config.json');
+    // MySQL is now required - strict validation
+    if (!dbConfig.host || String(dbConfig.host).trim() === '') {
+        console.error('[mysql] CRITICAL: MySQL host not configured!');
+        console.error('[mysql] Please set config.database.host in config.json');
+        throw new Error('MySQL configuration required! Please set config.database.host and other MySQL settings in config.json. The bot cannot run without MySQL.');
     }
     
     if (!__pool) {
-        __pool = mysql.createPool({
-            host: dbConfig.host || 'localhost',
+        const poolConfig = {
+            host: String(dbConfig.host).trim(),
             port: dbConfig.port || 3306,
             user: dbConfig.user || 'root',
             password: dbConfig.password || '',
@@ -32,7 +34,36 @@ function createDB() {
             queueLimit: 0,
             enableKeepAlive: true,
             keepAliveInitialDelay: 0
+        };
+        
+        console.log('[mysql] Creating MySQL connection pool:', {
+            host: poolConfig.host,
+            port: poolConfig.port,
+            database: poolConfig.database,
+            user: poolConfig.user
         });
+        
+        __pool = mysql.createPool(poolConfig);
+        
+        // Test connection asynchronously - log error but don't block startup
+        // The first actual query will fail if connection is bad
+        (async () => {
+            try {
+                const conn = await __pool.getConnection();
+                await conn.query('SELECT 1');
+                conn.release();
+                console.log('[mysql] ✓ Connection test successful');
+            } catch (err) {
+                console.error('[mysql] ✗ CRITICAL: MySQL connection test failed!');
+                console.error('[mysql] Error:', err.message);
+                console.error('[mysql] The bot may fail when trying to use the database.');
+                console.error('[mysql] Please check:');
+                console.error('[mysql]   1. MySQL server is running');
+                console.error('[mysql]   2. config.database settings in config.json are correct');
+                console.error('[mysql]   3. Database user has proper permissions');
+                console.error('[mysql]   4. Database exists: ' + poolConfig.database);
+            }
+        })();
         
         __adapter = new MySQLAdapter(__pool);
     }
