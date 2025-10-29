@@ -1188,7 +1188,7 @@ app.get('/staff', ensureAuth, async (req, res) => {
         req.session.staff_ok = true;
 
         const qUser = (req.query.user || '').replace(/[^0-9]/g, '');
-        const qTicketId = (req.query.ticket_id || '').trim();
+        const qTicketId = (req.query.ticket_id || req.query.ticket || '').trim();
         const qType = (req.query.type || '').toLowerCase();
         const qFrom = req.query.from ? new Date(req.query.from) : null;
         const qTo = req.query.to ? new Date(req.query.to) : null;
@@ -1263,11 +1263,17 @@ app.get('/staff', ensureAuth, async (req, res) => {
         }));
         
         const pagination = { page, limit, total, totalPages };
+        const hasSearchResults = !!(qUser || qTicketId || qType || qServer || qClosedBy || qFrom || qTo);
+        
         res.render('staff_tickets', { 
             tickets, 
+            hasSearchResults,
+            resultCount: total,
+            maxResults: limit,
             query: { 
                 user: qUser, 
                 ticket_id: qTicketId,
+                ticket: qTicketId, // Also support 'ticket' query param
                 type: qType, 
                 from: req.query.from || '', 
                 to: req.query.to || '', 
