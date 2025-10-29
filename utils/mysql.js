@@ -138,15 +138,17 @@ class MySQLAdapter {
                     close_user_id, close_reason, transcript_url, global_ticket_number
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
-                    ticket_type = VALUES(ticket_type),
-                    server = VALUES(server),
-                    username = VALUES(username),
-                    close_time = VALUES(close_time),
-                    close_type = VALUES(close_type),
-                    close_user = VALUES(close_user),
-                    close_user_id = VALUES(close_user_id),
-                    close_reason = VALUES(close_reason),
-                    transcript_url = VALUES(transcript_url)
+                    ticket_type = COALESCE(VALUES(ticket_type), ticket_type),
+                    server = COALESCE(VALUES(server), server),
+                    username = COALESCE(VALUES(username), username),
+                    created_at = COALESCE(VALUES(created_at), created_at),
+                    close_time = COALESCE(VALUES(close_time), close_time),
+                    close_type = COALESCE(VALUES(close_type), close_type),
+                    close_user = COALESCE(VALUES(close_user), close_user),
+                    close_user_id = COALESCE(VALUES(close_user_id), close_user_id),
+                    close_reason = COALESCE(VALUES(close_reason), close_reason),
+                    transcript_url = COALESCE(VALUES(transcript_url), transcript_url),
+                    global_ticket_number = COALESCE(VALUES(global_ticket_number), global_ticket_number)
             `, [
                 ticketData.userId || ticketData.user_id,
                 ticketData.ticketId || ticketData.ticket_id,

@@ -426,16 +426,38 @@ try {
 		await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.steamId`, String(SteamID))
 	}
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.responses`, responses)
-	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, Date.now() / 1000)
+	const createdAt = Math.floor(Date.now() / 1000);
+	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.createdAt`, createdAt)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.ticketType`, ticketType)
 	await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.globalTicketNumber`, formattedTicketNumber)
 	// Save parsed server for reporting
+	let server = null;
 	try {
 		const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
 		if (m && m[1]) {
-			await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.server`, m[1]);
+			server = m[1];
+			await db.set(`PlayerStats.${user.id}.ticketLogs.${formattedTicketNumber}.server`, server);
 		}
 	} catch (_) {}
+	
+	// Also write to MySQL tickets table if MySQL adapter is available
+	try {
+		if (typeof db.writeTicket === 'function') {
+			await db.writeTicket({
+				userId: String(user.id),
+				ticketId: String(formattedTicketNumber),
+				ticketType: ticketType || null,
+				server: server || null,
+				username: user.username || null,
+				steamId: SteamID && SteamID.toString().startsWith('7656119') ? String(SteamID) : null,
+				responses: responses || null,
+				createdAt: createdAt,
+				globalTicketNumber: formattedTicketNumber
+			});
+		}
+	} catch (err) {
+		console.error('[backbone] Error writing ticket to MySQL:', err.message);
+	}
 
 	// After creating the ticket channel and sending the DM, update the bot's status
 	await func.updateTicketStatus(client);
