@@ -1003,7 +1003,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             
             await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, savedTranscriptURL);
             
-            // Write ticket data - use MySQL tickets table if available, otherwise quick.db
+            // Write ticket data to MySQL
             try {
                 const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
                 const responsesText = await db.get(`PlayerStats.${DiscordID}.ticketLogs.${globalTicketNumber}.responses`) || '';
@@ -1024,22 +1024,11 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     transcriptURL: savedTranscriptURL || null
                 };
                 
-                // If MySQL adapter has writeTicket method, use it (direct to tickets table)
+                // Write to MySQL tickets table
                 if (typeof db.writeTicket === 'function') {
                     await db.writeTicket(ticketRow);
                 } else {
-                    // Fallback: use quick.db structure
-                    const fnameFull = `${channel.name}.full.html`;
-                    const fnameUser = `${channel.name}.html`;
-                    await db.set(`TicketIndex.byFilename.${fnameFull}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-                    await db.set(`TicketIndex.byFilename.${fnameUser}`, { ownerId: String(DiscordID), ticketId: String(globalTicketNumber) });
-                    
-                    const key = `TicketIndex.staffList`;
-                    const list = (await db.get(key)) || [];
-                    list.push(ticketRow);
-                    const MAX_INDEX = 25000;
-                    const trimmed = list.length > MAX_INDEX ? list.slice(list.length - MAX_INDEX) : list;
-                    await db.set(key, trimmed);
+                    throw new Error('MySQL writeTicket method not available');
                 }
             } catch (err) {
                 console.error('[closeTicket] Error writing ticket data:', err.message);

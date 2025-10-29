@@ -15,30 +15,28 @@ let __adapter = null;
 function createDB() {
     const dbConfig = config.database || {};
     
-    // Check if MySQL is enabled
-    if (dbConfig.type === 'mysql' || dbConfig.host) {
-        if (!__pool) {
-            __pool = mysql.createPool({
-                host: dbConfig.host || 'localhost',
-                port: dbConfig.port || 3306,
-                user: dbConfig.user || 'root',
-                password: dbConfig.password || '',
-                database: dbConfig.database || 'ticketbot',
-                waitForConnections: true,
-                connectionLimit: 10,
-                queueLimit: 0,
-                enableKeepAlive: true,
-                keepAliveInitialDelay: 0
-            });
-            
-            __adapter = new MySQLAdapter(__pool);
-        }
-        return __adapter;
+    // MySQL is now required - throw error if not configured
+    if (!dbConfig.host && dbConfig.type !== 'mysql') {
+        throw new Error('MySQL configuration required. Please set config.database.host and other MySQL settings in config.json');
     }
     
-    // Fallback to quick.db if MySQL not configured
-    const { createDB: createQuickDB } = require('./quickdb');
-    return createQuickDB();
+    if (!__pool) {
+        __pool = mysql.createPool({
+            host: dbConfig.host || 'localhost',
+            port: dbConfig.port || 3306,
+            user: dbConfig.user || 'root',
+            password: dbConfig.password || '',
+            database: dbConfig.database || 'ticketbot',
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0,
+            enableKeepAlive: true,
+            keepAliveInitialDelay: 0
+        });
+        
+        __adapter = new MySQLAdapter(__pool);
+    }
+    return __adapter;
 }
 
 // Compatibility layer that mimics quick.db interface
@@ -108,6 +106,56 @@ class MySQLAdapter {
                     }
                 })()
             }));
+        } finally {
+            conn.release();
+        }
+    }
+    
+    // Get transcript index entry by filename
+    async getTranscriptIndex(filename) {
+        const conn = await this.pool.getConnection();
+        try {
+            const [rows] = await conn.query(
+                'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
+                [filename]
+            );
+            
+            if (rows.length === 0) {
+                // Try alternative filename variants
+                const altFilename = filename.endsWith('.full.html') 
+                    ? filename.replace(/\.full\.html$/i, '.html')
+                    : filename.replace(/\.html$/i, '.full.html');
+                const [altRows] = await conn.query(
+                    'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
+                    [altFilename]
+                );
+                if (altRows.length === 0) return null;
+                return {
+                    ownerId: String(altRows[0].user_id || ''),
+                    ticketId: String(altRows[0].ticket_id || ''),
+                    ticketType: altRows[0].ticket_type || null
+                };
+            }
+            
+            return {
+                ownerId: String(rows[0].user_id || ''),
+                ticketId: String(rows[0].ticket_id || ''),
+                ticketType: rows[0].ticket_type || null
+            };
+        } finally {
+            conn.release();
+        }
+    }
+    
+    // Get unique user IDs from tickets (for user list caching)
+    async getUserIds(limit = 500) {
+        const conn = await this.pool.getConnection();
+        try {
+            const [rows] = await conn.query(
+                'SELECT DISTINCT user_id FROM tickets WHERE user_id IS NOT NULL LIMIT ?',
+                [limit]
+            );
+            return rows.map(row => String(row.user_id || '')).filter(Boolean);
         } finally {
             conn.release();
         }

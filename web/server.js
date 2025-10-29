@@ -274,23 +274,25 @@ async function findOwnerByFilename(filename) {
         if (rec && rec.ownerId) return rec.ownerId;
     }
 
-    // Try persistent index next (with small cache); be tolerant of case by checking both
+    // Try MySQL transcript_index table
     for (const cand of candidates) {
         const cKey = String(cand);
         const cKeyLower = cKey.toLowerCase();
         const cached = cacheByFilename.get(cKey) || cacheByFilename.get(cKeyLower);
         if (cached && cached.expiresAt > Date.now()) return cached.value?.ownerId || null;
+        
         try {
-            let idx = await db.get(`TicketIndex.byFilename.${cKey}`);
-            if (!idx) idx = await db.get(`TicketIndex.byFilename.${cKeyLower}`);
-            if (idx && idx.ownerId) {
-                cacheByFilename.set(cKeyLower, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
-                return idx.ownerId;
+            if (typeof db.getTranscriptIndex === 'function') {
+                const idx = await db.getTranscriptIndex(cKey);
+                if (idx && idx.ownerId) {
+                    cacheByFilename.set(cKeyLower, { value: idx, expiresAt: Date.now() + CACHE_TTL_MS });
+                    return idx.ownerId;
+                }
             }
         } catch (_) {}
     }
 
-    // Avoid DB-wide scan on request path; not found
+    // Not found
     return null;
 }
 
@@ -299,7 +301,7 @@ function userHasOverride(_userId, _filename) {
 }
 
 async function findTicketContextByFilename(filename) {
-    // Return { ownerId, ticketId, ticketType } using fast in-memory index or lightweight lookups
+    // Return { ownerId, ticketId, ticketType } using fast in-memory index or MySQL lookup
     try {
         // Build candidate filenames we consider equivalent
         const candidates = new Set([filename]);
@@ -313,37 +315,47 @@ async function findTicketContextByFilename(filename) {
             const rec = transcriptIndex.get(c);
             if (rec) return rec;
         }
-        // Try persistent index
+        
+        // Try MySQL transcript_index table
         for (const c of candList) {
             try {
-                // Try both lower-cased and original-case keys
-                const idx = await db.get(`TicketIndex.byFilename.${c}`) || await db.get(`TicketIndex.byFilename.${filename}`);
-                if (idx && (idx.ownerId || idx.ticketId || idx.ticketType)) {
-                    // Enrich with ticketType if missing
-                    if (!idx.ticketType && idx.ownerId && idx.ticketId) {
-                        try {
-                            const t = await db.get(`PlayerStats.${idx.ownerId}.ticketLogs.${idx.ticketId}`) || {};
-                            if (t && t.ticketType) return { ownerId: idx.ownerId, ticketId: idx.ticketId, ticketType: t.ticketType };
-                        } catch (_) {}
+                if (typeof db.getTranscriptIndex === 'function') {
+                    const idx = await db.getTranscriptIndex(c);
+                    if (idx && (idx.ownerId || idx.ticketId)) {
+                        // Enrich with ticketType from tickets table if missing
+                        if (!idx.ticketType && idx.ownerId && idx.ticketId) {
+                            try {
+                                const [tickets] = await db.query(
+                                    'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                                    [idx.ownerId, idx.ticketId]
+                                );
+                                if (tickets && tickets.length > 0 && tickets[0].ticket_type) {
+                                    idx.ticketType = tickets[0].ticket_type;
+                                }
+                            } catch (_) {}
+                        }
+                        return idx;
                     }
-                    return idx;
                 }
             } catch (_) {}
         }
-        // Last resort: derive ticketId from filename suffix and try direct get without scanning all
+        // Last resort: derive ticketId from filename suffix and query MySQL directly
         const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
         const idMatch = base.match(/-(\d{1,8})$/);
         if (idMatch) {
             const ticketId = idMatch[1];
             try {
-                const ps = await db.get('PlayerStats');
-                if (ps && typeof ps === 'object') {
-                    for (const ownerId of Object.keys(ps)) {
-                        const t = ps[ownerId]?.ticketLogs?.[ticketId];
-                        if (t && (t.ticketType || t.transcriptURL)) {
-                            const ticketType = t.ticketType || null;
-                            return { ownerId, ticketId, ticketType };
-                        }
+                if (typeof db.query === 'function') {
+                    const [rows] = await db.query(
+                        'SELECT user_id, ticket_type FROM tickets WHERE ticket_id = ? LIMIT 1',
+                        [ticketId]
+                    );
+                    if (rows && rows.length > 0) {
+                        return {
+                            ownerId: String(rows[0].user_id || ''),
+                            ticketId: ticketId,
+                            ticketType: rows[0].ticket_type || null
+                        };
                     }
                 }
             } catch (_) {}
@@ -1109,10 +1121,9 @@ let cachedUserIdListExpiresAt = 0;
 const USERID_LIST_TTL_MS = 60 * 1000; // 60s
 async function refreshUserIdList() {
     try {
-        const list = await db.get('TicketIndex.staffList');
-        if (Array.isArray(list)) {
-            const uniq = Array.from(new Set(list.map(x => x && x.userId).filter(Boolean)));
-            cachedUserIdList = uniq;
+        if (typeof db.getUserIds === 'function') {
+            const userIds = await db.getUserIds(500);
+            cachedUserIdList = userIds;
             cachedUserIdListExpiresAt = Date.now() + USERID_LIST_TTL_MS;
         }
     } catch (_) {}
@@ -1127,64 +1138,13 @@ async function getAllUserIds() {
 // Efficient ticket search using SQL queries
 async function searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit = 100 }) {
     try {
-        // If MySQL adapter with searchTickets method, use it
         if (typeof db.searchTickets === 'function') {
             return await db.searchTickets({ ticketId, userId, ticketType, server, closedBy, fromDate, toDate, limit });
         }
         
-        // Fallback for quick.db (legacy support)
-        const staffList = await db.get('TicketIndex.staffList');
-        if (!Array.isArray(staffList)) return [];
-        
-        const results = [];
-        const maxScan = Math.min(limit * 20, 1500);
-        let scanned = 0;
-        
-        for (const ticket of staffList) {
-            if (scanned >= maxScan || results.length >= limit) break;
-            scanned++;
-            
-            if (!ticket) continue;
-            
-            if (ticketId) {
-                const tid = String(ticket.ticketId || '').trim();
-                const searchTid = String(ticketId).trim();
-                if (tid !== searchTid && !tid.includes(searchTid) && !tid.includes(searchTid.padStart(4, '0'))) continue;
-            }
-            
-            if (userId && String(ticket.userId || '') !== String(userId)) continue;
-            if (ticketType && String(ticket.ticketType || '').toLowerCase() !== String(ticketType).toLowerCase()) continue;
-            
-            if (server) {
-                const ticketServer = String(ticket.server || '').toLowerCase();
-                if (!ticketServer.includes(String(server).toLowerCase())) continue;
-            }
-            
-            if (closedBy) {
-                const searchTerm = String(closedBy).toLowerCase();
-                const closeUser = String(ticket.closeUser || '').toLowerCase();
-                const closeUserId = String(ticket.closeUserID || '').toLowerCase();
-                if (!closeUser.includes(searchTerm) && !closeUserId.includes(searchTerm)) continue;
-            }
-            
-            if (fromDate && ticket.createdAt && ticket.createdAt * 1000 < fromDate.getTime()) continue;
-            if (toDate && ticket.createdAt && ticket.createdAt * 1000 > toDate.getTime()) continue;
-            
-            results.push({
-                userId: String(ticket.userId || ''),
-                ticketId: String(ticket.ticketId || ''),
-                ticketType: ticket.ticketType || 'Unknown',
-                server: ticket.server || null,
-                createdAt: ticket.createdAt || null,
-                closeUser: ticket.closeUser || null,
-                closeUserID: ticket.closeUserID || null,
-                closeReason: ticket.closeReason || null,
-                transcriptFilename: ticket.transcriptFilename || null
-            });
-        }
-        
-        results.sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0));
-        return results.slice(0, limit);
+        // MySQL adapter should always have searchTickets method
+        console.error('[web] MySQL searchTickets method not available');
+        return [];
     } catch (err) {
         console.error('[web] Search tickets error:', err.message || err);
         return [];
