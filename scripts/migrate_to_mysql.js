@@ -3,7 +3,16 @@
  * Run this once to migrate all data
  */
 
-const { createDB: createQuickDB } = require('../utils/quickdb');
+// Note: quickdb.js has been removed - this migration script should only be run once
+// If you need to migrate again, restore the old quickdb.js temporarily
+const { QuickDB } = require('quick.db');
+let quickDbInstance = null;
+function createQuickDB() {
+    if (!quickDbInstance) {
+        quickDbInstance = new QuickDB({ filePath: './data/json.sqlite' });
+    }
+    return quickDbInstance;
+}
 const mysql = require('mysql2/promise');
 const config = require('../config/config.json');
 

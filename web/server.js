@@ -56,7 +56,7 @@ if (!BOT_TOKEN) {
 }
 
 // --- Databases ---
-const db = createDB(); // persist to ./data/json.sqlite
+const db = createDB(); // MySQL database via utils/mysql.js
 // Admin overrides removed per requirements; no external permissions DB
 
 // --- Auth setup ---
