@@ -249,8 +249,22 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		? `${user.username} (${SteamID})`
 		: user.username;
 
-		// Get the global ticket counter
-		let globalTicketCount = await db.get('globalTicketCount') || 0;
+		// Get the global ticket counter from MySQL
+		let globalTicketCount = await db.get('globalTicketCount');
+		if (globalTicketCount === null || globalTicketCount === undefined) {
+			// Initialize to highest existing ticket number if tickets exist
+			try {
+				if (typeof db.query === 'function') {
+					const [rows] = await db.query('SELECT MAX(CAST(ticket_id AS UNSIGNED)) as maxId FROM tickets WHERE ticket_id REGEXP "^[0-9]+$"');
+					globalTicketCount = rows[0]?.maxId || 0;
+				} else {
+					globalTicketCount = 0;
+				}
+			} catch (_) {
+				globalTicketCount = 0;
+			}
+		}
+		globalTicketCount = Number(globalTicketCount) || 0;
 		globalTicketCount++;
 		await db.set('globalTicketCount', globalTicketCount);
 

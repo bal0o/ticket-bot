@@ -161,6 +161,55 @@ class MySQLAdapter {
         }
     }
     
+    // Get tickets for a specific user (for "my tickets" view)
+    async getUserTickets(userId, options = {}) {
+        const conn = await this.pool.getConnection();
+        try {
+            const { closedOnly = true, limit = 100, offset = 0 } = options;
+            let where = ['user_id = ?'];
+            const params = [String(userId)];
+            
+            if (closedOnly) {
+                where.push('(close_time IS NOT NULL OR close_type IS NOT NULL OR transcript_url IS NOT NULL)');
+            }
+            
+            const sql = `
+                SELECT user_id, ticket_id, ticket_type, server, created_at,
+                       close_user, close_user_id, close_reason, transcript_url
+                FROM tickets
+                WHERE ${where.join(' AND ')}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            `;
+            
+            params.push(limit, offset);
+            const [rows] = await conn.query(sql, params);
+            
+            return rows.map(row => {
+                const url = row.transcript_url || '';
+                let filename = url ? url.split('/').pop() : null;
+                if (filename && filename.endsWith('.full.html')) {
+                    filename = filename.replace(/\.full\.html$/, '.html');
+                }
+                
+                return {
+                    userId: String(row.user_id || ''),
+                    ticketId: String(row.ticket_id || ''),
+                    ticketType: row.ticket_type || 'Unknown',
+                    server: row.server || null,
+                    createdAt: row.created_at || null,
+                    closeUser: row.close_user || null,
+                    closeUserID: row.close_user_id || null,
+                    closeReason: row.close_reason || null,
+                    transcriptFilename: filename,
+                    isClosed: !!(row.close_time || row.transcript_url)
+                };
+            });
+        } finally {
+            conn.release();
+        }
+    }
+    
     // Direct MySQL methods for efficient queries
     async query(sql, params = []) {
         const conn = await this.pool.getConnection();
