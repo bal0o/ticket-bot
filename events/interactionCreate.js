@@ -1085,6 +1085,11 @@ module.exports = async function (client, interaction) {
 							if (nameParts.length > 0) {
 								const ticketId = nameParts[nameParts.length - 1];
 								// Check if this ticket ID exists in the open tickets set
+								if (openTicketIds.size === 0) {
+									// No open tickets in DB; stop counting further
+									openTicketCount = 0;
+									break;
+								}
 								if (openTicketIds.has(ticketId)) {
 									openTicketCount++;
 								}
