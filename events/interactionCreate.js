@@ -1059,12 +1059,48 @@ module.exports = async function (client, interaction) {
 				const allChannels = await staffGuild.channels.fetch();
 				
 				// Filter to only text channels with topic matching user ID
-				let filteredChannels = allChannels.filter(x => 
+				let candidateChannels = allChannels.filter(x => 
 					x.type === 'GUILD_TEXT' && 
 					x.topic === interaction.member.user.id
 				);
 				
-				if (filteredChannels.size >= client.config.bot_settings.max_tickets_per_user) {
+				// Cross-reference with database to only count channels for open tickets
+				// Channel names are in format: [server-]tickettype-#### or tickettype-####
+				let openTicketCount = 0;
+				if (candidateChannels.size > 0 && typeof db.query === 'function') {
+					try {
+						// Get all open tickets for this user from database
+						const [openTicketsRows] = await db.query(
+							`SELECT ticket_id FROM tickets 
+							WHERE user_id = ? 
+							AND (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`,
+							[String(interaction.member.user.id)]
+						);
+						const openTicketIds = new Set(openTicketsRows.map(row => String(row.ticket_id)));
+						
+						// Only count channels that correspond to open tickets
+						for (const channel of candidateChannels.values()) {
+							// Extract ticket ID from channel name (last part after last '-')
+							const nameParts = channel.name.split('-');
+							if (nameParts.length > 0) {
+								const ticketId = nameParts[nameParts.length - 1];
+								// Check if this ticket ID exists in the open tickets set
+								if (openTicketIds.has(ticketId)) {
+									openTicketCount++;
+								}
+							}
+						}
+					} catch (dbError) {
+						// If database check fails, fall back to channel count (original behavior)
+						func.handle_errors(dbError, client, 'interactionCreate.js', 'Error checking open tickets in database, falling back to channel count');
+						openTicketCount = candidateChannels.size;
+					}
+				} else {
+					// Fallback to channel count if no database or no candidate channels
+					openTicketCount = candidateChannels.size;
+				}
+				
+				if (openTicketCount >= client.config.bot_settings.max_tickets_per_user) {
 					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 					return;
 				}
