@@ -45,12 +45,46 @@ module.exports = async function (client, message) {
             const topicChannels = guild.channels.cache.filter(ch => ch.type === 'GUILD_TEXT' && ch.topic === message.author.id);
             const activeTickets = [];
 
+            // Cross-reference with database so only open tickets are counted
+            let openTicketIds = null;
+            if (topicChannels.size > 0 && typeof db.query === 'function') {
+                try {
+                    const [rows] = await db.query(
+                        `SELECT ticket_id FROM tickets
+                         WHERE user_id = ?
+                         AND (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`,
+                        [String(message.author.id)]
+                    );
+                    openTicketIds = new Set(rows.map(row => String(row.ticket_id)));
+                } catch (dbError) {
+                    func.handle_errors(dbError, client, `messageCreate.js`, `Error checking open tickets in database, falling back to channel list`);
+                    openTicketIds = null; // fall back to original behavior
+                }
+            }
+
             // Build ticket items from channel name (avoid fetching pins)
             for (const ch of topicChannels.values()) {
                 const name = ch.name || '';
                 const parts = name.split('-');
                 const ticketNumber = parts.length > 1 ? parts[parts.length - 1] : 'unknown';
                 const typeGuess = parts.length > 1 ? parts.slice(0, parts.length - 1).join('-') : 'ticket';
+
+                let includeChannel = true;
+                if (openTicketIds instanceof Set) {
+                    if (openTicketIds.size === 0) {
+                        includeChannel = false;
+                    } else {
+                        const ticketId = parts.length > 0 ? parts[parts.length - 1] : null;
+                        if (!ticketId || !openTicketIds.has(String(ticketId))) {
+                            includeChannel = false;
+                        }
+                    }
+                }
+
+                if (!includeChannel) {
+                    continue;
+                }
+
                 activeTickets.push({ channel: ch, type: 'regular', ticketInfo: { title: `${typeGuess} #${ticketNumber}` } });
             }
 

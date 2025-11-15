@@ -69,7 +69,7 @@ module.exports = {
             await channel.send("⚠️ I couldn't rename or move this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
         }
         // Update the pinned embed's title and footer to match the new ticket type
-        const myPins = await channel.messages.fetchPinned();
+        const myPins = await func.fetchPinnedWithCache(channel);
         const LastPin = myPins.last();
         if (LastPin && LastPin.embeds[0]) {
             const embed = LastPin.embeds[0];
@@ -104,7 +104,7 @@ module.exports = {
         // Check for required fields in the new ticket type (e.g., server selection)
         if (questionFilesystem.server_selection && questionFilesystem.server_selection.enabled) {
             // Check if the pinned embed has a field for server selection
-            const myPins = await channel.messages.fetchPinned();
+            const myPins = await func.fetchPinnedWithCache(channel);
             const LastPin = myPins.last();
             let hasServerField = false;
             if (LastPin && LastPin.embeds[0]) {
