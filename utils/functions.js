@@ -65,11 +65,14 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
 // Cache for pinned messages to prevent rate limiting
 const pinnedCache = new Map(); // channelId -> { messages, timestamp }
 const pendingFetches = new Map(); // channelId -> Promise
-const CACHE_TTL = 30000; // 30 seconds cache
+const lastFetchTimes = new Map(); // channelId -> timestamp of last fetch attempt
+const CACHE_TTL = 60000; // 60 seconds cache (longer to avoid rate limits)
+const MIN_REQUEST_INTERVAL = 3500; // Minimum 3.5 seconds between requests (respects 3s sublimit with margin)
 
 /**
  * Fetch pinned messages with caching and rate limit handling.
  * Prevents multiple simultaneous requests and caches results briefly.
+ * Respects Discord's 3-second sublimit on pins route.
  */
 module.exports.fetchPinnedSafe = async function(channel) {
     if (!channel || !channel.messages) {
@@ -95,14 +98,22 @@ module.exports.fetchPinnedSafe = async function(channel) {
         }
     }
     
+    // Respect minimum interval between requests to avoid sublimit violations
+    const lastFetch = lastFetchTimes.get(channelId);
+    if (lastFetch && (now - lastFetch) < MIN_REQUEST_INTERVAL) {
+        const waitTime = MIN_REQUEST_INTERVAL - (now - lastFetch);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
     // Create a new fetch promise
     const fetchPromise = (async () => {
         const maxAttempts = 3;
         let attempt = 0;
-        let baseDelay = 1000;
+        let baseDelay = 4000; // Start with 4 seconds to respect sublimit
         
         while (attempt < maxAttempts) {
             try {
+                lastFetchTimes.set(channelId, Date.now());
                 const messages = await channel.messages.fetchPinned();
                 // Cache the result
                 pinnedCache.set(channelId, { messages, timestamp: Date.now() });
@@ -118,20 +129,25 @@ module.exports.fetchPinnedSafe = async function(channel) {
                 
                 if (isRateLimit) {
                     // Try to extract retry_after from various possible locations
-                    let retryAfter = 1;
+                    let retryAfter = 3; // Default to 3 seconds for sublimit
                     if (err.retry_after !== undefined) {
-                        retryAfter = typeof err.retry_after === 'number' ? err.retry_after : parseFloat(err.retry_after) || 1;
+                        retryAfter = typeof err.retry_after === 'number' ? err.retry_after : parseFloat(err.retry_after) || 3;
                     } else if (err.retryAfter !== undefined) {
-                        retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 1;
+                        retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 3;
                     } else if (err.timeout !== undefined) {
-                        retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 1;
+                        retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 3;
                     }
                     
                     // retry_after is usually in seconds, convert to milliseconds
-                    const delay = Math.min((retryAfter * 1000) + (Math.random() * 500), 60000); // Max 60s
+                    // Add extra margin for sublimit
+                    const delay = Math.max(
+                        (retryAfter * 1000) + 500, // Add 500ms margin
+                        MIN_REQUEST_INTERVAL * (attempt + 1) // Exponential backoff respecting sublimit
+                    );
+                    const finalDelay = Math.min(delay, 60000); // Max 60s
                     
                     if (attempt < maxAttempts) {
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                        await new Promise(resolve => setTimeout(resolve, finalDelay));
                         continue;
                     }
                 }
