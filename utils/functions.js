@@ -21,116 +21,6 @@ const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
 
-// Cache for pinned messages to reduce API calls and prevent 429 rate limits
-// Format: channelId -> { messages: Collection, timestamp: number }
-const pinnedMessagesCache = new Map();
-const PINNED_CACHE_TTL = 30000; // 30 seconds cache TTL
-
-/**
- * Fetch pinned messages with caching and rate limit handling
- * Respects Discord's rate limits per https://discord.com/developers/docs/topics/rate-limits
- * @param {Discord.TextChannel|Discord.ThreadChannel} channel - The channel to fetch pins from
- * @returns {Promise<Discord.Collection<string, Discord.Message>>} Pinned messages collection
- */
-async function fetchPinnedWithCache(channel) {
-    if (!channel || !channel.messages) {
-        throw new Error('Invalid channel provided');
-    }
-
-    const channelId = channel.id;
-    const now = Date.now();
-    
-    // Check cache first
-    const cached = pinnedMessagesCache.get(channelId);
-    if (cached && (now - cached.timestamp) < PINNED_CACHE_TTL) {
-        return cached.messages;
-    }
-
-    // Try to fetch with retry logic for 429 errors
-    let retries = 0;
-    const maxRetries = 3;
-    let lastError = null;
-
-    while (retries <= maxRetries) {
-        try {
-            const pinned = await channel.messages.fetchPinned();
-            
-            // Update cache on success
-            pinnedMessagesCache.set(channelId, {
-                messages: pinned,
-                timestamp: now
-            });
-            
-            return pinned;
-        } catch (error) {
-            lastError = error;
-            
-            // If it's a 429 rate limit error, respect Discord's Retry-After header
-            if (error.code === 429 || error.status === 429) {
-                retries++;
-                if (retries <= maxRetries) {
-                    // Respect Discord's Retry-After header if available (in seconds)
-                    // Discord.js may provide this in error.requestData or error.timeout
-                    let waitTime = 1000; // Default 1 second
-                    
-                    // Check for Retry-After header in the error response
-                    if (error.requestData && error.requestData.response) {
-                        const retryAfter = error.requestData.response.headers?.['retry-after'];
-                        if (retryAfter) {
-                            // Retry-After is in seconds, convert to milliseconds
-                            waitTime = parseFloat(retryAfter) * 1000;
-                        } else if (error.requestData.response.headers?.['x-ratelimit-reset-after']) {
-                            // Alternative: X-RateLimit-Reset-After (also in seconds)
-                            waitTime = parseFloat(error.requestData.response.headers['x-ratelimit-reset-after']) * 1000;
-                        }
-                    }
-                    
-                    // Check Discord.js error timeout property (if available)
-                    if (error.timeout && typeof error.timeout === 'number') {
-                        waitTime = Math.max(waitTime, error.timeout);
-                    }
-                    
-                    // Fallback to exponential backoff if no header info available
-                    if (waitTime <= 1000) {
-                        waitTime = Math.min(1000 * Math.pow(2, retries - 1), 10000); // Max 10 seconds
-                    }
-                    
-                    // Add small jitter to avoid thundering herd, but respect the minimum wait time
-                    const jitter = Math.random() * 500; // 0-500ms jitter
-                    waitTime = Math.max(waitTime, 1000) + jitter; // Minimum 1 second
-                    
-                    // Cap at reasonable maximum (60 seconds as per Discord docs)
-                    waitTime = Math.min(waitTime, 60000);
-                    
-                    console.log(`Rate limited (429) fetching pins for channel ${channelId}, waiting ${Math.round(waitTime)}ms before retry ${retries}/${maxRetries}`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                    continue;
-                }
-            }
-            
-            // For non-429 errors or after max retries, check cache as fallback
-            if (cached && cached.messages) {
-                console.log(`Using cached pins for channel ${channelId} due to fetch error: ${error.message || error.code}`);
-                return cached.messages;
-            }
-            
-            // If no cache and it's not a retryable 429, throw the error
-            throw error;
-        }
-    }
-
-    // If we exhausted retries, try cache one more time
-    if (cached && cached.messages) {
-        console.log(`Using cached pins for channel ${channelId} after retry exhaustion`);
-        return cached.messages;
-    }
-
-    throw lastError || new Error('Failed to fetch pinned messages');
-}
-
-// Export the cache function for use in other modules
-module.exports.fetchPinnedWithCache = fetchPinnedWithCache;
-
 /**
  * Send a DM with retries and delivery verification.
  * Returns { delivered: boolean, message: Message|null, error: Error|null }
@@ -170,6 +60,107 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
         }
     }
     return { delivered: false, message: null, error: new Error('Unknown DM send failure') };
+}
+
+// Cache for pinned messages to prevent rate limiting
+const pinnedCache = new Map(); // channelId -> { messages, timestamp }
+const pendingFetches = new Map(); // channelId -> Promise
+const CACHE_TTL = 30000; // 30 seconds cache
+
+/**
+ * Fetch pinned messages with caching and rate limit handling.
+ * Prevents multiple simultaneous requests and caches results briefly.
+ */
+module.exports.fetchPinnedSafe = async function(channel) {
+    if (!channel || !channel.messages) {
+        throw new Error('Invalid channel provided');
+    }
+    
+    const channelId = channel.id;
+    const now = Date.now();
+    
+    // Check cache first
+    const cached = pinnedCache.get(channelId);
+    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+        return cached.messages;
+    }
+    
+    // If there's already a pending fetch, wait for it instead of creating a new one
+    if (pendingFetches.has(channelId)) {
+        try {
+            return await pendingFetches.get(channelId);
+        } catch (err) {
+            // If pending fetch failed, we'll try again below
+            pendingFetches.delete(channelId);
+        }
+    }
+    
+    // Create a new fetch promise
+    const fetchPromise = (async () => {
+        const maxAttempts = 3;
+        let attempt = 0;
+        let baseDelay = 1000;
+        
+        while (attempt < maxAttempts) {
+            try {
+                const messages = await channel.messages.fetchPinned();
+                // Cache the result
+                pinnedCache.set(channelId, { messages, timestamp: Date.now() });
+                return messages;
+            } catch (err) {
+                attempt++;
+                
+                // Handle rate limit errors (429)
+                // Discord.js may provide rate limit info in different formats
+                const isRateLimit = err.code === 429 || err.httpStatus === 429 || 
+                                   (err.request && err.request.status === 429) ||
+                                   (err.message && /429|rate.?limit/i.test(err.message));
+                
+                if (isRateLimit) {
+                    // Try to extract retry_after from various possible locations
+                    let retryAfter = 1;
+                    if (err.retry_after !== undefined) {
+                        retryAfter = typeof err.retry_after === 'number' ? err.retry_after : parseFloat(err.retry_after) || 1;
+                    } else if (err.retryAfter !== undefined) {
+                        retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 1;
+                    } else if (err.timeout !== undefined) {
+                        retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 1;
+                    }
+                    
+                    // retry_after is usually in seconds, convert to milliseconds
+                    const delay = Math.min((retryAfter * 1000) + (Math.random() * 500), 60000); // Max 60s
+                    
+                    if (attempt < maxAttempts) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                }
+                
+                // For non-rate-limit errors, retry with exponential backoff
+                if (attempt < maxAttempts) {
+                    const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), 10000);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                
+                // All attempts failed
+                throw err;
+            }
+        }
+        
+        throw new Error('Failed to fetch pinned messages after retries');
+    })();
+    
+    // Store the promise so concurrent calls can share it
+    pendingFetches.set(channelId, fetchPromise);
+    
+    try {
+        const result = await fetchPromise;
+        return result;
+    } finally {
+        // Clean up the pending fetch after completion
+        pendingFetches.delete(channelId);
+    }
 }
 
 module.exports.handle_errors = async (err, client, file, message) => {
@@ -913,7 +904,7 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
         // Fetch pinned message for ticket info
         let myPins;
         try {
-            myPins = await fetchPinnedWithCache(channel);
+            myPins = await module.exports.fetchPinnedSafe(channel);
         } catch (err) {
             // removed debug
             return;
