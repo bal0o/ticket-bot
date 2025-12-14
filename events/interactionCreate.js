@@ -36,6 +36,18 @@ module.exports = async function (client, interaction) {
     try {
         // Removed status init here to avoid delaying interaction ack; handled in ready.js
 
+        if (interaction.isAutocomplete()) {
+            const command = client.commands.get(interaction.commandName + `_slash`);
+            if (command && command.autocomplete) {
+                try {
+                    await command.autocomplete(interaction, client);
+                } catch (err) {
+                    func.handle_errors(err, client, `interactionCreate.js`, 'Error in autocomplete');
+                }
+            }
+            return;
+        }
+
         if (interaction.isCommand()) {
     const command = client.commands.get(interaction.commandName + `_slash`)
     if (!command) return;
@@ -147,6 +159,135 @@ module.exports = async function (client, interaction) {
                 } catch (e) {
                     // If we can't edit the reply, the interaction has probably timed out
                 }
+            }
+            return;
+        }
+
+        if (interaction.customId === 'replyStandardResponse') {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                
+                const context = client.replyContext?.get(interaction.user.id);
+                if (!context) {
+                    return interaction.editReply({ content: 'Session expired. Please use /reply again.', ephemeral: true });
+                }
+                
+                const { channelId, userId } = context;
+                const editedResponse = interaction.fields.getTextInputValue('replyText');
+                
+                if (!editedResponse || !editedResponse.trim()) {
+                    return interaction.editReply({ content: 'Response cannot be empty.', ephemeral: true });
+                }
+                
+                // Get the channel
+                const channel = await client.channels.fetch(channelId).catch(() => null);
+                if (!channel) {
+                    return interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true });
+                }
+                
+                // Get the user for DM
+                const user = await client.users.fetch(userId).catch(() => null);
+                
+                // Get or create webhook (similar to messageCreate.js)
+                const webhookChannel = channel;
+                let webhook = null;
+                
+                try {
+                    if (!webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+                        throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
+                    }
+                    
+                    const webhooks = await webhookChannel.fetchWebhooks();
+                    webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
+                    
+                    if (!webhook) {
+                        webhook = await webhookChannel.createWebhook("Ticket Webhook", {
+                            avatar: interaction.user.displayAvatarURL()
+                        });
+                    }
+                } catch (webhookError) {
+                    func.handle_errors(webhookError, client, 'interactionCreate.js', 'Error creating/fetching webhook for reply');
+                    // Fallback to regular message if webhook fails
+                    await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                }
+                
+                // Send via webhook to appear as staff member
+                if (webhook) {
+                    const sanitize = (text) => {
+                        let replyNoEveryone = text.replace(`@everyone`, `@ everyone`);
+                        let replyNoHere = replyNoEveryone.replace(`@here`, `@ here`);
+                        return replyNoHere.replace(`<@`, `<@ `);
+                    };
+                    
+                    // Get display name from member if available, otherwise use username
+                    let displayName = interaction.user.username;
+                    try {
+                        if (interaction.member && interaction.member.displayName) {
+                            displayName = interaction.member.displayName;
+                        }
+                    } catch (_) {}
+                    
+                    try {
+                        await webhook.send({
+                            content: sanitize(editedResponse),
+                            username: displayName,
+                            avatarURL: interaction.user.displayAvatarURL()
+                        });
+                    } catch (webhookSendError) {
+                        func.handle_errors(webhookSendError, client, 'interactionCreate.js', 'Error sending webhook message');
+                        // Fallback
+                        await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                    }
+                }
+                
+                // Send DM to user (similar to regular ticket replies)
+                if (user) {
+                    try {
+                        let roleName = 'Staff';
+                        let displayName = interaction.user.username;
+                        let staffAvatar = interaction.user.displayAvatarURL();
+                        
+                        try {
+                            if (interaction.member) {
+                                displayName = interaction.member.displayName || interaction.user.username;
+                                staffAvatar = interaction.member.displayAvatarURL?.() || interaction.user.displayAvatarURL();
+                                
+                                const roles = interaction.member.roles?.cache
+                                    ?.filter(role => role.id !== interaction.guild.id)
+                                    ?.sort((a, b) => b.position - a.position);
+                                
+                                const highestRole = roles?.first();
+                                if (highestRole) {
+                                    roleName = highestRole.name;
+                                }
+                            }
+                        } catch (_) {}
+                        
+                        const replyEmbed = new Discord.MessageEmbed()
+                            .setAuthor({ 
+                                name: `${displayName} (${roleName})`, 
+                                iconURL: staffAvatar
+                            })
+                            .setDescription(editedResponse)
+                            .setColor(client.config.bot_settings.main_color);
+                        
+                        await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                    } catch (dmError) {
+                        // DM failures are not critical, just log
+                        func.handle_errors(dmError, client, 'interactionCreate.js', 'Error sending DM for reply command');
+                    }
+                }
+                
+                // Clean up context
+                client.replyContext?.delete(interaction.user.id);
+                
+                await interaction.editReply({ content: 'Response sent successfully!', ephemeral: true });
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'Error handling replyStandardResponse modal');
+                try {
+                    await interaction.editReply({ content: 'An error occurred while sending the response.', ephemeral: true });
+                } catch (_) {}
+                client.replyContext?.delete(interaction.user.id);
             }
             return;
         }
@@ -662,16 +803,32 @@ module.exports = async function (client, interaction) {
 
             const handlerRaw = require("../content/handler/options.json");
             // Build move options from configured ticket types that have a valid ticket-category present in the guild
+            // Filter by allow_transfers (same as /move slash command)
             const typeOptions = [];
             for (const typeKey of Object.keys(handlerRaw.options)) {
                 try {
+                    // Skip if transfers are explicitly disabled
+                    if (handlerRaw.options[typeKey].allow_transfers === false) {
+                        continue;
+                    }
                     const qf = require(`../content/questions/${handlerRaw.options[typeKey].question_file}`);
                     const categoryId = qf["ticket-category"];
                     if (!categoryId) continue;
-                    const cat = interaction.guild.channels.cache.get(categoryId);
+                    // Try cache first, then fetch if not found
+                    let cat = interaction.guild.channels.cache.get(categoryId);
+                    if (!cat) {
+                        try {
+                            cat = await interaction.guild.channels.fetch(categoryId);
+                        } catch (_) {
+                            continue;
+                        }
+                    }
                     if (!cat || cat.type !== 'GUILD_CATEGORY') continue;
                     typeOptions.push({ typeKey, categoryName: cat.name, categoryId });
-                } catch (_) {}
+                } catch (err) {
+                    // Log errors but continue processing other ticket types
+                    func.handle_errors(err, client, 'interactionCreate.js', `Error processing ticket type ${typeKey} for moveticket`);
+                }
             }
 
             if (typeOptions.length === 0) {
@@ -705,8 +862,21 @@ module.exports = async function (client, interaction) {
             const opt = handlerRaw.options[typeKey];
             if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', ephemeral: true }); return; }
             const qf = require(`../content/questions/${opt.question_file}`);
-            const categoryId = qf["ticket-category"]; 
-            const category = categoryId ? interaction.guild.channels.cache.get(categoryId) : null;
+            const categoryId = qf["ticket-category"];
+            if (!categoryId) {
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                return;
+            }
+            // Try cache first, then fetch if not found
+            let category = interaction.guild.channels.cache.get(categoryId);
+            if (!category) {
+                try {
+                    category = await interaction.guild.channels.fetch(categoryId);
+                } catch (_) {
+                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                    return;
+                }
+            }
             if (!category || category.type !== 'GUILD_CATEGORY') {
                 await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
                 return;

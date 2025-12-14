@@ -20,6 +20,7 @@ client.commands = new Collection();
 client.blocked_users = new Set();
 client.cooldown = new Set();
 client.claims = new Map();
+client.replyContext = new Map();
 client.config = config;
 
 // Web server is now a separate process; only start here if explicitly requested
