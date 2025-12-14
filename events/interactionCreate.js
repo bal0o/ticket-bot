@@ -809,7 +809,15 @@ module.exports = async function (client, interaction) {
                     const qf = require(`../content/questions/${handlerRaw.options[typeKey].question_file}`);
                     const categoryId = qf["ticket-category"];
                     if (!categoryId) continue;
-                    const cat = interaction.guild.channels.cache.get(categoryId);
+                    // Try cache first, then fetch if not found
+                    let cat = interaction.guild.channels.cache.get(categoryId);
+                    if (!cat) {
+                        try {
+                            cat = await interaction.guild.channels.fetch(categoryId);
+                        } catch (_) {
+                            continue;
+                        }
+                    }
                     if (!cat || cat.type !== 'GUILD_CATEGORY') continue;
                     typeOptions.push({ typeKey, categoryName: cat.name, categoryId });
                 } catch (_) {}
@@ -846,8 +854,21 @@ module.exports = async function (client, interaction) {
             const opt = handlerRaw.options[typeKey];
             if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', ephemeral: true }); return; }
             const qf = require(`../content/questions/${opt.question_file}`);
-            const categoryId = qf["ticket-category"]; 
-            const category = categoryId ? interaction.guild.channels.cache.get(categoryId) : null;
+            const categoryId = qf["ticket-category"];
+            if (!categoryId) {
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                return;
+            }
+            // Try cache first, then fetch if not found
+            let category = interaction.guild.channels.cache.get(categoryId);
+            if (!category) {
+                try {
+                    category = await interaction.guild.channels.fetch(categoryId);
+                } catch (_) {
+                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                    return;
+                }
+            }
             if (!category || category.type !== 'GUILD_CATEGORY') {
                 await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
                 return;
