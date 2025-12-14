@@ -6,7 +6,6 @@ const Discord = require("discord.js");
 const unirest = require("unirest");
 const func = require("../utils/functions.js");
 const lang = require("../content/handler/lang.json");
-const responses = require("../content/response.json");
 const { createDB } = require('../utils/mysql')
 const db = createDB();
 const metrics = require('../utils/metrics');
@@ -36,6 +35,18 @@ module.exports = async function (client, interaction) {
 
     try {
         // Removed status init here to avoid delaying interaction ack; handled in ready.js
+
+        if (interaction.isAutocomplete()) {
+            const command = client.commands.get(interaction.commandName + `_slash`);
+            if (command && command.autocomplete) {
+                try {
+                    await command.autocomplete(interaction, client);
+                } catch (err) {
+                    func.handle_errors(err, client, `interactionCreate.js`, 'Error in autocomplete');
+                }
+            }
+            return;
+        }
 
         if (interaction.isCommand()) {
     const command = client.commands.get(interaction.commandName + `_slash`)
@@ -780,120 +791,6 @@ module.exports = async function (client, interaction) {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
                     try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', ephemeral: true }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
                 });
-        }
-
-        if (interaction.customId === 'reply_select_category') {
-            try {
-                await interaction.deferUpdate();
-                
-                const category = interaction.values[0];
-                const categoryResponses = responses[category];
-                
-                if (!categoryResponses || Object.keys(categoryResponses).length === 0) {
-                    await interaction.editReply({ content: 'No responses found for this category.', components: [] });
-                    return;
-                }
-                
-                // Get stored context
-                const context = client.replyContext?.get(interaction.user.id);
-                if (!context) {
-                    await interaction.editReply({ content: 'Session expired. Please use /reply again.', components: [] });
-                    return;
-                }
-                
-                // Create select menu for responses within the category
-                const responseOptions = Object.keys(categoryResponses).map(key => ({
-                    label: key.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                    value: key,
-                    description: categoryResponses[key].substring(0, 100) // Preview of response
-                }));
-                
-                // Discord select menus can only have 25 options
-                const responseRow = new Discord.MessageActionRow()
-                    .addComponents(
-                        new Discord.MessageSelectMenu()
-                            .setCustomId('reply_select_response')
-                            .setPlaceholder('Select a response')
-                            .addOptions(responseOptions.slice(0, 25))
-                    );
-                
-                // Update context with selected category
-                context.category = category;
-                client.replyContext.set(interaction.user.id, context);
-                
-                await interaction.editReply({ 
-                    content: `Select a response from **${category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}**:`, 
-                    components: [responseRow] 
-                });
-            } catch (e) {
-                func.handle_errors(e, client, 'interactionCreate.js', 'Error handling reply category selection');
-                try {
-                    await interaction.editReply({ content: 'An error occurred. Please try again.', components: [] });
-                } catch (_) {}
-            }
-            return;
-        }
-
-        if (interaction.customId === 'reply_select_response') {
-            try {
-                await interaction.deferUpdate();
-                
-                const responseKey = interaction.values[0];
-                
-                // Get stored context
-                const context = client.replyContext?.get(interaction.user.id);
-                if (!context) {
-                    await interaction.editReply({ content: 'Session expired. Please use /reply again.', components: [] });
-                    return;
-                }
-                
-                const { channelId, userId, username, greeting, ack, category } = context;
-                
-                if (!category) {
-                    await interaction.editReply({ content: 'Category not found. Please use /reply again.', components: [] });
-                    return;
-                }
-                
-                // Get the response text
-                const responseText = responses[category]?.[responseKey];
-                if (!responseText) {
-                    await interaction.editReply({ content: 'Response not found.', components: [] });
-                    return;
-                }
-                
-                // Replace placeholders
-                let finalResponse = responseText
-                    .replace(/{greeting}/g, greeting)
-                    .replace(/{player}/g, username)
-                    .replace(/{ack}/g, ack);
-                
-                // Get the channel
-                const channel = await client.channels.fetch(channelId).catch(() => null);
-                if (!channel) {
-                    await interaction.editReply({ content: 'Could not find the ticket channel.', components: [] });
-                    return;
-                }
-                
-                // Send the message to the ticket channel
-                await channel.send(finalResponse);
-                
-                // Clean up context
-                client.replyContext?.delete(interaction.user.id);
-                
-                // Update the interaction to show success
-                await interaction.editReply({ 
-                    content: 'Response sent successfully!', 
-                    components: [] 
-                });
-            } catch (e) {
-                func.handle_errors(e, client, 'interactionCreate.js', 'Error handling reply response selection');
-                try {
-                    await interaction.editReply({ content: 'An error occurred while sending the response.', components: [] });
-                } catch (_) {}
-                // Clean up context on error
-                client.replyContext?.delete(interaction.user.id);
-            }
-            return;
         }
 
         if (interaction.customId === 'ticketclose') {
