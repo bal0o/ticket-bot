@@ -28,13 +28,11 @@ module.exports = {
                 .setRequired(true)
                 .setAutocomplete(true)),
     async execute(interaction, client) {
-        await interaction.deferReply({ ephemeral: true });
-        
         const channel = interaction.channel;
         
         // Check if this is a valid ticket channel
         if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) {
-            return interaction.editReply('This is not a valid ticket channel.');
+            return interaction.reply({ content: 'This is not a valid ticket channel.', ephemeral: true });
         }
         
         // Get the user ID from channel topic
@@ -43,7 +41,7 @@ module.exports = {
         // Fetch the user to get their username
         const user = await client.users.fetch(userId).catch(() => null);
         if (!user) {
-            return interaction.editReply('Could not find the user for this ticket.');
+            return interaction.reply({ content: 'Could not find the user for this ticket.', ephemeral: true });
         }
         
         // Get greeting and ack from config, with defaults
@@ -55,25 +53,47 @@ module.exports = {
         const responseKey = interaction.options.getString('response');
         
         if (!category || !responseKey) {
-            return interaction.editReply('Please select both category and response.');
+            return interaction.reply({ content: 'Please select both category and response.', ephemeral: true });
         }
         
         const responseText = responses[category]?.[responseKey];
         
         if (!responseText) {
-            return interaction.editReply('Response not found.');
+            return interaction.reply({ content: 'Response not found.', ephemeral: true });
         }
         
         // Replace placeholders
-        let finalResponse = responseText
+        let preFilledResponse = responseText
             .replace(/{greeting}/g, greeting)
             .replace(/{player}/g, user.username)
             .replace(/{ack}/g, ack);
         
-        // Send the message to the ticket channel
-        await channel.send(finalResponse);
+        // Store context for modal submission
+        client.replyContext = client.replyContext || new Map();
+        client.replyContext.set(interaction.user.id, {
+            channelId: channel.id,
+            userId: userId,
+            username: user.username,
+            greeting: greeting,
+            ack: ack
+        });
         
-        await interaction.editReply('Response sent successfully!');
+        // Create and show modal for editing
+        const replyModal = new Discord.Modal()
+            .setCustomId('replyStandardResponse')
+            .setTitle('Edit Standard Response');
+        
+        const replyInput = new Discord.TextInputComponent()
+            .setCustomId('replyText')
+            .setLabel('Response (editable)')
+            .setStyle('PARAGRAPH')
+            .setRequired(true)
+            .setValue(preFilledResponse.substring(0, 4000)); // Discord modal limit is 4000 chars
+        
+        const firstActionRow = new Discord.MessageActionRow().addComponents(replyInput);
+        replyModal.addComponents(firstActionRow);
+        
+        await interaction.showModal(replyModal);
     },
     async autocomplete(interaction, client) {
         const focusedOption = interaction.options.getFocused(true);

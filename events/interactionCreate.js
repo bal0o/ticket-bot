@@ -163,6 +163,135 @@ module.exports = async function (client, interaction) {
             return;
         }
 
+        if (interaction.customId === 'replyStandardResponse') {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                
+                const context = client.replyContext?.get(interaction.user.id);
+                if (!context) {
+                    return interaction.editReply({ content: 'Session expired. Please use /reply again.', ephemeral: true });
+                }
+                
+                const { channelId, userId } = context;
+                const editedResponse = interaction.fields.getTextInputValue('replyText');
+                
+                if (!editedResponse || !editedResponse.trim()) {
+                    return interaction.editReply({ content: 'Response cannot be empty.', ephemeral: true });
+                }
+                
+                // Get the channel
+                const channel = await client.channels.fetch(channelId).catch(() => null);
+                if (!channel) {
+                    return interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true });
+                }
+                
+                // Get the user for DM
+                const user = await client.users.fetch(userId).catch(() => null);
+                
+                // Get or create webhook (similar to messageCreate.js)
+                const webhookChannel = channel;
+                let webhook = null;
+                
+                try {
+                    if (!webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+                        throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
+                    }
+                    
+                    const webhooks = await webhookChannel.fetchWebhooks();
+                    webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
+                    
+                    if (!webhook) {
+                        webhook = await webhookChannel.createWebhook("Ticket Webhook", {
+                            avatar: interaction.user.displayAvatarURL()
+                        });
+                    }
+                } catch (webhookError) {
+                    func.handle_errors(webhookError, client, 'interactionCreate.js', 'Error creating/fetching webhook for reply');
+                    // Fallback to regular message if webhook fails
+                    await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                }
+                
+                // Send via webhook to appear as staff member
+                if (webhook) {
+                    const sanitize = (text) => {
+                        let replyNoEveryone = text.replace(`@everyone`, `@ everyone`);
+                        let replyNoHere = replyNoEveryone.replace(`@here`, `@ here`);
+                        return replyNoHere.replace(`<@`, `<@ `);
+                    };
+                    
+                    // Get display name from member if available, otherwise use username
+                    let displayName = interaction.user.username;
+                    try {
+                        if (interaction.member && interaction.member.displayName) {
+                            displayName = interaction.member.displayName;
+                        }
+                    } catch (_) {}
+                    
+                    try {
+                        await webhook.send({
+                            content: sanitize(editedResponse),
+                            username: displayName,
+                            avatarURL: interaction.user.displayAvatarURL()
+                        });
+                    } catch (webhookSendError) {
+                        func.handle_errors(webhookSendError, client, 'interactionCreate.js', 'Error sending webhook message');
+                        // Fallback
+                        await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                    }
+                }
+                
+                // Send DM to user (similar to regular ticket replies)
+                if (user) {
+                    try {
+                        let roleName = 'Staff';
+                        let displayName = interaction.user.username;
+                        let staffAvatar = interaction.user.displayAvatarURL();
+                        
+                        try {
+                            if (interaction.member) {
+                                displayName = interaction.member.displayName || interaction.user.username;
+                                staffAvatar = interaction.member.displayAvatarURL?.() || interaction.user.displayAvatarURL();
+                                
+                                const roles = interaction.member.roles?.cache
+                                    ?.filter(role => role.id !== interaction.guild.id)
+                                    ?.sort((a, b) => b.position - a.position);
+                                
+                                const highestRole = roles?.first();
+                                if (highestRole) {
+                                    roleName = highestRole.name;
+                                }
+                            }
+                        } catch (_) {}
+                        
+                        const replyEmbed = new Discord.MessageEmbed()
+                            .setAuthor({ 
+                                name: `${displayName} (${roleName})`, 
+                                iconURL: staffAvatar
+                            })
+                            .setDescription(editedResponse)
+                            .setColor(client.config.bot_settings.main_color);
+                        
+                        await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                    } catch (dmError) {
+                        // DM failures are not critical, just log
+                        func.handle_errors(dmError, client, 'interactionCreate.js', 'Error sending DM for reply command');
+                    }
+                }
+                
+                // Clean up context
+                client.replyContext?.delete(interaction.user.id);
+                
+                await interaction.editReply({ content: 'Response sent successfully!', ephemeral: true });
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'Error handling replyStandardResponse modal');
+                try {
+                    await interaction.editReply({ content: 'An error occurred while sending the response.', ephemeral: true });
+                } catch (_) {}
+                client.replyContext?.delete(interaction.user.id);
+            }
+            return;
+        }
+
         if (interaction.customId === "CustomResponseModal") {
             await interaction.deferUpdate().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})
 
