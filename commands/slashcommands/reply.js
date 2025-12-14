@@ -3,21 +3,14 @@ const Discord = require('discord.js');
 const func = require('../../utils/functions.js');
 const responses = require('../../content/response.json');
 
-// Build a flat list of all responses for autocomplete
-function buildResponseList() {
-    const responseList = [];
-    for (const [category, categoryResponses] of Object.entries(responses)) {
-        for (const [responseKey, responseText] of Object.entries(categoryResponses)) {
-            const categoryDisplay = category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const responseDisplay = responseKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            responseList.push({
-                name: `${categoryDisplay}: ${responseDisplay}`,
-                value: `${category}:${responseKey}`,
-                description: responseText.substring(0, 100).replace(/{greeting}|{player}|{ack}/g, '...')
-            });
-        }
-    }
-    return responseList;
+// Format category name for display
+function formatCategoryName(category) {
+    return category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
+// Format response name for display
+function formatResponseName(responseKey) {
+    return responseKey.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 module.exports = {
@@ -25,8 +18,13 @@ module.exports = {
         .setName('reply')
         .setDescription('Send a standard response to the ticket.')
         .addStringOption(option =>
+            option.setName('category')
+                .setDescription('Select a response category')
+                .setRequired(true)
+                .setAutocomplete(true))
+        .addStringOption(option =>
             option.setName('response')
-                .setDescription('Select a standard response to send')
+                .setDescription('Select a response from the category')
                 .setRequired(true)
                 .setAutocomplete(true)),
     async execute(interaction, client) {
@@ -52,13 +50,14 @@ module.exports = {
         const greeting = client.config.active_ticket_settings?.greeting || 'Hey';
         const ack = client.config.active_ticket_settings?.ack || 'Thanks';
         
-        // Get the selected response
-        const responseValue = interaction.options.getString('response');
-        if (!responseValue || !responseValue.includes(':')) {
-            return interaction.editReply('Invalid response selected.');
+        // Get the selected category and response
+        const category = interaction.options.getString('category');
+        const responseKey = interaction.options.getString('response');
+        
+        if (!category || !responseKey) {
+            return interaction.editReply('Please select both category and response.');
         }
         
-        const [category, responseKey] = responseValue.split(':');
         const responseText = responses[category]?.[responseKey];
         
         if (!responseText) {
@@ -77,28 +76,65 @@ module.exports = {
         await interaction.editReply('Response sent successfully!');
     },
     async autocomplete(interaction, client) {
-        const focusedValue = interaction.options.getFocused();
-        const responseList = buildResponseList();
+        const focusedOption = interaction.options.getFocused(true);
+        const focusedValue = focusedOption.value;
         
-        // Filter responses based on user input, or show all if no input
-        let filtered;
-        if (!focusedValue || focusedValue.trim() === '') {
-            filtered = responseList.slice(0, 25);
-        } else {
-            filtered = responseList
-                .filter(response => 
-                    response.name.toLowerCase().includes(focusedValue.toLowerCase()) ||
-                    response.description.toLowerCase().includes(focusedValue.toLowerCase())
-                )
-                .slice(0, 25); // Discord limit is 25 choices
+        if (focusedOption.name === 'category') {
+            // Autocomplete for categories
+            const categories = Object.keys(responses);
+            let filtered;
+            
+            if (!focusedValue || focusedValue.trim() === '') {
+                filtered = categories.slice(0, 25);
+            } else {
+                filtered = categories
+                    .filter(cat => 
+                        formatCategoryName(cat).toLowerCase().includes(focusedValue.toLowerCase()) ||
+                        cat.toLowerCase().includes(focusedValue.toLowerCase())
+                    )
+                    .slice(0, 25);
+            }
+            
+            await interaction.respond(
+                filtered.map(category => ({
+                    name: formatCategoryName(category),
+                    value: category
+                }))
+            );
+        } else if (focusedOption.name === 'response') {
+            // Autocomplete for responses within the selected category
+            const selectedCategory = interaction.options.getString('category');
+            
+            if (!selectedCategory || !responses[selectedCategory]) {
+                // If no category selected yet, return empty
+                await interaction.respond([]);
+                return;
+            }
+            
+            const categoryResponses = responses[selectedCategory];
+            const responseKeys = Object.keys(categoryResponses);
+            
+            let filtered;
+            if (!focusedValue || focusedValue.trim() === '') {
+                filtered = responseKeys.slice(0, 25);
+            } else {
+                filtered = responseKeys
+                    .filter(key => 
+                        formatResponseName(key).toLowerCase().includes(focusedValue.toLowerCase()) ||
+                        key.toLowerCase().includes(focusedValue.toLowerCase()) ||
+                        categoryResponses[key].toLowerCase().includes(focusedValue.toLowerCase())
+                    )
+                    .slice(0, 25);
+            }
+            
+            await interaction.respond(
+                filtered.map(key => ({
+                    name: formatResponseName(key),
+                    value: key,
+                    description: categoryResponses[key].substring(0, 100).replace(/{greeting}|{player}|{ack}/g, '...')
+                }))
+            );
         }
-        
-        await interaction.respond(
-            filtered.map(response => ({
-                name: response.name,
-                value: response.value
-            }))
-        );
     }
 };
 
