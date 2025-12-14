@@ -46,7 +46,9 @@
 "ticket_user_embed_color": "#208cdd",
 "ticket_staff_embed_color": "#89CFF0",
 "staff_ticket_replies_in_embed": true,
-"sendUserCloseReason": true
+"sendUserCloseReason": true,
+"greeting": "Hey",
+"ack": "Acknowledged"
 },
 
 "timeouts": {

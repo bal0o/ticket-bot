@@ -1,0 +1,59 @@
+{
+    "general-support": {
+        "greeting": "{greeting} {player}, would you be able to provide a bit more detail about what happened?",
+        "skinbox": "{greeting} {player}, We’ve mostly fixed the skinbox issues!\nyou should be able to now use /sb in-game to skin items using our curated list of approved skins.\nThis list includes:\nMost pre-launch skins\nMost of the skins players have requested since skinbox broke\nThe only missing feature:\nYou still cannot skin items using skins you personally own via commands. Spray cans + repair benches are still required for that.\nWant more skins added?\nUse /skinrequest [skinid] in game!",
+        "trouble shooting": "{greeting} sorry your having this problem please attempt the following to see if it can help resolve your issues:\nVerifying your game files.\n",
+        "ST not working": "{greeting} sorry to hear that, can you try doing /stfix for me?",
+        "Teams not working": "{greeting}, how did you create the team?",
+        "Dome Event Heli": "{greeting}, sorry to hear about this. This issues is known and is activly being looking into by the dev team. For now please ignore the heli. Is there anything else I can help you with today?",
+        "RP System Update": "{greeting} so with the new changes to the RP system, your balance reflects not only the RP you have in the bank but the RP you have in your pockets too. So when you deposit the RP the balance does not change. a good way to test this is by taking the RP from your inventory (by placing it in a box or on the ground) and you will see the balance go down.",
+        "Ticket Volume [High]": "{greeting} {player}, really sorry for the delay, we are experiencing a high volume of tickets right now. what happened please?",
+        "Harbinger door not opening": "{ack}, did the card get used when you swiped, or did nothing happen at all?",
+        "Raid not spawning": "{greeting} {player}, the raid will appear soon it might currently be in the queue. If you check the in-game chat it should let you know there when you purchased it! :smile:",
+        "Bradley crate outside areana": "{greeting} sorry that you are having this problem. This is due to the bradley range, this will be resolved in a future patch but for now I can offer you a refund on the bradley you lost!",
+        "World \"x\" down": "{greeting} there let me double check and see what we can do :smile:",
+        "NRE": "{greeting} {player}, this is a known issue and is currently being worked on. At the moment, I’m unable to provide direct assistance sorry about that. Is there anything else I can help you with today? :smile:",
+        "Object Reference Error": "{greeting} {player}, this is a known issue and is actively being worked on. Is there anything else I can help you with today? :smile:",
+        "cloud flare down": "{greeting} {player}, it seems like cloudflare is having some issues right now. Unfortunately, there’s nothing we can do on our end to resolve this. You can check Cloudflare’s status page for updates: https://www.cloudflarestatus.com/ Is there anything else I can help you with today? :smile:",
+        "ticket-close": "Is there anything else I can help you with today? :smile:"
+    },
+    "clipping": {
+        "Steam Clipping": "{greeting}, steam now has a built in clipping feature, if you press shift + tab in game it will pop up with the steam overlay and if you hit the settings button along the bottom and go to the 'game recording' tab you can select the settings you wish to use. It records up to 120 minutes back and it is all cloud based so no storage or performance issues. :smile: \nMore information here: https://help.steampowered.com/en/faqs/view/23B7-49AD-4A28-9590",
+        "Medal Clipping": "{greeting} {player}, Medal is a light weight, easy to use clipping service where sharing your clips is as simple as copying a link. More information here: https://medal.tv/",
+        "SteelSeries Clipping": "{greeting} {player}, If you have Steelseries gg you can use the moments to capture your gameplay without it constantly recording! More information here: https://steelseries.com/gg/moments"
+    },
+    "rp-refund": {
+        "greeting": "{greeting} {player}, please give me a moment while I verify a few details.",
+        "info": "Your request is currently being reviewed by our team. Please be patient as this can take some time. We’ll notify you once we have an update. Thank you for your understanding!",
+        "refund issued": "That should be your refund in now, is there anything else I can help you with today? :smile:",
+        "refund denied": "Sorry to inform you that after reviewing your request, we are unable to issue a refund at this time. Is there anything else I can help you with today?",
+        "lack of evidence deny": "Unfortunately, without proper evidence we’re unable to issue an RP refund at this time. Is there anything else I can help you with today?",
+        "ticket-close": "Once processed, we’ll notify you. Thank you for your patience."
+    },
+    "lost-items": {
+        "greeting": "{greeting} {player}, please give me a moment while I verify a few details.",
+        "itemised list": "{ack}, please can you make me an itemised list of items you lost - including quantities (1 per line, on desktop you can use shift+enter to start a new line) and I will get these returned to you.",
+        "staff building": "Please can you come to hub 1 to the staff building and I will get those items returned to you! :smile:",
+        "lack of evidence deny": "Unfortunately, without evidence we cannot issue a refund at this time. Is there anything else I can help you with today?",
+        "ticket-close": "We’ll update you as soon as we have more information. Thanks for your patience!"
+    },
+    "known-issues": {
+        "Generic": "{greeting} there, this is a known issue and the devs are activily investigating it. As of right now we can't assist you with this issue. Is that everything I can help you with today? :smile:",
+        "Pictures going blank": "{greeting}, This is a known bug and is being looked into by the dev team. Is there anything else I can help you with today? :smile:",
+        "Unknown issue": "{greeting} {player}. Thank you for bringing this to our attention. I have informed the necassery people of this issue. How ever at this moment of time I am unable to assist you till I hear back from the devs. Is there anything else I can help you with today? :smile:",
+        "Decay issues": "{greeting} {player}, the team is currently aware of the decay issue and are looking into it promptly! Is there anything else I can help you with today?",
+        "Zombie event": "{greeting} I am sorry to hear you are having this issue! The devs are aware of this issue however and are working on getting it resolved as soon as possible. Is there anything I can help you with today? :smile:",
+        "Cooking buffs": "{greeting} {player}, sorry to hear your having issues with the cooking buffs. However the devs are currently working on a fix for this issue, let me see if I can get someone to assist you! :smile:",
+        "/sil": "{greeting} {player}, the /sil issue is being worked on by the dev team. Unfortunately, I’m unable to assist further at this time. Is there anything else I can help you with today? :smile:",
+        "Set Genes": "{greeting} {player}, the set genes issue is known and is being worked on by the dev team. Unfortunately, I’m unable to assist further at this time. Is there anything else I can help you with today? :smile:",
+        "Backpack Gather": "{greeting} {player}, the backpack gathering issue is known and is being worked on by the dev team. Unfortunately, I’m unable to assist further at this time. Is there anything else I can help you with today? :smile:"
+    },
+    "naval-issues": {
+        "can't modify boat": "{greeting} {player}, if you’re in the deep sea, this is actually a vanilla Rust feature. Try returning to the mainland - you should be able to modify your boat there. :smile:",
+        "can't see deep sea map": "{greeting} {player}, not being able to see the map in deep sea areas is intentional and part of Rust’s base game. You’ll unlock more map visibility as you explore! :smile:",
+        "Uknown Issue": "{greeting} {player}, sadly this is a unknown issue that we can't assist you with today please try contacting facepunch to get a resolution to your problem here: https://support.facepunchstudios.com/hc/en-us"
+    },
+    "naval-bugs": {
+        "Unsolvable bug": "Sorry to hear you’re experiencing this! Unfortunately, this is an issue we’re unable to resolve on our end. You can report it directly to Facepunch here: https://support.facepunchstudios.com/hc/en-us"
+    }
+}
