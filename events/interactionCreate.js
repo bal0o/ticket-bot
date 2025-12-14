@@ -803,9 +803,14 @@ module.exports = async function (client, interaction) {
 
             const handlerRaw = require("../content/handler/options.json");
             // Build move options from configured ticket types that have a valid ticket-category present in the guild
+            // Filter by allow_transfers (same as /move slash command)
             const typeOptions = [];
             for (const typeKey of Object.keys(handlerRaw.options)) {
                 try {
+                    // Skip if transfers are explicitly disabled
+                    if (handlerRaw.options[typeKey].allow_transfers === false) {
+                        continue;
+                    }
                     const qf = require(`../content/questions/${handlerRaw.options[typeKey].question_file}`);
                     const categoryId = qf["ticket-category"];
                     if (!categoryId) continue;
@@ -820,7 +825,10 @@ module.exports = async function (client, interaction) {
                     }
                     if (!cat || cat.type !== 'GUILD_CATEGORY') continue;
                     typeOptions.push({ typeKey, categoryName: cat.name, categoryId });
-                } catch (_) {}
+                } catch (err) {
+                    // Log errors but continue processing other ticket types
+                    func.handle_errors(err, client, 'interactionCreate.js', `Error processing ticket type ${typeKey} for moveticket`);
+                }
             }
 
             if (typeOptions.length === 0) {
