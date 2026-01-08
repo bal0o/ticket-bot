@@ -60,7 +60,7 @@
 
 "file_extensions": {
 "allowed_file_extensions_enabled": true,
-"allowed_file_extensions": ["png", "jpeg", "txt", "jpg", "gif", "mp4", "mp3", "vdf"]
+"allowed_file_extensions": ["png", "jpeg", "txt", "jpg", "gif", "mp4", "mp3", "ogg", "vdf"]
 },
 
     "transcript_settings": {
