@@ -586,16 +586,17 @@ class MySQLAdapter {
             }
             
             if (userId) {
-                // Search by both user_id and username (similar to closed_by search)
+                // Search by user_id (Discord ID), steam_id, and username
                 const userIdStr = String(userId).trim();
                 if (/^\d+$/.test(userIdStr)) {
-                    // It's a numeric ID - search user_id exactly, but also allow partial username match
-                    where.push('(user_id = ? OR LOWER(username) LIKE ?)');
-                    params.push(userIdStr, `%${userIdStr.toLowerCase()}%`);
+                    // It's a numeric ID - could be Discord ID or Steam ID
+                    // Search user_id exactly, steam_id exactly, and also allow partial username match
+                    where.push('(user_id = ? OR steam_id = ? OR LOWER(username) LIKE ?)');
+                    params.push(userIdStr, userIdStr, `%${userIdStr.toLowerCase()}%`);
                 } else {
-                    // It's a username - search username field and also check if it matches a user_id
-                    where.push('(LOWER(username) LIKE ? OR user_id LIKE ?)');
-                    params.push(`%${userIdStr.toLowerCase()}%`, `%${userIdStr}%`);
+                    // It's a username or partial match - search username field, user_id, and steam_id
+                    where.push('(LOWER(username) LIKE ? OR user_id LIKE ? OR steam_id LIKE ?)');
+                    params.push(`%${userIdStr.toLowerCase()}%`, `%${userIdStr}%`, `%${userIdStr}%`);
                 }
             }
             

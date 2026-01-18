@@ -941,7 +941,10 @@ module.exports = async function (client, interaction) {
                     const topicUser = interaction.channel.topic;
                     if (topicUser) {
                         const user = await client.users.fetch(topicUser).catch(() => null);
-                        if (user) user.send(`Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`).catch(() => {});
+                        if (user) {
+                            // Use sendDMWithRetry for better reliability with long-term tickets
+                            await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 }).catch(() => {});
+                        }
                     }
                     await interaction.deleteReply().catch(() => {});
                 })
@@ -1239,16 +1242,24 @@ module.exports = async function (client, interaction) {
 				let openTicketCount = 0;
 				if (candidateChannels.size > 0 && typeof db.query === 'function') {
 					try {
-						// Get all open tickets for this user from database
+						// Get all open tickets for this user from database, including ticket_type
 						const [openTicketsRows] = await db.query(
-							`SELECT ticket_id FROM tickets 
+							`SELECT ticket_id, ticket_type FROM tickets 
 							WHERE user_id = ? 
 							AND (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`,
 							[String(interaction.member.user.id)]
 						);
-						const openTicketIds = new Set(openTicketsRows.map(row => String(row.ticket_id)));
 						
-						// Only count channels that correspond to open tickets
+						// Filter out internal tickets and applications
+						const publicOpenTickets = openTicketsRows.filter(row => {
+							const ticketType = row.ticket_type;
+							if (!ticketType) return true; // Include if we can't determine type
+							return !func.shouldExcludeFromTicketCount(ticketType);
+						});
+						
+						const openTicketIds = new Set(publicOpenTickets.map(row => String(row.ticket_id)));
+						
+						// Only count channels that correspond to open public (non-internal) tickets
 						for (const channel of candidateChannels.values()) {
 							// Extract ticket ID from channel name (last part after last '-')
 							const nameParts = channel.name.split('-');

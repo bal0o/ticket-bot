@@ -31,6 +31,33 @@ async function validateWebhook(webhook, channel) {
     }
 }
 
+// Helper function to get file extension from attachment (checks name first, then URL as fallback)
+function getFileExtension(attachment) {
+    // First try to get extension from attachment name (most reliable)
+    if (attachment.name) {
+        const nameMatch = attachment.name.match(/\.([^.]+)$/i);
+        if (nameMatch) {
+            return nameMatch[1].toLowerCase();
+        }
+    }
+    // Fallback to checking URL (for backwards compatibility)
+    if (attachment.url || attachment.attachment) {
+        const url = (attachment.url || attachment.attachment).split('?')[0];
+        const urlMatch = url.match(/\.([^.]+)$/i);
+        if (urlMatch) {
+            return urlMatch[1].toLowerCase();
+        }
+    }
+    return null;
+}
+
+// Helper function to check if attachment extension is allowed
+function isExtensionAllowed(attachment, allowedExtensions) {
+    const ext = getFileExtension(attachment);
+    if (!ext) return false;
+    return allowedExtensions.some(allowedExt => allowedExt.toLowerCase() === ext);
+}
+
 module.exports = async function (client, message) {
     try {
         // Ignore messages from users who are in the selection process
@@ -208,14 +235,10 @@ module.exports = async function (client, message) {
                     // Validate all attachments before sending any
                     for (let attachment of message.attachments) {
                         if (client.config.file_extensions.allowed_file_extensions_enabled === true) {
-                            let allowedExtensionCount = 0;
-                            let attachmentLink = attachment[1].attachment.split(`?ex=`)[0];
-                            for (extension of client.config.file_extensions.allowed_file_extensions) {
-                                if (attachmentLink.substring(attachmentLink.length - extension.length).toLowerCase() === extension.toLowerCase()) allowedExtensionCount++
-                            }
-                            if (allowedExtensionCount === 0) {
+                            const attachmentObj = attachment[1];
+                            if (!isExtensionAllowed(attachmentObj, client.config.file_extensions.allowed_file_extensions)) {
                                 const errorEmbed = new Discord.MessageEmbed()
-                                    .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachment[1].name}`) : `**Attachment \`(${attachment[1].name})\` contains a blacklisted extension and was not sent!**`)
+                                    .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachmentObj.name}`) : `**Attachment \`(${attachmentObj.name})\` contains a blacklisted extension and was not sent!**`)
                                     .setColor(client.config.active_ticket_settings.ticket_staff_embed_color);
                                 await message.channel.send({ embeds: [errorEmbed] }).catch(e => { func.handle_errors(e, client, `messageCreate.js`, null) });
                                 await message.react('❌').catch(() => {});
@@ -467,14 +490,10 @@ async function processTicketMessage(message, channel, client) {
     const filesToSend = [];
     for (let attachment of message.attachments) {
         if (client.config.file_extensions.allowed_file_extensions_enabled === true) {
-            let extensionChecks = 0;
-            let attachementLink = attachment[1].attachment.split(`?ex=`)[0];
-            for (extension of client.config.file_extensions.allowed_file_extensions) {
-                if (attachementLink.substring(attachementLink.length - extension.length).toLowerCase() === extension.toLowerCase()) extensionChecks++
-            }
-            if (extensionChecks === 0) {
+            const attachmentObj = attachment[1];
+            if (!isExtensionAllowed(attachmentObj, client.config.file_extensions.allowed_file_extensions)) {
                 const TicketreplyEmbed = new Discord.MessageEmbed()
-                    .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachment[1].name}`) : `**Attachment \`(${attachment[1].name})\` contains a blacklisted extension and was not sent!**`)
+                    .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachmentObj.name}`) : `**Attachment \`(${attachmentObj.name})\` contains a blacklisted extension and was not sent!**`)
                     .setColor(config.active_ticket_settings.ticket_user_embed_color);
                 await message.channel.send({embeds: [TicketreplyEmbed]}).catch((err) => { func.handle_errors(err, client, `messageCreate.js`, null) })
                 await message.react('❌')

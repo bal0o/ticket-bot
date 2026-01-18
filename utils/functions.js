@@ -22,6 +22,56 @@ const fs = require("fs");
 const applications = require('./applications');
 
 /**
+ * Check if a ticket type is internal by looking up the question file
+ * @param {string} ticketType - The ticket type name (e.g., "Admin Escalation" or "admin-escalation")
+ * @returns {boolean} - True if the ticket type is internal, false otherwise
+ */
+module.exports.isTicketTypeInternal = function(ticketType) {
+    try {
+        if (!ticketType) return false;
+        const handlerRaw = require("../content/handler/options.json");
+        
+        // Normalize the input: convert to lowercase and replace hyphens/spaces with a common separator
+        const normalizedInput = ticketType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        
+        // Try to find a match by normalizing both the input and the option keys
+        const found = Object.keys(handlerRaw.options).find(optionKey => {
+            const normalizedKey = optionKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            return normalizedKey === normalizedInput || optionKey.toLowerCase() === ticketType.toLowerCase();
+        });
+        
+        if (!found) return false;
+        const questionFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+        return !!questionFile.internal;
+    } catch (_) {
+        return false;
+    }
+};
+
+/**
+ * Check if a ticket type should be excluded from open ticket counts
+ * (includes internal tickets and staff applications)
+ * @param {string} ticketType - The ticket type name (e.g., "Staff Application" or "Admin Escalation")
+ * @returns {boolean} - True if the ticket should be excluded from counts, false otherwise
+ */
+module.exports.shouldExcludeFromTicketCount = function(ticketType) {
+    if (!ticketType) return false;
+    
+    // Check if it's an internal ticket
+    if (module.exports.isTicketTypeInternal(ticketType)) {
+        return true;
+    }
+    
+    // Check if it's a staff application (case-insensitive)
+    const normalizedType = ticketType.toLowerCase();
+    if (normalizedType.includes('application') || normalizedType.includes('staff application')) {
+        return true;
+    }
+    
+    return false;
+};
+
+/**
  * Send a DM with retries and delivery verification.
  * Returns { delivered: boolean, message: Message|null, error: Error|null }
  */
@@ -830,12 +880,59 @@ module.exports.updateTicketStatus = async function(client) {
         // Get all channels in the staff guild
         const channels = staffGuild.channels.cache;
         
+        // First, get all open non-internal tickets from the database
+        let openPublicTicketIds = new Set();
+        let dbQuerySucceeded = false;
+        try {
+            if (typeof db.query === 'function') {
+                const [openTicketsRows] = await db.query(
+                    `SELECT ticket_id, ticket_type FROM tickets 
+                    WHERE (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`
+                );
+                
+                dbQuerySucceeded = true;
+                
+                // Filter out internal tickets and applications
+                for (const row of openTicketsRows) {
+                    const ticketType = row.ticket_type;
+                    if (!ticketType || !module.exports.shouldExcludeFromTicketCount(ticketType)) {
+                        openPublicTicketIds.add(String(row.ticket_id));
+                    }
+                }
+            }
+        } catch (dbError) {
+            console.warn('[updateTicketStatus] Error querying database for open tickets:', dbError.message);
+            // Fall back to counting all channels if database query fails
+        }
+        
         // Count channels that have a topic matching Discord ID pattern (indicating they are ticket channels)
+        // Exclude internal tickets from the count by matching against database
         const ticketCount = channels.filter(channel => {
             // Discord.js v13 uses string constants
             const isTextChannel = channel.type === 'GUILD_TEXT' || channel.type === 0;
             const hasTicketTopic = channel.topic && /^\d{17,19}$/.test(channel.topic);
-            return isTextChannel && hasTicketTopic;
+            if (!isTextChannel || !hasTicketTopic) return false;
+            
+            // If database query succeeded, use it to filter out internal tickets
+            if (dbQuerySucceeded) {
+                try {
+                    // Extract ticket number from channel name (last part after last '-')
+                    const nameParts = channel.name.split('-');
+                    if (nameParts.length >= 2) {
+                        const ticketId = nameParts[nameParts.length - 1];
+                        // Only count if this ticket ID is in our set of open public tickets
+                        return openPublicTicketIds.has(ticketId);
+                    }
+                } catch (_) {
+                    // If parsing fails, exclude it (safer to exclude when we can't determine)
+                    return false;
+                }
+                // If we can't parse the ticket ID, exclude it
+                return false;
+            }
+            
+            // Fallback: if database query failed, count all channels (original behavior)
+            return true;
         }).size;
 
         console.log(`[updateTicketStatus] Found ${ticketCount} open ticket channels`);
@@ -1251,10 +1348,18 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
                 reply += `\n\nView your transcript: <${userUrl}>`;
             }
-            let sentMsg = null;
-            try { sentMsg = await user.send(reply); } catch (e) { /* ignore DM failures silently */ }
-            // Extra safety: try suppressing embeds in case Discord still attempts a preview
-            try { if (sentMsg && sentMsg.suppressEmbeds) await sentMsg.suppressEmbeds(true); } catch (_) {}
+            // Use sendDMWithRetry for better reliability with long-term tickets (handles stale DM channels)
+            try {
+                const result = await module.exports.sendDMWithRetry(user, reply, { maxAttempts: 3, baseDelayMs: 600 });
+                const sentMsg = result && result.message ? result.message : null;
+                // Extra safety: try suppressing embeds in case Discord still attempts a preview
+                if (sentMsg && sentMsg.suppressEmbeds) {
+                    try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+                }
+            } catch (e) {
+                // Log error but don't fail ticket closure
+                func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${DiscordID}`);
+            }
         }
         // Update ticket count
         await module.exports.updateTicketStatus(client);
