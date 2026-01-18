@@ -941,7 +941,10 @@ module.exports = async function (client, interaction) {
                     const topicUser = interaction.channel.topic;
                     if (topicUser) {
                         const user = await client.users.fetch(topicUser).catch(() => null);
-                        if (user) user.send(`Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`).catch(() => {});
+                        if (user) {
+                            // Use sendDMWithRetry for better reliability with long-term tickets
+                            await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 }).catch(() => {});
+                        }
                     }
                     await interaction.deleteReply().catch(() => {});
                 })

@@ -1348,10 +1348,18 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
                 reply += `\n\nView your transcript: <${userUrl}>`;
             }
-            let sentMsg = null;
-            try { sentMsg = await user.send(reply); } catch (e) { /* ignore DM failures silently */ }
-            // Extra safety: try suppressing embeds in case Discord still attempts a preview
-            try { if (sentMsg && sentMsg.suppressEmbeds) await sentMsg.suppressEmbeds(true); } catch (_) {}
+            // Use sendDMWithRetry for better reliability with long-term tickets (handles stale DM channels)
+            try {
+                const result = await module.exports.sendDMWithRetry(user, reply, { maxAttempts: 3, baseDelayMs: 600 });
+                const sentMsg = result && result.message ? result.message : null;
+                // Extra safety: try suppressing embeds in case Discord still attempts a preview
+                if (sentMsg && sentMsg.suppressEmbeds) {
+                    try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+                }
+            } catch (e) {
+                // Log error but don't fail ticket closure
+                func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${DiscordID}`);
+            }
         }
         // Update ticket count
         await module.exports.updateTicketStatus(client);

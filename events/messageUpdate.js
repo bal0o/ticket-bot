@@ -90,16 +90,64 @@ module.exports = async function (client, oldMessage, newMessage) {
         // Staff edits in ticket -> update DM side if applicable
         if (newMessage.guild && newMessage.channel && !newMessage.channel.isThread()) {
             const map = await db.get(`StaffForwardMap.${newMessage.id}`);
-            if (!map || !map.userId || !map.dmChannelId) return;
-
-            const dmChannel = await client.channels.fetch(map.dmChannelId).catch(() => null);
-            if (!dmChannel) return;
+            if (!map || !map.userId) return;
 
             const content = newMessage.content || "";
             const hasContent = content.trim() !== "";
 
             // Replace text messages; leave files untouched
             if (Array.isArray(map.textMessageIds) && map.textMessageIds.length > 0) {
+                let dmChannel = null;
+                
+                // Try to fetch stored DM channel first
+                if (map.dmChannelId) {
+                    dmChannel = await client.channels.fetch(map.dmChannelId).catch(() => null);
+                }
+                
+                // Recovery: If DM channel fetch failed (stale ID), fetch user and create new DM
+                if (!dmChannel && map.userId) {
+                    try {
+                        const user = await client.users.fetch(map.userId).catch(() => null);
+                        if (user) {
+                            // Use sendDMWithRetry which will create a new DM channel
+                            // For edits, we just need to send the new content (can't delete old messages)
+                            const newIds = [];
+                            if (hasContent) {
+                                if (content.length <= 2000) {
+                                    const result = await func.sendDMWithRetry(user, { content }, { maxAttempts: 2, baseDelayMs: 600 });
+                                    const sent = result && result.message ? result.message : null;
+                                    if (sent && sent.id) {
+                                        newIds.push(sent.id);
+                                        // Update stored dmChannelId with new channel ID
+                                        await db.set(`StaffForwardMap.${newMessage.id}.dmChannelId`, sent.channel?.id || map.dmChannelId).catch(() => {});
+                                    }
+                                } else {
+                                    for (let i = 0; i < content.length; i += 1900) {
+                                        const toSend = content.substring(i, Math.min(content.length, i + 1900));
+                                        const result = await func.sendDMWithRetry(user, { content: toSend }, { maxAttempts: 2, baseDelayMs: 600 });
+                                        const sent = result && result.message ? result.message : null;
+                                        if (sent && sent.id) {
+                                            newIds.push(sent.id);
+                                            // Update stored dmChannelId with new channel ID from first successful send
+                                            if (i === 0 && sent.channel?.id) {
+                                                await db.set(`StaffForwardMap.${newMessage.id}.dmChannelId`, sent.channel.id).catch(() => {});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            await db.set(`StaffForwardMap.${newMessage.id}.textMessageIds`, newIds);
+                            return; // Exit early after recovery
+                        }
+                    } catch (recoveryError) {
+                        func.handle_errors(recoveryError, client, `messageUpdate.js`, `DM recovery failed for user ${map.userId}`);
+                    }
+                    return; // Can't recover, exit
+                }
+                
+                // Normal path: DM channel is valid, delete old messages and send new ones
+                if (!dmChannel) return;
+                
                 // Delete old DM text messages
                 for (const msgId of map.textMessageIds) {
                     try { await dmChannel.messages.delete(msgId).catch(() => {}); } catch (_) {}
