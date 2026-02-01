@@ -190,7 +190,10 @@ module.exports = async function (client, message) {
             if (message.channel.isThread()) {
                 return;
             }
-            
+
+            // If the ticket user is posting in the channel (internal tickets), no forwarding needed
+            if (message.author.id === userId) return;
+
             const user = await client.users.fetch(userId).catch(() => null);
             if (!user) {
                 return message.reply("Could not find the user to send the message to.");
@@ -226,11 +229,11 @@ module.exports = async function (client, message) {
                 }
             } catch (_) {}
 
-            // Prepare mapping container for staff->user forwards
+            // Prepare mapping container for staff->user forwards (only used for non-internal tickets)
             const staffForward = { userId: user.id, dmChannelId: null, filesMessageId: null, textMessageIds: [] };
 
-            // Handle staff -> user attachments (send inline, no extra notices)
-            if (message.attachments && message.attachments.size > 0) {
+            // Handle staff -> user attachments (send inline, no extra notices). Skip for internal - user is in channel.
+            if (!ticketType?.internal && message.attachments && message.attachments.size > 0) {
                 try {
                     // Validate all attachments before sending any
                     for (let attachment of message.attachments) {
@@ -329,8 +332,8 @@ module.exports = async function (client, message) {
                     }
                 }
             }
-            
-            if (message.content.startsWith(`${prefix}me`)) {
+
+            if (!ticketType?.internal && message.content.startsWith(`${prefix}me`)) {
                 const replyContent = message.content.slice(`${prefix}me`.length).trim();
                 if (!replyContent) {
                     return message.reply("Please provide a message to send.");
@@ -376,7 +379,7 @@ module.exports = async function (client, message) {
                     await message.reply("There was an error sending your message. Please try again.");
                 }
 
-            } else if (message.content.startsWith(`${prefix}r`)) {
+            } else if (!ticketType?.internal && message.content.startsWith(`${prefix}r`)) {
                 if (ticketType && ticketType["anonymous-only-replies"] === false) {
                     const allowedRoles = client.config.role_ids.role_ids_anonymous_cmd;
                     if (!message.member.roles.cache.some(role => allowedRoles.includes(role.id))) {
@@ -412,7 +415,7 @@ module.exports = async function (client, message) {
                 if (command.toLowerCase() === "ticketinfo" || command.toLowerCase() === "ticketcheetos" || command.toLowerCase() === "ticketuserinfo") return;
                 client.commands.get(command)(client, message);
 
-			} else {
+			} else if (!ticketType?.internal) {
                 const replyContent = message.content;
                  if (!replyContent) {
                     return;
