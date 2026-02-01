@@ -94,7 +94,13 @@ async function main() {
                 console.log(`[fix_internal] Would add user ${userId} to #${channel.name} (${channel.id})`);
                 fixed++;
             } else {
-                await channel.permissionOverwrites.edit(userId, {
+                const user = await client.users.fetch(userId).catch(() => null);
+                if (!user) {
+                    console.error(`[fix_internal] Could not fetch user ${userId} for #${channel.name} (user may have left Discord)`);
+                    errors++;
+                    continue;
+                }
+                await channel.permissionOverwrites.create(user, {
                     VIEW_CHANNEL: true,
                     SEND_MESSAGES: true,
                     READ_MESSAGE_HISTORY: true,
