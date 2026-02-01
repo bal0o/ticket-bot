@@ -455,7 +455,15 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
             overwrites.push(add)
         }
     }
-}   
+}
+
+    // For internal tickets: add the user so they can participate directly in the channel (same Discord)
+    if (questionFile.internal) {
+        overwrites.push({
+            id: recepientMember.id,
+            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY'],
+        });
+    }
 
 // Get the server name from the responses if server selection is enabled
 let serverPrefix = "";
@@ -679,9 +687,9 @@ try {
         } catch (e) { func.handle_errors(e, client, 'functions.js', 'Failed to post Cheetos check'); }
     })();
 
-    // Skip creating staff thread for internal tickets
+    // Create staff thread for all tickets. For internal tickets it's a private thread (staff-only) so higher-level staff can discuss without the user seeing.
     let thread = null;
-    if (!questionFile.internal) try {
+    try {
         console.log(`[Functions] Creating staff thread for ticket #${formattedTicketNumber}...`);
         // Create as public thread first so we can add role permissions
         thread = await ticketChannel.threads.create({
@@ -786,38 +794,29 @@ try {
             } catch (e) {
                 func.handle_errors(e, client, `functions.js`, `Failed to add access roles to staff thread for ticket #${formattedTicketNumber}`);
             }
-            
-            // Convert thread to private after setting role permissions
+        } else if (client.config.role_ids.default_admin_role_id) {
+            // When no access roles: ensure admin role can access the staff thread
             try {
-                console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
-                await thread.edit({
-                    type: 'GUILD_PRIVATE_THREAD'
-                });
-                console.log(`[Functions] Successfully converted thread to private`);
-            } catch (convertError) {
-                console.error(`[Functions] Failed to convert thread to private:`, convertError);
-            }
-            
-            // Debug: Check final thread state
-            try {
-                console.log(`[Functions] Final thread state for ticket #${formattedTicketNumber}:`);
-                console.log(`[Functions] - Thread ID: ${thread.id}`);
-                console.log(`[Functions] - Thread Name: ${thread.name}`);
-                console.log(`[Functions] - Thread Type: ${thread.type}`);
-                console.log(`[Functions] - Thread Archived: ${thread.archived}`);
-                console.log(`[Functions] - Thread Locked: ${thread.locked}`);
-                console.log(`[Functions] - Thread Parent Channel: ${thread.parent?.name} (${thread.parent?.id})`);
-                
-                // Check if thread is visible to the bot
-                const fetchedThread = await ticketChannel.threads.fetch(thread.id).catch(() => null);
-                if (fetchedThread) {
-                    console.log(`[Functions] - Thread is fetchable by bot`);
-                } else {
-                    console.log(`[Functions] - WARNING: Thread is NOT fetchable by bot`);
+                const adminRole = staffGuild.roles.cache.get(client.config.role_ids.default_admin_role_id);
+                if (adminRole && thread.permissionOverwrites?.create) {
+                    await thread.permissionOverwrites.create(adminRole, {
+                        VIEW_CHANNEL: true,
+                        SEND_MESSAGES: true,
+                        READ_MESSAGE_HISTORY: true
+                    });
                 }
-            } catch (debugError) {
-                console.error(`[Functions] Error during thread debugging:`, debugError);
-            }
+            } catch (_) {}
+        }
+
+        // Convert thread to private so only explicitly added roles/members can see it
+        try {
+            console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
+            await thread.edit({
+                type: 'GUILD_PRIVATE_THREAD'
+            });
+            console.log(`[Functions] Successfully converted thread to private`);
+        } catch (convertError) {
+            console.error(`[Functions] Failed to convert thread to private:`, convertError);
         }
 
     } catch (e) {
