@@ -692,41 +692,11 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
             lastTicket = commsTickets.length > 0 ? commsTickets[commsTickets.length - 1] : null;
             if (lastTicket && lastTicket.channelId) {
                 try {
-                    // Try to fetch the channel to see if it exists
+                    // Try to fetch the channel to see if it exists (for UI only; do not post messages on view)
                     const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
                         headers: { Authorization: `Bot ${BOT_TOKEN}` }
                     });
                     channelExists = channelResponse.status === 200;
-                    console.log(`Channel ${lastTicket.channelId} exists: ${channelExists}`);
-                    
-                    // If channel exists, check if it has the proper setup (close button)
-                    if (channelExists) {
-                        try {
-                            const messagesResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages?limit=10`, {
-                                headers: { Authorization: `Bot ${BOT_TOKEN}` }
-                            });
-                            
-                            // Check if any message has the close button
-                            const hasCloseButton = messagesResponse.data.some(msg => 
-                                msg.components && msg.components.some(comp => 
-                                    comp.components && comp.components.some(btn => btn.custom_id === 'app_comm_close')
-                                )
-                            );
-                            
-                            if (!hasCloseButton) {
-                                console.log(`Channel ${lastTicket.channelId} exists but missing close button, adding it...`);
-                                // Add the close button message
-                                await axios.post(`https://discord.com/api/v10/channels/${lastTicket.channelId}/messages`, {
-                                    content: `📱 **Application Communication Channel**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}`,
-                                    components: [
-                                        { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
-                                    ]
-                                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
-                            }
-                        } catch (setupError) {
-                            console.error('Failed to check/setup channel:', setupError?.response?.data || setupError);
-                        }
-                    }
                 } catch (error) {
                     // Channel doesn't exist or we can't access it
                     channelExists = false;
