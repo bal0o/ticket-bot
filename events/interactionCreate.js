@@ -585,8 +585,9 @@ module.exports = async function (client, interaction) {
                 const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
                 if (!appId) { await interaction.editReply({ content: 'Not linked to an application.' }); return; }
                 const member = interaction.member;
-                const isAdmin = member.roles.cache.has(config.role_ids.application_admin_role_id) || member.roles.cache.has(config.role_ids.default_admin_role_id);
-                if (!isAdmin) { await interaction.editReply({ content: 'You do not have permission to close this.' }); return; }
+                const canAccess = member.roles.cache.has(config.role_ids?.application_admin_role_id) || member.roles.cache.has(config.role_ids?.default_admin_role_id)
+                    || (Array.isArray(config.web?.roles?.admin_role_ids) && config.web.roles.admin_role_ids.some(rid => member.roles.cache.has(rid)));
+                if (!canAccess) { await interaction.editReply({ content: 'You do not have permission to close this.' }); return; }
                 
                 // Get application details
                 const appRec = await applications.getApplication(appId);

@@ -849,16 +849,12 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         }
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
-        const adminRoleId = config.role_ids.application_admin_role_id || config.role_ids.default_admin_role_id;
-
-        // Viewer roles mirror application visibility: admin + staff roles from web.roles
+        // Comms channel: same roles as application access (admin + application_admin only, no general staff)
         const viewerRoles = new Set();
-        if (adminRoleId) viewerRoles.add(adminRoleId);
-        if (config.web && config.web.roles && Array.isArray(config.web.roles.admin_role_ids)) {
+        if (config.role_ids?.application_admin_role_id) viewerRoles.add(config.role_ids.application_admin_role_id);
+        if (config.role_ids?.default_admin_role_id) viewerRoles.add(config.role_ids.default_admin_role_id);
+        if (Array.isArray(config.web?.roles?.admin_role_ids)) {
             for (const rid of config.web.roles.admin_role_ids) if (rid) viewerRoles.add(rid);
-        }
-        if (config.web && config.web.roles && Array.isArray(config.web.roles.staff_role_ids)) {
-            for (const rid of config.web.roles.staff_role_ids) if (rid) viewerRoles.add(rid);
         }
 
         const overwrites = [

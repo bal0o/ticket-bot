@@ -40,7 +40,8 @@ function renderTranscript(messages, options) {
 	const ticketOpenerId = options.DiscordID != null ? String(options.DiscordID) : null;
 	for (const msg of list) {
 		const isFromTicketOpener = ticketOpenerId != null && msg.author?.id != null && String(msg.author.id) === ticketOpenerId;
-		const isStaffAnon = options.mode === 'user' && !msg.webhookId && !isFromTicketOpener && options.isAnonTicket && !/^!me\b/i.test(msg.content);
+		const contentStr = typeof msg.content === 'string' ? msg.content : (msg.content != null ? String(msg.content) : '');
+		const isStaffAnon = options.mode === 'user' && !msg.webhookId && !isFromTicketOpener && options.isAnonTicket && !/^!me\b/i.test(contentStr);
 		const displayName = isStaffAnon ? 'Brit Support' : (msg.author?.tag || msg.author?.username || 'Unknown');
 		const displayAvatar = isStaffAnon ? 'https://cdn.discordapp.com/embed/avatars/0.png' : (msg.author?.avatarURL || 'https://cdn.discordapp.com/embed/avatars/0.png');
 
@@ -69,7 +70,7 @@ function renderTranscript(messages, options) {
 		titleDiv.appendChild(meta);
 		messageContainer.appendChild(titleDiv);
 
-		let content = msg.content || '';
+		let content = contentStr;
 		if (options.mode === 'user' && /^!(me|r)\b/i.test(content)) content = content.replace(/^!(?:me|r)\b\s*/i, '');
 		if (content) {
 			const node = document.createElement('div');
@@ -197,7 +198,9 @@ async function run(job) {
 }
 
 if (!isMainThread) {
-	run(workerData);
+	run(workerData).catch((err) => {
+		try { if (parentPort) parentPort.postMessage({ ok: false, error: err?.message || String(err) }); } catch (_) {}
+	});
 }
 
 
