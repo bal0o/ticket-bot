@@ -76,6 +76,29 @@ module.exports.shouldExcludeFromTicketCount = function(ticketType) {
  * Returns { delivered: boolean, message: Message|null, error: Error|null }
  */
 module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
+    // Guard against accidentally sending completely empty DMs
+    try {
+        if (typeof payload === 'string') {
+            if (!payload.trim()) {
+                // Refuse to send a truly empty string DM
+                throw new Error('sendDMWithRetry called with empty string payload');
+            }
+        } else if (payload && typeof payload === 'object') {
+            const hasContent = typeof payload.content === 'string' && payload.content.trim() !== '';
+            const hasEmbeds = Array.isArray(payload.embeds) && payload.embeds.length > 0;
+            const hasFiles = Array.isArray(payload.files) && payload.files.length > 0;
+            if (!hasContent && !hasEmbeds && !hasFiles) {
+                throw new Error('sendDMWithRetry called with empty object payload (no content/embeds/files)');
+            }
+        }
+    } catch (guardErr) {
+        // Surface via handle_errors but don't crash callers
+        try {
+            module.exports.handle_errors(guardErr, user.client || null, 'functions.js', 'sendDMWithRetry guard rejected empty payload');
+        } catch (_) {}
+        return { delivered: false, message: null, error: guardErr };
+    }
+
     const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : 3;
     const baseDelayMs = Number.isFinite(opts.baseDelayMs) ? opts.baseDelayMs : 500;
     let attempt = 0;

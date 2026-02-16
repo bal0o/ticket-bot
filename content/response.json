@@ -15,7 +15,11 @@
         "NRE": "{greeting} {player}, this is a known issue and is currently being worked on. At the moment, I’m unable to provide direct assistance sorry about that. Is there anything else I can help you with today? :smile:",
         "Object Reference Error": "{greeting} {player}, this is a known issue and is actively being worked on. Is there anything else I can help you with today? :smile:",
         "cloud flare down": "{greeting} {player}, it seems like cloudflare is having some issues right now. Unfortunately, there’s nothing we can do on our end to resolve this. You can check Cloudflare’s status page for updates: https://www.cloudflarestatus.com/ Is there anything else I can help you with today? :smile:",
-        "ticket-close": "Is there anything else I can help you with today? :smile:"
+        "anything-else": "Is there anything else I can help you with today? :smile:",
+        "close-warning": "## :warning: **__Ticket Closing Soon__** :warning:\n> **If we don't get a response** \n> **Ticket Will Be Closed In: 10 Minutes** :timer:"
+    },
+    "ban-appeals": {
+        "files": "## {greeting} {player}, to assist you effectively, please follow these steps:\n\n- Open Steam\n- Select \"Steam\" in the upper left corner\n- Select \"Settings\" to open the Settings Window\n- Select \"Storage\" on the left-hand side\n- Select the \"...\" icon next to your drive, and choose \"Browse Folder\"\n- In the folder that opens click on \"steam\" in the address bar\n- Locate and open the 'config' folder.\n- Copy BOTH the 'config.vdf' and 'loginusers.vdf' files.\n- Return to the ticket and right-click inside the message box.\n- Paste the copied files into the message box and press ENTER to send.\n\nFor visual guidance, you can refer to this video:\nhttps://imgur.com/a/NVkeVJb\nhttps://i.imgur.com/s67ClXV.png\n\n**PLEASE NOTE**\nFiles are necessary for every appeal and whitelisting request to conduct background verifications.\nThese files DO NOT contain any private information.\nFailure to provide these files will result in the closure of your ticket and denial of your request."
     },
     "clipping": {
         "Steam Clipping": "{greeting}, steam now has a built in clipping feature, if you press shift + tab in game it will pop up with the steam overlay and if you hit the settings button along the bottom and go to the 'game recording' tab you can select the settings you wish to use. It records up to 120 minutes back and it is all cloud based so no storage or performance issues. :smile: \nMore information here: https://help.steampowered.com/en/faqs/view/23B7-49AD-4A28-9590",
@@ -28,14 +32,14 @@
         "refund issued": "That should be your refund in now, is there anything else I can help you with today? :smile:",
         "refund denied": "Sorry to inform you that after reviewing your request, we are unable to issue a refund at this time. Is there anything else I can help you with today?",
         "lack of evidence deny": "Unfortunately, without proper evidence we’re unable to issue an RP refund at this time. Is there anything else I can help you with today?",
-        "ticket-close": "Once processed, we’ll notify you. Thank you for your patience."
+        "processing": "Once processed, we’ll notify you. Thank you for your patience."
     },
     "lost-items": {
         "greeting": "{greeting} {player}, please give me a moment while I verify a few details.",
         "itemised list": "{ack}, please can you make me an itemised list of items you lost - including quantities (1 per line, on desktop you can use shift+enter to start a new line) and I will get these returned to you.",
         "staff building": "Please can you come to hub 1 to the staff building and I will get those items returned to you! :smile:",
         "lack of evidence deny": "Unfortunately, without evidence we cannot issue a refund at this time. Is there anything else I can help you with today?",
-        "ticket-close": "We’ll update you as soon as we have more information. Thanks for your patience!"
+        "patience": "We’ll update you as soon as we have more information. Thanks for your patience!"
     },
     "known-issues": {
         "Generic": "{greeting} there, this is a known issue and the devs are activily investigating it. As of right now we can't assist you with this issue. Is that everything I can help you with today? :smile:",

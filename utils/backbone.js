@@ -185,7 +185,25 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		
 	
 
-		let overflow = responses.length > 2000;
+		// Final safety: if for any reason we didn't capture any responses, do NOT open a ticket
+		let trimmedResponses = (responses || "").trim();
+		if (!trimmedResponses) {
+			try {
+				logger.event('TicketEmptyResponses', {
+					userId: user.id,
+					ticketType,
+					questionCount: Array.isArray(questionFilesystem.questions) ? questionFilesystem.questions.length : 0
+				});
+			} catch (_) {}
+			// Let the user know that no ticket was created
+			try {
+				await user.send("We couldn't capture any of your answers, so no ticket was opened. Please try again and complete the questions, or contact staff directly if this keeps happening.");
+			} catch (_) {}
+			// Abort before creating a channel/ticket
+			return;
+		}
+
+		let overflow = trimmedResponses.length > 2000;
 		let DiscordNumber = 0
 		let title = ""
 		let author = ""
@@ -277,7 +295,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		const embed = new Discord.MessageEmbed()
 		.setAuthor({ name: authorName, iconURL: user.displayAvatarURL()})
 		    .setTitle(`${ticketType} #${formattedTicketNumber}`)
-		.setDescription(responses.substring(0, 4000))
+		.setDescription(trimmedResponses.substring(0, 4000))
 		.setColor(client.config.bot_settings.main_color || '#208cdd')
 		    .setTimestamp()
 		.setFooter({text: `${user.id}-${formattedTicketNumber} | ${ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
