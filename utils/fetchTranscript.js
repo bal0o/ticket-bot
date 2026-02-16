@@ -150,12 +150,14 @@ module.exports.fetch = async (channel, options) => {
     for (let msg of filtered) {
         // Determine display identity per new rules
         const isUserForward = !!msg.webhookId;
+        const ticketOpenerId = opts.DiscordID != null ? String(opts.DiscordID) : null;
+        const isFromTicketOpener = ticketOpenerId != null && msg.author?.id != null && String(msg.author.id) === ticketOpenerId;
         let rawContent = '';
         try { rawContent = msg.cleanContent || msg.content || ''; } catch (_) {}
         const startsWithMe = /^!me\b/i.test(rawContent);
         const startsWithAnon = /^!r\b/i.test(rawContent);
         const staffDefaultsAnon = !!opts.isAnonTicket;
-        const shouldShowAsBrit = (opts.mode === 'user') && !isUserForward && (startsWithAnon || (!startsWithMe && staffDefaultsAnon));
+        const shouldShowAsBrit = (opts.mode === 'user') && !isUserForward && !isFromTicketOpener && (startsWithAnon || (!startsWithMe && staffDefaultsAnon));
 
         let baseName = (msg.author?.tag || 'Unknown');
         if (startsWithAnon && opts.mode !== 'user' && !isUserForward) {

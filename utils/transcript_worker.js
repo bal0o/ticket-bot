@@ -37,9 +37,12 @@ function renderTranscript(messages, options) {
 
 	const core = document.createElement('div');
 
+	const ticketOpenerId = options.DiscordID != null ? String(options.DiscordID) : null;
 	for (const msg of list) {
-		const displayName = (options.mode === 'user' && !msg.webhookId && (options.isAnonTicket && !/^!me\b/i.test(msg.content))) ? 'Brit Support' : (msg.author?.tag || msg.author?.username || 'Unknown');
-		const displayAvatar = (options.mode === 'user' && !msg.webhookId && options.isAnonTicket && !/^!me\b/i.test(msg.content)) ? 'https://cdn.discordapp.com/embed/avatars/0.png' : (msg.author?.avatarURL || 'https://cdn.discordapp.com/embed/avatars/0.png');
+		const isFromTicketOpener = ticketOpenerId != null && msg.author?.id != null && String(msg.author.id) === ticketOpenerId;
+		const isStaffAnon = options.mode === 'user' && !msg.webhookId && !isFromTicketOpener && options.isAnonTicket && !/^!me\b/i.test(msg.content);
+		const displayName = isStaffAnon ? 'Brit Support' : (msg.author?.tag || msg.author?.username || 'Unknown');
+		const displayAvatar = isStaffAnon ? 'https://cdn.discordapp.com/embed/avatars/0.png' : (msg.author?.avatarURL || 'https://cdn.discordapp.com/embed/avatars/0.png');
 
 		const parent = document.createElement('div');
 		parent.className = 'parent-container';

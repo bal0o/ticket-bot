@@ -212,6 +212,15 @@ module.exports = async function (client, message) {
                 }
             }
 
+            // Internal = in internal category. Only skip DM relay when the ticket user is actually in the guild (so they see messages in channel).
+            // If the user is not in the Discord, we must still forward staff messages to them via DM.
+            let userInGuild = false;
+            try {
+                const member = staffGuild.members.cache.get(userId) || await staffGuild.members.fetch(userId).catch(() => null);
+                userInGuild = !!member;
+            } catch (_) {}
+            const shouldForwardToUser = !ticketType?.internal || !userInGuild;
+
             // Access roles are now added when the staff thread is created, not when staff type in the main channel
             
             // Claim enforcement: if enabled and ticket claimed by someone else, block
@@ -229,11 +238,11 @@ module.exports = async function (client, message) {
                 }
             } catch (_) {}
 
-            // Prepare mapping container for staff->user forwards (only used for non-internal tickets)
+            // Prepare mapping container for staff->user forwards (used when we relay to user via DM)
             const staffForward = { userId: user.id, dmChannelId: null, filesMessageId: null, textMessageIds: [] };
 
-            // Handle staff -> user attachments (send inline, no extra notices). Skip for internal - user is in channel.
-            if (!ticketType?.internal && message.attachments && message.attachments.size > 0) {
+            // Handle staff -> user attachments (send inline, no extra notices). Skip only when internal AND user is in guild.
+            if (shouldForwardToUser && message.attachments && message.attachments.size > 0) {
                 try {
                     // Validate all attachments before sending any
                     for (let attachment of message.attachments) {
@@ -333,7 +342,7 @@ module.exports = async function (client, message) {
                 }
             }
 
-            if (!ticketType?.internal && message.content.startsWith(`${prefix}me`)) {
+            if (shouldForwardToUser && message.content.startsWith(`${prefix}me`)) {
                 const replyContent = message.content.slice(`${prefix}me`.length).trim();
                 if (!replyContent) {
                     return message.reply("Please provide a message to send.");
@@ -379,7 +388,7 @@ module.exports = async function (client, message) {
                     await message.reply("There was an error sending your message. Please try again.");
                 }
 
-            } else if (!ticketType?.internal && message.content.startsWith(`${prefix}r`)) {
+            } else if (shouldForwardToUser && message.content.startsWith(`${prefix}r`)) {
                 if (ticketType && ticketType["anonymous-only-replies"] === false) {
                     const allowedRoles = client.config.role_ids.role_ids_anonymous_cmd;
                     if (!message.member.roles.cache.some(role => allowedRoles.includes(role.id))) {
@@ -415,7 +424,7 @@ module.exports = async function (client, message) {
                 if (command.toLowerCase() === "ticketinfo" || command.toLowerCase() === "ticketcheetos" || command.toLowerCase() === "ticketuserinfo") return;
                 client.commands.get(command)(client, message);
 
-			} else if (!ticketType?.internal) {
+			} else if (shouldForwardToUser) {
                 const replyContent = message.content;
                  if (!replyContent) {
                     return;
