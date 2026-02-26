@@ -414,7 +414,7 @@ module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeU
 	}
 }
 
-module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo) => {
+module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, steamId) => {
     // Null check for recepientMember
     if (!recepientMember) {
         func.handle_errors(null, client, 'functions.js', 'openTicket called with null recepientMember');
@@ -742,6 +742,41 @@ try {
                 content: `View user's ticket history on web: <${baseWeb}/staff?user=${recepientMember.id}>`,
                 allowedMentions: { parse: [] }
             });
+        } catch (_) {}
+
+        // Post a quick link to external staff lookup (Steam-based) if SteamID is available
+        try {
+            if (steamId && steamId.toString().startsWith('7656119')) {
+                let regionCode = null;
+                try {
+                    if (typeof responses === 'string' && responses.length > 0) {
+                        // Prefer explicit Region field, fall back to Server name
+                        let regionSource = null;
+                        const regionMatch = responses.match(/\*\*Region:\*\*\n(.*?)(?:\n\n|$)/i);
+                        if (regionMatch && regionMatch[1]) {
+                            regionSource = regionMatch[1].trim();
+                        } else {
+                            const serverMatch = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/i);
+                            if (serverMatch && serverMatch[1]) {
+                                regionSource = serverMatch[1].trim();
+                            }
+                        }
+                        if (regionSource) {
+                            const lower = regionSource.toLowerCase();
+                            if (lower.includes('eu')) regionCode = 'eu';
+                            else if (lower.includes('us') || lower.includes('na') || lower.includes('america')) regionCode = 'us';
+                        }
+                    }
+                } catch (_) {}
+
+                let lookupUrl = `https://staff.britspve.com/lookup/player?steamid=${encodeURIComponent(String(steamId))}`;
+                if (regionCode) lookupUrl += `&region=${regionCode}`;
+
+                await thread.send({
+                    content: `Staff lookup: <${lookupUrl}>`,
+                    allowedMentions: { parse: [] }
+                });
+            }
         } catch (_) {}
 
         if (bmInfo) {
