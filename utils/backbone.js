@@ -288,7 +288,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 
 		// Format the ticket number with leading zeros (e.g., 0001)
 		let formattedTicketNumber = globalTicketCount.toString().padStart(4, '0');
-
+		
 	// Use ONLY the global ticket number for everything
 	let ticketUniqueID = formattedTicketNumber;
 
@@ -310,10 +310,10 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			}
 		}
 		
-        if (questionFilesystem["open-as-ticket"] == true) {
+		if (questionFilesystem["open-as-ticket"] == true) {
             try { logger.event('TicketOpenChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
-
-const openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo);
+			
+const openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID);
 // Kick off BM lookup without delaying ticket creation
 ;(async () => {
     try {
