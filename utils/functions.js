@@ -252,6 +252,90 @@ module.exports.fetchPinnedSafe = async function(channel) {
     }
 }
 
+/** Discord limit: max channels per category */
+const MAX_CHANNELS_PER_CATEGORY = 50;
+
+/**
+ * Returns a category ID that has room for a new channel (< 50 children).
+ * If the preferred category is full, finds an existing overflow category with room or creates one.
+ * @param {Client} client - Bot client (for logging)
+ * @param {Guild} staffGuild - The guild to look in
+ * @param {string|null} preferredCategoryId - Preferred category ID from config
+ * @param {string} ticketType - Ticket type name (for logging/overflow naming)
+ * @returns {Promise<string|null>} Category ID to use, or null for guild root
+ */
+async function getCategoryWithRoom(client, staffGuild, preferredCategoryId, ticketType) {
+    if (!staffGuild?.channels?.cache) return preferredCategoryId || null;
+
+    const categoryById = (id) => staffGuild.channels.cache.get(id);
+    const countChildren = (categoryId) =>
+        staffGuild.channels.cache.filter((c) => c.parentId === categoryId).size;
+
+    const tryCategory = (cat) => {
+        if (!cat || cat.type !== 'GUILD_CATEGORY') return null;
+        return countChildren(cat.id) < MAX_CHANNELS_PER_CATEGORY ? cat.id : null;
+    };
+
+    if (preferredCategoryId) {
+        const preferred = categoryById(preferredCategoryId);
+        const usable = tryCategory(preferred);
+        if (usable) return usable;
+
+        // Preferred is full: look for existing overflow categories (same name + " (2)", " (3)", ...)
+        const baseName = preferred?.name || 'Tickets';
+        const overflowCats = staffGuild.channels.cache.filter(
+            (c) => c.type === 'GUILD_CATEGORY' && c.name.startsWith(baseName)
+        );
+        for (const [, cat] of overflowCats) {
+            const id = tryCategory(cat);
+            if (id) return id;
+        }
+
+        // Create new overflow category: "BaseName (N)" for next N
+        let n = 2;
+        let name = `${baseName} (${n})`;
+        while (staffGuild.channels.cache.some((c) => c.name === name)) {
+            n++;
+            name = `${baseName} (${n})`;
+        }
+        try {
+            const newCat = await staffGuild.channels.create(name, { type: 'GUILD_CATEGORY' });
+            if (client) func.handle_errors(null, client, 'functions.js', `Category "${baseName}" was full; created overflow category "${name}" for ticket type '${ticketType}'.`);
+            return newCat.id;
+        } catch (e) {
+            if (client) func.handle_errors(e, client, 'functions.js', `Failed to create overflow category for '${ticketType}'; will try guild root.`);
+            return null;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * If parentCategoryId points to an overflow category (name like "Tickets (2)")
+ * and it has no remaining children, delete the category. Call after deleting a ticket channel.
+ * @param {Client|null} client - Bot client (for error logging)
+ * @param {Guild} guild - Guild that owned the channel
+ * @param {string|null} parentCategoryId - Parent category ID (from channel.parentId before delete)
+ */
+async function deleteEmptyOverflowCategory(client, guild, parentCategoryId) {
+    if (!guild?.channels?.cache || !parentCategoryId) return;
+    const category = guild.channels.cache.get(parentCategoryId);
+    if (!category || category.type !== 'GUILD_CATEGORY') return;
+    // Overflow categories we create are named "BaseName (2)", "BaseName (3)", etc.
+    if (!/^.+\s+\(\d+\)$/.test(category.name)) return;
+    const childCount = guild.channels.cache.filter((c) => c.parentId === parentCategoryId).size;
+    if (childCount > 0) return;
+    try {
+        await category.delete();
+    } catch (e) {
+        if (e?.code === 10003) return; // Already deleted
+        if (client) func.handle_errors(e, client, 'functions.js', 'Failed to delete empty overflow category');
+    }
+}
+
+module.exports.deleteEmptyOverflowCategory = deleteEmptyOverflowCategory;
+
 module.exports.handle_errors = async (err, client, file, message) => {
 
 	let ErrorChannel = client.channels.cache.get(client.config.channel_ids.error_channel)
@@ -414,6 +498,17 @@ module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeU
 	}
 }
 
+/** Notify the user when ticket creation fails (ephemeral reply + DM when possible). */
+async function notifyTicketCreationFailed(interaction, recepientMember) {
+    const message = 'Your ticket could not be created. Please try again or contact staff.';
+    if (interaction?.editReply) {
+        await interaction.editReply({ content: message, ephemeral: true }).catch(() => {});
+    }
+    if (recepientMember?.send) {
+        await recepientMember.send(message).catch(() => {});
+    }
+}
+
 module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, steamId) => {
     // Null check for recepientMember
     if (!recepientMember) {
@@ -527,12 +622,40 @@ try {
     }
 } catch (_) { parentId = null; }
 
-let ticketChannel = await staffGuild.channels.create(channelName, {
-    type: "text",
-    topic: recepientMember.id,
-    parent: parentId || null,
-    permissionOverwrites: overwrites,
-});
+// Ensure we use a category that has room (Discord max 50 channels per category)
+parentId = await getCategoryWithRoom(client, staffGuild, parentId, ticketType);
+
+let ticketChannel;
+try {
+    ticketChannel = await staffGuild.channels.create(channelName, {
+        type: "text",
+        topic: recepientMember.id,
+        parent: parentId || null,
+        permissionOverwrites: overwrites,
+    });
+} catch (createErr) {
+    const isCategoryFull = createErr?.code === 50035 || (createErr?.message && String(createErr.message).includes('Maximum number of channels in category reached'));
+    if (isCategoryFull && parentId) {
+        // Retry with a fresh category (overflow); getCategoryWithRoom will create/find one
+        try {
+            const fallbackParentId = await getCategoryWithRoom(client, staffGuild, parentId, ticketType);
+            ticketChannel = await staffGuild.channels.create(channelName, {
+                type: "text",
+                topic: recepientMember.id,
+                parent: fallbackParentId || null,
+                permissionOverwrites: overwrites,
+            });
+        } catch (retryErr) {
+            func.handle_errors(retryErr, client, 'functions.js', 'openTicket channel create failed (retry after category full)');
+            await notifyTicketCreationFailed(interaction, recepientMember);
+            return;
+        }
+    } else {
+        func.handle_errors(createErr, client, 'functions.js', 'openTicket channel create failed');
+        await notifyTicketCreationFailed(interaction, recepientMember);
+        return;
+    }
+}
 
 // Index: add to user's active ticket channels
 try {
@@ -1242,8 +1365,11 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                         try {
                             if (msg && msg.ok === true) {
                                 // Transcript successfully generated, safe to delete channel
+                                const parentId = channel.parentId;
+                                const guild = channel.guild;
                                 try {
                                     await channel.delete();
+                                    await deleteEmptyOverflowCategory(client, guild, parentId);
                                 } catch (err) {
                                     if (err && err.code === 10003) {
                                         module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
@@ -1258,9 +1384,12 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                                 await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
                                 
                                 // Still delete on failure after fallback
+                                const parentIdFallback = channel.parentId;
+                                const guildFallback = channel.guild;
                                 setTimeout(async () => {
                                     try {
                                         await channel.delete();
+                                        await deleteEmptyOverflowCategory(client, guildFallback, parentIdFallback);
                                     } catch (err) {
                                         if (err && err.code === 10003) {
                                             module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
@@ -1274,10 +1403,12 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     // On worker error, still try to delete after a delay
                     worker.on('error', async (err) => { 
                         try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {}
-                        // Delete channel on error after delay
+                        const parentIdError = channel.parentId;
+                        const guildError = channel.guild;
                         setTimeout(async () => {
                             try {
                                 await channel.delete();
+                                await deleteEmptyOverflowCategory(client, guildError, parentIdError);
                             } catch (err) {
                                 if (err && err.code === 10003) {
                                     module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
@@ -1287,10 +1418,12 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     });
                 } catch (e) {
                     try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
-                    // On error collecting messages, still try to delete the channel as fallback
+                    const parentIdCatch = channel.parentId;
+                    const guildCatch = channel.guild;
                     setTimeout(async () => {
                         try {
                             await channel.delete();
+                            await deleteEmptyOverflowCategory(client, guildCatch, parentIdCatch);
                         } catch (err) {
                             if (err && err.code === 10003) {
                                 module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
