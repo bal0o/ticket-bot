@@ -677,9 +677,12 @@ module.exports = async function (client, interaction) {
                 await db.delete(`AppMap.channelToApp.${channel.id}`);
                 
                 // Delete the channel after a short delay
+                const parentId = channel.parentId;
+                const guild = channel.guild;
                 setTimeout(async () => {
                     try {
                         await channel.delete();
+                        await func.deleteEmptyOverflowCategory(client, guild, parentId);
                     } catch (err) {
                         console.error('Failed to delete communication channel:', err);
                     }
