@@ -139,10 +139,85 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
 const pinnedCache = new Map(); // channelId -> { messages, timestamp }
 const pendingFetches = new Map(); // channelId -> Promise
 const lastFetchTimes = new Map(); // channelId -> timestamp of last fetch attempt
-const pinsRateLimitedUntil = new Map(); // channelId -> timestamp until which we must not hit pins route
+let pinsRateLimitedUntil = 0; // global timestamp until which we must not hit pins route for any channel
 const CACHE_TTL = 60000; // 60 seconds cache (longer to avoid rate limits)
 const MIN_REQUEST_INTERVAL = 3500; // Minimum 3.5 seconds between requests (respects 3s sublimit with margin)
 const MAX_PINS_BACKOFF_MS = 60 * 60 * 1000; // Never back off for more than 1 hour locally
+
+// Shared throttling for message history fetching (transcripts, metrics, etc.)
+const lastMessageFetchTimes = new Map(); // channelId -> timestamp of last messages.fetch
+const messagesRateLimitedUntil = new Map(); // channelId -> timestamp until which we should not hit messages route
+const MIN_MESSAGE_REQUEST_INTERVAL = 600; // Minimum spacing between messages.fetch calls per channel (ms)
+const MAX_MESSAGES_BACKOFF_MS = 60 * 1000; // Cap backoff at 60s for message history
+
+async function safeFetchMessages(channel, options) {
+    if (!channel || !channel.messages || typeof channel.messages.fetch !== 'function') {
+        throw new Error('Invalid channel provided to safeFetchMessages');
+    }
+    const channelId = channel.id;
+    const now = Date.now();
+
+    // Honor any known per-channel rate limit window
+    const blockedUntil = messagesRateLimitedUntil.get(channelId);
+    if (blockedUntil && now < blockedUntil) {
+        const waitMs = blockedUntil - now;
+        await new Promise(res => setTimeout(res, waitMs));
+    }
+
+    // Enforce minimal spacing between requests for this channel
+    const last = lastMessageFetchTimes.get(channelId);
+    if (last && (Date.now() - last) < MIN_MESSAGE_REQUEST_INTERVAL) {
+        const waitMs = MIN_MESSAGE_REQUEST_INTERVAL - (Date.now() - last);
+        await new Promise(res => setTimeout(res, waitMs));
+    }
+
+    const maxAttempts = 3;
+    let attempt = 0;
+    // Basic retry with 429-aware backoff
+    // (Discord.js already buckets, this just adds extra safety margin)
+    while (attempt < maxAttempts) {
+        try {
+            lastMessageFetchTimes.set(channelId, Date.now());
+            return await channel.messages.fetch(options);
+        } catch (err) {
+            attempt++;
+            const isRateLimit =
+                err?.code === 429 ||
+                err?.httpStatus === 429 ||
+                (err?.request && err.request.status === 429) ||
+                (err?.message && /429|rate.?limit/i.test(String(err.message)));
+
+            if (!isRateLimit) {
+                // Non rate-limit errors bubble up immediately
+                throw err;
+            }
+
+            let retryAfter = 1; // seconds
+            if (err.retry_after !== undefined) {
+                retryAfter = typeof err.retry_after === 'number' ? err.retry_after : parseFloat(err.retry_after) || 1;
+            } else if (err.retryAfter !== undefined) {
+                retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 1;
+            } else if (err.timeout !== undefined) {
+                // Some discord.js errors expose timeout in ms
+                retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 1;
+            }
+
+            const delayMs = Math.min(
+                Math.max(retryAfter * 1000 + 300, MIN_MESSAGE_REQUEST_INTERVAL),
+                MAX_MESSAGES_BACKOFF_MS
+            );
+            const untilTs = Date.now() + delayMs;
+            messagesRateLimitedUntil.set(channelId, untilTs);
+
+            if (attempt >= maxAttempts) {
+                throw err;
+            }
+            await new Promise(res => setTimeout(res, delayMs));
+        }
+    }
+}
+
+module.exports.safeFetchMessages = safeFetchMessages;
 
 /**
  * Fetch pinned messages with caching and rate limit handling.
@@ -154,11 +229,11 @@ module.exports.fetchPinnedSafe = async function(channel) {
         throw new Error('Invalid channel provided');
     }
     
-    const channelId = channel.id;
     const now = Date.now();
     
-    // If we know this channel's pins route is currently hard rate-limited, do not hit the API again.
-    const blockedUntil = pinsRateLimitedUntil.get(channelId);
+    // If we know the pins route is currently hard rate-limited, do not hit the API again.
+    const channelId = channel.id;
+    const blockedUntil = pinsRateLimitedUntil;
     if (blockedUntil && now < blockedUntil) {
         const cached = pinnedCache.get(channelId);
         if (cached && (now - cached.timestamp) < CACHE_TTL) {
@@ -212,7 +287,7 @@ module.exports.fetchPinnedSafe = async function(channel) {
                                    (err.request && err.request.status === 429) ||
                                    (err.message && /429|rate.?limit/i.test(err.message));
                 
-                if (isRateLimit) {
+            if (isRateLimit) {
                     // Try to extract retry_after from various possible locations
                     let retryAfter = 3; // Default to 3 seconds for sublimit
                     if (err.retry_after !== undefined) {
@@ -227,7 +302,7 @@ module.exports.fetchPinnedSafe = async function(channel) {
                     // Convert to ms and clamp to a sane upper bound (Discord can return ~1h sublimits for pins)
                     const delayMs = Math.min(Math.max((retryAfter * 1000) + 500, MIN_REQUEST_INTERVAL), MAX_PINS_BACKOFF_MS);
                     const untilTs = Date.now() + delayMs;
-                    pinsRateLimitedUntil.set(channelId, untilTs);
+                    pinsRateLimitedUntil = Math.max(pinsRateLimitedUntil || 0, untilTs);
 
                     // Do NOT keep hammering the API – surface the error so callers can abort gracefully.
                     throw err;
@@ -259,6 +334,66 @@ module.exports.fetchPinnedSafe = async function(channel) {
         pendingFetches.delete(channelId);
     }
 }
+
+/**
+ * Safely pin a message while respecting known pins rate limits.
+ * - If we know the pins route is rate-limited globally, we skip pinning entirely.
+ * - On a 429 response, we record the retry-after window in pinsRateLimitedUntil and do not retry.
+ * This prevents a flood of queued pin operations from all firing as soon as the bucket re-opens.
+ */
+async function safePinMessage(message) {
+    if (!message || !message.channel || typeof message.pin !== 'function') return;
+
+    const now = Date.now();
+
+    // If the pins route is currently known to be blocked globally, do not enqueue another pin.
+    const channelId = message.channel.id;
+    const blockedUntil = pinsRateLimitedUntil;
+    if (blockedUntil && now < blockedUntil) {
+        return;
+    }
+
+    try {
+        await message.pin();
+    } catch (err) {
+        const isRateLimit =
+            err?.code === 429 ||
+            err?.httpStatus === 429 ||
+            (err?.request && err.request.status === 429) ||
+            (err?.message && /429|rate.?limit/i.test(String(err.message)));
+
+        if (isRateLimit) {
+            // Try to extract retry_after from various possible locations
+            let retryAfter = 3; // seconds
+            if (err.retry_after !== undefined) {
+                retryAfter = typeof err.retry_after === 'number' ? err.retry_after : parseFloat(err.retry_after) || 3;
+            } else if (err.retryAfter !== undefined) {
+                retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 3;
+            } else if (err.timeout !== undefined) {
+                // Some discord.js errors expose timeout in ms
+                retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 3;
+            }
+
+            // Convert to ms and clamp to a sane upper bound (Discord can return ~1h sublimits for pins)
+            const delayMs = Math.min(
+                Math.max(retryAfter * 1000 + 500, MIN_REQUEST_INTERVAL),
+                MAX_PINS_BACKOFF_MS
+            );
+            const untilTs = Date.now() + delayMs;
+            pinsRateLimitedUntil = Math.max(pinsRateLimitedUntil || 0, untilTs);
+
+            // Intentionally do not rethrow to avoid propagating pin failures or triggering further retries.
+            return;
+        }
+
+        // Non-rate-limit errors are logged once but not rethrown, since failing to pin is non-fatal.
+        try {
+            module.exports.handle_errors(err, message.client || null, 'functions.js', 'safePinMessage failed to pin message');
+        } catch (_) {}
+    }
+}
+
+module.exports.safePinMessage = safePinMessage;
 
 /** Discord limit: max channels per category */
 const MAX_CHANNELS_PER_CATEGORY = 50;
@@ -737,7 +872,7 @@ try {
         components: [actionRow]
     });
     
-    await initialMessage.pin()?.catch(e => { });
+    await safePinMessage(initialMessage);
 
     let replyInfo = "";
     if (questionFile["anonymous-only-replies"] === true) {
@@ -1299,7 +1434,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Collect IDs of staff -> user messages during session (anon or not)
         const allowedIds = [];
         try {
-            const recent = await channel.messages.fetch({ limit: 50 });
+            const recent = await safeFetchMessages(channel, { limit: 50 });
             recent.forEach(m => {
                 if (m.author?.id === client.user.id) return; // skip bot markers
                 // Include explicit recent staff-to-user signals by prefix commands or our own markers
@@ -1309,153 +1444,160 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             });
         } catch (_) {}
 
-        // Offload transcript rendering to a worker thread to avoid blocking
+        // Offload transcript rendering to a worker thread to avoid blocking.
+        // Honor transcript_settings.enabled so operators can disable heavy history fetches when needed.
         try {
             const { Worker } = require('worker_threads');
             const path = require('path');
-            const { save_path, base_url } = client.config.transcript_settings;
-            if (!fs.existsSync(save_path)) fs.mkdirSync(save_path, { recursive: true });
+            const tCfg = client.config.transcript_settings || {};
+            if (tCfg.enabled === false) {
+                savedTranscriptURL = null;
+            } else {
+                const save_path = tCfg.save_path;
+                const base_url = tCfg.base_url;
+                if (!fs.existsSync(save_path)) fs.mkdirSync(save_path, { recursive: true });
 
-            // Collect raw messages for worker
-            const collectAll = async (chan) => {
-                let all = [];
-                let lastId = undefined;
-                for (;;) {
-                    const fetched = await chan.messages.fetch({ limit: 100, before: lastId }).catch(() => null);
-                    if (!fetched || fetched.size === 0) break;
-                    for (const m of fetched.values()) {
-                        all.push({
-                            id: m.id,
-                            createdAt: m.createdAt ? m.createdAt.getTime() : Date.now(),
-                            content: m.content || '',
-                            pinned: !!m.pinned,
-                            type: m.type || '',
-                            webhookId: m.webhookId || null,
-                            author: m.author ? { id: m.author.id, username: m.author.username, tag: m.author.tag, avatarURL: (typeof m.author.displayAvatarURL === 'function' ? m.author.displayAvatarURL() : '') } : null,
-                            embeds: Array.isArray(m.embeds) ? m.embeds.map(e => ({ title: e.title || '', description: e.description || '', fields: Array.isArray(e.fields) ? e.fields.map(f => ({ name: f.name || '', value: f.value || '' })) : [] })) : [],
-                            attachments: m.attachments && m.attachments.size ? Array.from(m.attachments.values()).map(a => a.url) : []
-                        });
+                // Collect raw messages for worker
+                    const collectAll = async (chan) => {
+                    let all = [];
+                    let lastId = undefined;
+                    for (;;) {
+                        const fetched = await safeFetchMessages(chan, { limit: 100, before: lastId }).catch(() => null);
+                        if (!fetched || fetched.size === 0) break;
+                        for (const m of fetched.values()) {
+                            all.push({
+                                id: m.id,
+                                createdAt: m.createdAt ? m.createdAt.getTime() : Date.now(),
+                                content: m.content || '',
+                                pinned: !!m.pinned,
+                                type: m.type || '',
+                                webhookId: m.webhookId || null,
+                                author: m.author ? { id: m.author.id, username: m.author.username, tag: m.author.tag, avatarURL: (typeof m.author.displayAvatarURL === 'function' ? m.author.displayAvatarURL() : '') } : null,
+                                embeds: Array.isArray(m.embeds) ? m.embeds.map(e => ({ title: e.title || '', description: e.description || '', fields: Array.isArray(e.fields) ? e.fields.map(f => ({ name: f.name || '', value: f.value || '' })) : [] })) : [],
+                                attachments: m.attachments && m.attachments.size ? Array.from(m.attachments.values()).map(a => a.url) : []
+                            });
+                        }
+                        lastId = fetched.lastKey();
                     }
-                    lastId = fetched.lastKey();
-                }
-                return all;
-            };
+                    return all;
+                };
 
-            let staffThread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-            if (!staffThread && channel.threads && channel.threads.fetchActive) {
-                const fetched = await channel.threads.fetchActive().catch(() => null);
-                if (fetched && fetched.threads) {
-                    staffThread = fetched.threads.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+                let staffThread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+                if (!staffThread && channel.threads && channel.threads.fetchActive) {
+                    const fetched = await channel.threads.fetchActive().catch(() => null);
+                    if (fetched && fetched.threads) {
+                        staffThread = fetched.threads.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+                    }
                 }
-            }
 
-            // Start message collection asynchronously (don't block close response)
-            const transcriptURL = `${base_url}${channel.name}.full.html`;
-            savedTranscriptURL = transcriptURL;
-            
-            // Send notification to channel that it will be deleted after transcript generation
-            try {
-                await channel.send('🔒 **This ticket has been closed.**\n\n📝 Generating transcript... This channel will be deleted once the transcript is complete.');
-            } catch (_) {}
-            
-            // Fire-and-forget: collect messages and generate transcript without blocking
-            // Delete channel only after messages are collected to ensure transcript success
-            setImmediate(async () => {
+                // Start message collection asynchronously (don't block close response)
+                const transcriptURL = `${base_url}${channel.name}.full.html`;
+                savedTranscriptURL = transcriptURL;
+                
+                // Send notification to channel that it will be deleted after transcript generation
                 try {
-                    // Collect messages (this is slow, happens after response)
-                    const messagesMain = await collectAll(channel);
-                    const messagesStaff = staffThread ? await collectAll(staffThread) : [];
-                    
-                    const job = {
-                        savePath: save_path,
-                        baseUrl: base_url,
-                        channelName: channel.name,
-                        DiscordID,
-                        isAnonTicket: !!typeFile["anonymous-only-replies"],
-                        closeReason: reason,
-                        closedBy: staffMember.username || staffMember.user?.username,
-                        responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
-                        messagesMain,
-                        messagesStaff
-                    };
+                    await channel.send('🔒 **This ticket has been closed.**\n\n📝 Generating transcript... This channel will be deleted once the transcript is complete.');
+                } catch (_) {}
+                
+                // Fire-and-forget: collect messages and generate transcript without blocking
+                // Delete channel only after messages are collected to ensure transcript success
+                setImmediate(async () => {
+                    try {
+                        // Collect messages (this is slow, happens after response)
+                        const messagesMain = await collectAll(channel);
+                        const messagesStaff = staffThread ? await collectAll(staffThread) : [];
+                        
+                        const job = {
+                            savePath: save_path,
+                            baseUrl: base_url,
+                            channelName: channel.name,
+                            DiscordID,
+                            isAnonTicket: !!typeFile["anonymous-only-replies"],
+                            closeReason: reason,
+                            closedBy: staffMember.username || staffMember.user?.username,
+                            responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
+                            messagesMain,
+                            messagesStaff
+                        };
 
-                    // Fire-and-forget rendering
-                    const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
-                    
-                    // Delete channel only when worker confirms completion
-                    worker.on('message', async (msg) => {
-                        try {
-                            if (msg && msg.ok === true) {
-                                // Transcript successfully generated, safe to delete channel
-                                const parentId = channel.parentId;
-                                const guild = channel.guild;
-                                try {
-                                    await channel.delete();
-                                    await deleteEmptyOverflowCategory(client, guild, parentId);
-                                } catch (err) {
-                                    if (err && err.code === 10003) {
-                                        module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
-                                    } else {
-                                        module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
-                                    }
-                                }
-                            } else {
-                                // Fallback: write minimal placeholder so links are valid
-                                const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
-                                await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
-                                await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
-                                
-                                // Still delete on failure after fallback
-                                const parentIdFallback = channel.parentId;
-                                const guildFallback = channel.guild;
-                                setTimeout(async () => {
+                        // Fire-and-forget rendering
+                        const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
+                        
+                        // Delete channel only when worker confirms completion
+                        worker.on('message', async (msg) => {
+                            try {
+                                if (msg && msg.ok === true) {
+                                    // Transcript successfully generated, safe to delete channel
+                                    const parentId = channel.parentId;
+                                    const guild = channel.guild;
                                     try {
                                         await channel.delete();
-                                        await deleteEmptyOverflowCategory(client, guildFallback, parentIdFallback);
+                                        await deleteEmptyOverflowCategory(client, guild, parentId);
                                     } catch (err) {
                                         if (err && err.code === 10003) {
-                                            module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                            module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
+                                        } else {
+                                            module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
                                         }
                                     }
-                                }, 2000);
-                            }
-                        } catch (_) {}
-                    });
-                    
-                    // On worker error, still try to delete after a delay
-                    worker.on('error', async (err) => { 
-                        try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {}
-                        const parentIdError = channel.parentId;
-                        const guildError = channel.guild;
+                                } else {
+                                    // Fallback: write minimal placeholder so links are valid
+                                    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
+                                    await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
+                                    await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
+                                    
+                                    // Still delete on failure after fallback
+                                    const parentIdFallback = channel.parentId;
+                                    const guildFallback = channel.guild;
+                                    setTimeout(async () => {
+                                        try {
+                                            await channel.delete();
+                                            await deleteEmptyOverflowCategory(client, guildFallback, parentIdFallback);
+                                        } catch (err) {
+                                            if (err && err.code === 10003) {
+                                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                            }
+                                        }
+                                    }, 2000);
+                                }
+                            } catch (_) {}
+                        });
+                        
+                        // On worker error, still try to delete after a delay
+                        worker.on('error', async (err) => { 
+                            try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {}
+                            const parentIdError = channel.parentId;
+                            const guildError = channel.guild;
+                            setTimeout(async () => {
+                                try {
+                                    await channel.delete();
+                                    await deleteEmptyOverflowCategory(client, guildError, parentIdError);
+                                } catch (err) {
+                                    if (err && err.code === 10003) {
+                                        module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                    }
+                                }
+                            }, 2000);
+                        });
+                    } catch (e) {
+                        try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
+                        const parentIdCatch = channel.parentId;
+                        const guildCatch = channel.guild;
                         setTimeout(async () => {
                             try {
                                 await channel.delete();
-                                await deleteEmptyOverflowCategory(client, guildError, parentIdError);
+                                await deleteEmptyOverflowCategory(client, guildCatch, parentIdCatch);
                             } catch (err) {
                                 if (err && err.code === 10003) {
                                     module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
+                                } else {
+                                    module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
                                 }
                             }
                         }, 2000);
-                    });
-                } catch (e) {
-                    try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
-                    const parentIdCatch = channel.parentId;
-                    const guildCatch = channel.guild;
-                    setTimeout(async () => {
-                        try {
-                            await channel.delete();
-                            await deleteEmptyOverflowCategory(client, guildCatch, parentIdCatch);
-                        } catch (err) {
-                            if (err && err.code === 10003) {
-                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
-                            } else {
-                                module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
-                            }
-                        }
-                    }, 2000);
-                }
-            });
+                    }
+                });
+            }
             
             await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, savedTranscriptURL);
             
@@ -1534,7 +1676,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             let userMessages = 0;
             let staffMessages = 0;
             try {
-                const fetched = await channel.messages.fetch({ limit: 100 });
+                const fetched = await safeFetchMessages(channel, { limit: 100 });
                 messageCount = fetched ? fetched.size : 0;
                 fetched?.forEach(msg => {
                     if (!msg.author) return;
