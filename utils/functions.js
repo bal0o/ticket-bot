@@ -139,8 +139,10 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
 const pinnedCache = new Map(); // channelId -> { messages, timestamp }
 const pendingFetches = new Map(); // channelId -> Promise
 const lastFetchTimes = new Map(); // channelId -> timestamp of last fetch attempt
+const pinsRateLimitedUntil = new Map(); // channelId -> timestamp until which we must not hit pins route
 const CACHE_TTL = 60000; // 60 seconds cache (longer to avoid rate limits)
 const MIN_REQUEST_INTERVAL = 3500; // Minimum 3.5 seconds between requests (respects 3s sublimit with margin)
+const MAX_PINS_BACKOFF_MS = 60 * 60 * 1000; // Never back off for more than 1 hour locally
 
 /**
  * Fetch pinned messages with caching and rate limit handling.
@@ -155,6 +157,16 @@ module.exports.fetchPinnedSafe = async function(channel) {
     const channelId = channel.id;
     const now = Date.now();
     
+    // If we know this channel's pins route is currently hard rate-limited, do not hit the API again.
+    const blockedUntil = pinsRateLimitedUntil.get(channelId);
+    if (blockedUntil && now < blockedUntil) {
+        const cached = pinnedCache.get(channelId);
+        if (cached && (now - cached.timestamp) < CACHE_TTL) {
+            return cached.messages;
+        }
+        throw new Error(`Pins route temporarily rate-limited for channel ${channelId} until ${new Date(blockedUntil).toISOString()}`);
+    }
+
     // Check cache first
     const cached = pinnedCache.get(channelId);
     if (cached && (now - cached.timestamp) < CACHE_TTL) {
@@ -208,21 +220,17 @@ module.exports.fetchPinnedSafe = async function(channel) {
                     } else if (err.retryAfter !== undefined) {
                         retryAfter = typeof err.retryAfter === 'number' ? err.retryAfter : parseFloat(err.retryAfter) || 3;
                     } else if (err.timeout !== undefined) {
+                        // Some discord.js errors expose timeout in ms
                         retryAfter = typeof err.timeout === 'number' ? err.timeout / 1000 : 3;
                     }
-                    
-                    // retry_after is usually in seconds, convert to milliseconds
-                    // Add extra margin for sublimit
-                    const delay = Math.max(
-                        (retryAfter * 1000) + 500, // Add 500ms margin
-                        MIN_REQUEST_INTERVAL * (attempt + 1) // Exponential backoff respecting sublimit
-                    );
-                    const finalDelay = Math.min(delay, 60000); // Max 60s
-                    
-                    if (attempt < maxAttempts) {
-                        await new Promise(resolve => setTimeout(resolve, finalDelay));
-                        continue;
-                    }
+
+                    // Convert to ms and clamp to a sane upper bound (Discord can return ~1h sublimits for pins)
+                    const delayMs = Math.min(Math.max((retryAfter * 1000) + 500, MIN_REQUEST_INTERVAL), MAX_PINS_BACKOFF_MS);
+                    const untilTs = Date.now() + delayMs;
+                    pinsRateLimitedUntil.set(channelId, untilTs);
+
+                    // Do NOT keep hammering the API – surface the error so callers can abort gracefully.
+                    throw err;
                 }
                 
                 // For non-rate-limit errors, retry with exponential backoff
@@ -254,6 +262,9 @@ module.exports.fetchPinnedSafe = async function(channel) {
 
 /** Discord limit: max channels per category */
 const MAX_CHANNELS_PER_CATEGORY = 50;
+
+// Prevent concurrent closeTicket/transcript jobs per channel (avoids message/pins spam on repeated clicks)
+const activeTicketClosures = new Set(); // channelId strings
 
 /**
  * Returns a category ID that has room for a new channel (< 50 children).
@@ -1186,6 +1197,17 @@ module.exports.updateTicketStatus = async function(client) {
  * @param {string} reason
  */
 module.exports.closeTicket = async (client, channel, staffMember, reason) => {
+    const channelId = channel && channel.id ? String(channel.id) : null;
+    if (!channelId) {
+        return;
+    }
+
+    // If a close is already in progress for this channel, do nothing.
+    if (activeTicketClosures.has(channelId)) {
+        return;
+    }
+
+    activeTicketClosures.add(channelId);
     try {
         // removed debug marker
         // Check if the channel still exists and is accessible
@@ -1576,5 +1598,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         } catch (_) {}
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
+    } finally {
+        activeTicketClosures.delete(channelId);
     }
 };
