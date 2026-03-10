@@ -48,7 +48,10 @@
      <% } %>
      
     <h1 style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-      <span>Application: <%= app.username %> (<%= app.userId %>)</span>
+      <span>
+        <div style="font-size:22px; font-weight:600;"><%= app.username %></div>
+        <div class="muted" style="font-size:12px; margin-top:2px;">Discord: <%= app.userId %></div>
+      </span>
       <span style="display:flex; gap:8px;">
         <% if (prevId) { %>
           <a class="btn" href="/applications/<%= prevId %>">◀ Previous</a>
@@ -58,12 +61,43 @@
         <% } %>
       </span>
     </h1>
-     <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
+     <p class="muted">
+       <span style="display:inline-flex; gap:6px; align-items:center;">
+         <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
+           <%= app.type %>
+         </span>
+         <% if (app.server) { %>
+           <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
+             Server: <%= app.server %>
+           </span>
+         <% } %>
+       </span>
+     </p>
+     <% if (steamId) { %>
+       <p class="muted" style="margin-top:4px;">
+         Steam: <a href="https://steamcommunity.com/profiles/<%= steamId %>" target="_blank" rel="noreferrer noopener"><%= steamId %></a>
+         <% if (battlemetricsUrl) { %>
+           • BattleMetrics: <a href="<%= battlemetricsUrl %>" target="_blank" rel="noreferrer noopener">View BM profile</a>
+         <% } %>
+       </p>
+     <% } %>
     
     <!-- Stages Progress - simplified -->
     <section class="stages-section">
       <h3>Application Progress</h3>
       <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
+      <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
+        <form method="post" action="/applications/<%= app.id %>/category" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <% const isDevApp = String(app.type || '').toLowerCase().includes('dev'); %>
+          <label>Category:
+            <select name="category">
+              <option value="staff" <%= !isDevApp ? 'selected' : '' %>>Staff</option>
+              <option value="dev" <%= isDevApp ? 'selected' : '' %>>Developer</option>
+            </select>
+          </label>
+          <button class="btn" type="submit">Update</button>
+        </form>
+      <% } %>
     </section>
 
     <div class="grid two">

@@ -134,7 +134,65 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				if (stop) break;
 				const question = questionFilesystem.questions[x];
 
-            const sent = await user.send(question).catch(async (err) => {
+                // Special handling for staff application role question: force Moderation Staff / Developer via buttons
+                if (
+                    ticketType &&
+                    ticketType.toLowerCase().includes('application') &&
+                    typeof question === 'string' &&
+                    question.toLowerCase().includes('what role are you interested in')
+                ) {
+                    const row = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('role_moderation_staff')
+                            .setLabel('Moderation Staff')
+                            .setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder()
+                            .setCustomId('role_developer')
+                            .setLabel('Developer')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+
+                    const sent = await user.send({
+                        content: question,
+                        components: [row]
+                    }).catch(async (err) => {
+                        if (err.message === `Cannot send messages to this user`) return;
+                        func.handle_errors(err, client, `backbone.js`, null)
+                    });
+
+                    if (!sent || !sent?.channel) {
+                        stop = true;
+                        break;
+                    }
+
+                    try {
+                        const collected = await sent.awaitMessageComponent({
+                            filter: i => i.user.id === user.id,
+                            time: 600000
+                        });
+
+                        const choice =
+                            collected.customId === 'role_developer'
+                                ? 'Developer'
+                                : 'Moderation Staff';
+
+                        // Disable buttons after selection
+                        const disabledRow = new ActionRowBuilder().addComponents(
+                            row.components.map(button => button.setDisabled(true))
+                        );
+                        await collected.update({
+                            components: [disabledRow]
+                        });
+
+                        responses = responses.concat(`\n\n**${question}**\n${choice}`);
+                        continue;
+                    } catch (_) {
+                        stop = true;
+                        break;
+                    }
+                }
+
+                const sent = await user.send(question).catch(async (err) => {
 					if (err.message === `Cannot send messages to this user`) return;
 				func.handle_errors(err, client, `backbone.js`, null)
 				})

@@ -636,6 +636,7 @@ app.get('/health', (req, res) => res.send('ok'));
 // Applications - list
 app.get('/applications', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const stage = (req.query.stage || '').trim();
+    const kind = (req.query.kind || '').trim().toLowerCase();
     let items = await applications.listApplications({ stage: stage || undefined });
     // By default, show only active applications (exclude Approved, Denied, Archived)
     if (!stage && !req.query.all) {
@@ -644,12 +645,40 @@ app.get('/applications', ensureAuth, ensureApplicationsAccess, async (req, res) 
     items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
-    const total = items.length;
+    const isDev = (app) => {
+        const t = String(app.type || '').toLowerCase();
+        return t.includes('dev') || t.includes('developer');
+    };
+    let devApps = items.filter(isDev);
+    let staffApps = items.filter(a => !isDev(a));
+    let filtered = items;
+    if (kind === 'dev') filtered = devApps;
+    else if (kind === 'staff') filtered = staffApps;
+
+    const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
-    const paged = items.slice(start, start + limit);
+    const paged = filtered.slice(start, start + limit);
+
+    // Resolve display names for applicants
+    let applicantNames = {};
+    try {
+        const userIds = Array.from(new Set(paged.map(a => String(a.userId || '')).filter(Boolean)));
+        applicantNames = await getDiscordUsernamesMap(userIds);
+    } catch (_) {}
+
     // Pass request query and pagination to template
-    res.render('applications_index', { items: paged, stage, request: { query: req.query }, query: req.query, pagination: { page, limit, total, totalPages } });
+    res.render('applications_index', { 
+        items: paged, 
+        stage, 
+        request: { query: req.query }, 
+        query: req.query, 
+        pagination: { page, limit, total, totalPages },
+        kind,
+        devCount: devApps.length,
+        staffCount: staffApps.length,
+        applicantNames
+    });
 });
 
 // Applications - detail
@@ -657,6 +686,27 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
+    // Resolve SteamID (and optional BM link) from the origin ticket for this application
+    let steamId = null;
+    let battlemetricsUrl = null;
+    try {
+        const origin = (appRec.tickets || []).find(t => t && t.type === 'origin' && t.ticketId);
+        if (origin && typeof db.query === 'function') {
+            const [rows] = await db.query(
+                'SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [String(appRec.userId || ''), String(origin.ticketId)]
+            );
+            if (rows && rows.length > 0 && rows[0].steam_id) {
+                const candidate = String(rows[0].steam_id);
+                if (candidate && candidate.startsWith('7656119')) {
+                    steamId = candidate;
+                    battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[web] /applications/:id steam lookup failed:', e?.message || e);
+    }
     // Resolve display names for history/comments
     const ids = new Set();
     (appRec.history || []).forEach(h => { if (h.by) ids.add(String(h.by)); });
@@ -720,8 +770,29 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
         channelExists,
         lastTicket,
         prevId,
-        nextId
+        nextId,
+        steamId,
+        battlemetricsUrl
     });
+});
+
+// Applications - update category (staff vs dev) by changing type string
+app.post('/applications/:id/category', ensureAuth, ensureApplicationsAccess, async (req, res) => {
+    const appId = req.params.id;
+    const category = (req.body.category || '').toLowerCase();
+    try {
+        const appRec = await applications.getApplication(appId);
+        if (!appRec) return res.status(404).send('Not found');
+        if (['Approved','Denied','Archived'].includes(appRec.stage)) {
+            return res.redirect(`/applications/${appId}?notification=Cannot change category for a closed application.&type=error`);
+        }
+        const newType = category === 'dev' ? 'Developer Application' : 'Staff Application';
+        await applications.updateType(appId, newType, req.user.id, `Category set to ${category === 'dev' ? 'Developer' : 'Staff'}`);
+        return res.redirect(`/applications/${appId}?notification=Application category updated.&type=success`);
+    } catch (e) {
+        console.error('[web] /applications/:id/category error:', e);
+        return res.redirect(`/applications/${appId}?notification=Failed to update application category.&type=error`);
+    }
 });
 
 // Applications - stage advance
@@ -745,6 +816,49 @@ app.post('/applications/:id/deny', ensureAuth, ensureApplicationsAccess, async (
     if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.deny(appId, req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - batch actions
+app.post('/applications/batch', ensureAuth, ensureApplicationsAccess, async (req, res) => {
+    try {
+        let ids = req.body.ids || [];
+        const action = (req.body.action || '').trim().toLowerCase();
+        const note = (req.body.note || '').trim();
+        if (!Array.isArray(ids)) ids = ids ? [ids] : [];
+        ids = ids.map(x => String(x)).filter(Boolean);
+        if (!ids.length || !['advance', 'deny', 'archive'].includes(action)) {
+            return res.redirect('/applications?notification=Select at least one application and a valid action.&type=error');
+        }
+        const stages = (config.applications && Array.isArray(config.applications.stages))
+            ? config.applications.stages
+            : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
+        let success = 0;
+        let skipped = 0;
+        for (const id of ids) {
+            try {
+                const appRec = await applications.getApplication(id);
+                if (!appRec) { skipped++; continue; }
+                if (['Approved','Denied','Archived'].includes(appRec.stage)) { skipped++; continue; }
+                if (action === 'advance') {
+                    const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
+                    const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
+                    await applications.advanceStage(id, nextStage, req.user.id, note || `Bulk advanced by ${req.user.id}`);
+                } else if (action === 'deny') {
+                    await applications.deny(id, req.user.id, note || `Bulk denied by ${req.user.id}`);
+                } else if (action === 'archive') {
+                    await applications.advanceStage(id, 'Archived', req.user.id, note || `Bulk archived by ${req.user.id}`);
+                }
+                success++;
+            } catch (_) {
+                skipped++;
+            }
+        }
+        const msg = `Batch ${action} complete: ${success} updated, ${skipped} skipped.`;
+        return res.redirect(`/applications?notification=${encodeURIComponent(msg)}&type=success`);
+    } catch (err) {
+        console.error('[web] /applications/batch error:', err);
+        return res.redirect('/applications?notification=Batch operation failed.&type=error');
+    }
 });
 
 // Applications - archive
@@ -831,7 +945,12 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
             { id: STAFF_GUILD_ID, type: 0, deny: (1<<10).toString() }, // VIEW_CHANNEL deny to @everyone
             ...Array.from(viewerRoles).map(rid => ({ id: rid, type: 0, allow: (1<<10).toString() }))
         ];
-        const channelName = `app-${appRec.username}-comms`;
+        const safeAppName = String(appRec.username || appRec.userId || 'user')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .substring(0, 16) || 'user';
+        const channelName = `app-${safeAppName}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
         await applications.linkTicket(appId, chan.id, chan.id, 'comms');
         // Map channel -> application for interaction handlers
@@ -847,6 +966,44 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         } catch (_) {}
         // Log to application history
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
+        
+        // Create a private staff thread inside the communication channel with the full application responses
+        try {
+            const threadName = `app-comms-${String(appRec.id || '').slice(0, 8) || 'thread'}`;
+            const threadRes = await axios.post(
+                `https://discord.com/api/v10/channels/${chan.id}/threads`,
+                {
+                    name: threadName,
+                    type: 12, // private thread
+                    auto_archive_duration: 10080
+                },
+                { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+            );
+            const thread = threadRes.data;
+            if (thread && thread.id) {
+                const fullResponses = typeof appRec.responses === 'string' ? appRec.responses : '';
+                const truncated = fullResponses.length > 4000 ? `${fullResponses.slice(0, 3997)}...` : fullResponses || 'No responses recorded';
+                const embed = {
+                    title: `${appRec.type || 'Application'} for ${appRec.username || appRec.userId}`,
+                    description: truncated,
+                    color: 0x208cdd,
+                    footer: {
+                        text: `Application ID: ${appRec.id || 'unknown'} • Stage: ${appRec.stage || 'Unknown'}`
+                    },
+                    timestamp: new Date().toISOString()
+                };
+                await axios.post(
+                    `https://discord.com/api/v10/channels/${thread.id}/messages`,
+                    {
+                        content: '',
+                        embeds: [embed]
+                    },
+                    { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+                );
+            }
+        } catch (threadError) {
+            console.error('Failed to create application comms staff thread:', threadError?.response?.data || threadError);
+        }
         
         // Post intro + close button
         try {

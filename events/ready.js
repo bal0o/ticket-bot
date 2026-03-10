@@ -66,12 +66,26 @@ module.exports = async function (client, message) {
             const rows = [];
             let usedCustoms = "";
 
+            // Resolve staff applications feature flag once
+            let staffAppsEnabled = handlerRaw.staff_applications_enabled;
+            try {
+                const db = createDB();
+                const flag = await db.get('FeatureFlags.StaffApplications.Enabled');
+                if (flag !== null && flag !== undefined) {
+                    staffAppsEnabled = !!flag;
+                }
+            } catch (_) {}
+
             for (const key of keys) {
                 const opt = handlerData.options[key];
                 if (!opt) continue;
 
                 const questionFilesystem = require(`../content/questions/${opt.question_file}`);
                 if (questionFilesystem.internal) continue;
+                // Optional per-type flag: hide when staff applications are disabled
+                if (questionFilesystem.staff_application === true && staffAppsEnabled === false) {
+                    continue;
+                }
 
                 // Skip validation for question files that don't have button content structure
                 if (questionFilesystem.active_ticket_button_content && 

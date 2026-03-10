@@ -22,5 +22,6 @@
 	"allow_feedback": false,
 	"open-as-ticket": true,
 	"max-active-tickets": 1,
-	"send_close_dm": false
+	"send_close_dm": false,
+    "staff_application": true
 }

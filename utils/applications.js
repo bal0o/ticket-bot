@@ -296,6 +296,22 @@ module.exports = {
         return await loadApplication(appId);
     },
 
+    async updateType(appId, newType, byStaffId, note) {
+        const rec = await loadApplication(appId);
+        if (!rec) return null;
+        rec.type = newType;
+        rec.updatedAt = Date.now();
+        rec.history = rec.history || [];
+        rec.history.push({
+            stage: rec.stage,
+            at: rec.updatedAt,
+            by: byStaffId || null,
+            note: note || ''
+        });
+        await saveApplication(rec);
+        return rec;
+    },
+
     async scheduleInterview({ appId, atTs, staffId, mode = 'voice' }) {
         // Schedule record processed by bot loop
         const jobId = `${appId}-${atTs}`;
