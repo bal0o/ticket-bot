@@ -1445,21 +1445,139 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
     res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
 });
 
-// Raw stream of transcript (iframe src)
+// Raw stream of transcript (iframe src) - DB-backed with legacy HTML fallback
 app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
     const filename = sanitizeFilename(req.params.filename);
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
+
     const allowed = await canViewTranscript(req.user.id, filename, res.locals.roleFlags);
     if (!allowed) {
         console.log('[web] /transcripts/raw deny', { userId: req.user.id, filename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     }
-    const abs = path.join(TRANSCRIPT_DIR, filename);
-    if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
-    if (!fs.existsSync(abs)) return res.status(404).send('Not found');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    fs.createReadStream(abs).pipe(res);
+
+    try {
+        const { renderTranscriptFromRows } = require('../utils/transcript_renderer');
+
+        // Determine mode and base channel name from filename
+        let mode = 'user';
+        let base = filename;
+        if (filename.endsWith('.staff.html')) {
+            mode = 'staff';
+            base = filename.replace(/\.staff\.html$/i, '');
+        } else if (filename.endsWith('.full.html')) {
+            mode = 'full';
+            base = filename.replace(/\.full\.html$/i, '');
+        } else if (filename.endsWith('.html')) {
+            mode = 'user';
+            base = filename.replace(/\.html$/i, '');
+        }
+
+        // For staff transcripts, use the staff thread channel name
+        let channelNames = [base];
+        if (mode === 'staff') {
+            const idMatch = base.match(/-(\d{1,8})$/);
+            if (idMatch) {
+                const ticketNum = idMatch[1];
+                channelNames = [`staff-chat-${ticketNum}`];
+            }
+        }
+
+        // Load ticket / owner context (may be null for non-ticket transcripts)
+        let ownerId = null;
+        let ticketId = null;
+        let ticketType = null;
+        try {
+            const ctx = await findTicketContextByFilename(filename);
+            if (ctx) {
+                ownerId = ctx.ownerId || null;
+                ticketId = ctx.ticketId || null;
+                ticketType = ctx.ticketType || null;
+            }
+        } catch (_) {}
+
+        // Fetch messages from ticket_messages for any of the candidate channel names
+        let rows = [];
+        if (typeof db.query === 'function') {
+            const placeholders = channelNames.map(() => '?').join(',');
+            const [resRows] = await db.query(
+                `SELECT message_id, channel_id, channel_name, guild_id,
+                        author_id, author_tag, author_username, author_is_bot,
+                        created_at, content, pinned, type, webhook_id, embeds, attachments
+                 FROM ticket_messages
+                 WHERE channel_name IN (${placeholders})
+                 ORDER BY created_at ASC, message_id ASC`,
+                channelNames
+            );
+            rows = resRows || [];
+        }
+
+        if (rows && rows.length > 0) {
+            // Derive close metadata from tickets table when available
+            let closeReason = null;
+            let closedBy = null;
+            let responseTime = null;
+            let isAnonTicket = false;
+            try {
+                if (ownerId && ticketId && typeof db.query === 'function') {
+                    const [ticketRows] = await db.query(
+                        'SELECT ticket_type, close_reason, close_user, created_at, close_time FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                        [String(ownerId), String(ticketId)]
+                    );
+                    if (ticketRows && ticketRows[0]) {
+                        closeReason = ticketRows[0].close_reason || null;
+                        closedBy = ticketRows[0].close_user || null;
+                        const openedAt = ticketRows[0].created_at ? Number(ticketRows[0].created_at) * 1000 : null;
+                        const closedAt = ticketRows[0].close_time ? Number(ticketRows[0].close_time) * 1000 : null;
+                        if (openedAt && closedAt && closedAt >= openedAt) {
+                            const durMs = closedAt - openedAt;
+                            try {
+                                const func = require('../utils/functions.js');
+                                responseTime = await func.convertMsToTime(durMs);
+                            } catch (_) {}
+                        }
+                        ticketType = ticketRows[0].ticket_type || ticketType;
+                    }
+                }
+                // Determine anon flag from question file when we know the ticket type
+                try {
+                    if (ticketType) {
+                        const handlerRaw = require('../content/handler/options.json');
+                        const found = Object.keys(handlerRaw.options).find(
+                            x => x.toLowerCase() === String(ticketType).toLowerCase()
+                        );
+                        if (found) {
+                            const qf = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+                            isAnonTicket = !!qf['anonymous-only-replies'];
+                        }
+                    }
+                } catch (_) {}
+            } catch (_) {}
+
+            const htmlBuf = renderTranscriptFromRows(rows, {
+                mode,
+                DiscordID: ownerId,
+                isAnonTicket,
+                closeReason,
+                closedBy,
+                responseTime
+            });
+
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(htmlBuf);
+        }
+
+        // Fallback for legacy HTML transcripts when DB has no rows
+        const abs = path.join(TRANSCRIPT_DIR, filename);
+        if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
+        if (!fs.existsSync(abs)) return res.status(404).send('Not found');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return fs.createReadStream(abs).pipe(res);
+    } catch (e) {
+        console.error('[web] /transcripts/raw error:', e);
+        return res.status(500).send('Failed to render transcript');
+    }
 });
 
 // Admin overrides routes removed

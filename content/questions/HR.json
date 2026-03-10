@@ -1,0 +1,25 @@
+{
+    "questions": [
+        "What is the nature of you query?",
+        "Please provide any background info",
+        "Are they are links / evidence / tickets or anything else you need to share?"
+    ],
+    "pre-message": "HR Ticket. Please answer the questions when valid.",
+    "post-message": "Thanks. An HR represenative will review and respond shortly.",
+    "transcript-channel": "1379458808195317852",
+    "ticket-category": "1441530220791206070",
+    "access-role-id": ["1441530554481901702","1368692575674044447"],
+    "ping-role-id": ["1441530554481901702"],
+    "anonymous-only-replies": false,
+    "check-cheetos": false,
+    "check-steamid": false,
+    "display-user-discord-info": true,
+    "needVerified": false,
+    "allow_feedback": false,
+    "open-as-ticket": true,
+    "internal": true,
+    "max-active-tickets": 5,
+    "send_close_dm": true
+}
+
+

@@ -1,7 +1,7 @@
 {
   "name": "dm-ticket-bot",
   "version": "2.4.4",
-  "description": "Discord.js v13 DM ticket bot",
+  "description": "Discord.js v14 DM ticket bot",
   "main": "index.js",
   "engines": {
     "node": ">=18.0.0"
@@ -17,7 +17,7 @@
   "dependencies": {
     "@discordjs/rest": "^2.4.2",
     "axios": "^1.9.0",
-    "discord.js": "^13.14.0",
+    "discord.js": "^14.16.1",
     "dotenv": "^8.2.0",
     "ejs": "^3.1.10",
     "express": "^4.19.2",

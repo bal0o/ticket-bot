@@ -4,7 +4,7 @@ const perms = require('../../utils/permissions.js');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
-const { Modal, TextInputComponent, MessageActionRow } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -113,15 +113,15 @@ module.exports = {
             }
             if (!hasServerField) {
                 // Prompt staff for the required server selection
-                const modal = new Modal()
+                const modal = new ModalBuilder()
                     .setCustomId('moveServerModal')
                     .setTitle('Provide Required Server');
-                const serverInput = new TextInputComponent()
+                const serverInput = new TextInputBuilder()
                     .setCustomId('serverInput')
                     .setLabel('Which server should be set for this ticket?')
-                    .setStyle('SHORT')
+                    .setStyle(TextInputStyle.Short)
                     .setRequired(true);
-                const firstActionRow = new MessageActionRow().addComponents(serverInput);
+                const firstActionRow = new ActionRowBuilder().addComponents(serverInput);
                 modal.addComponents(firstActionRow);
                 await interaction.showModal(modal);
                 // Save context for after modal submission

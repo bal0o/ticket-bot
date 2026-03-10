@@ -1,4 +1,4 @@
-const Discord = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
 let unirest = require('unirest');
 const func = require("./functions.js")
@@ -80,13 +80,13 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				const rows = [];
 				const buttonsPerRow = Math.ceil(servers.length / Math.ceil(servers.length / 5));
 				for (let i = 0; i < servers.length; i += buttonsPerRow) {
-					const row = new Discord.MessageActionRow()
-						.addComponents(
-							servers.slice(i, i + buttonsPerRow).map(server => 
-								new Discord.MessageButton()
+				const row = new ActionRowBuilder()
+					.addComponents(
+						servers.slice(i, i + buttonsPerRow).map(server => 
+							new ButtonBuilder()
 									.setCustomId(server)
 									.setLabel(server)
-									.setStyle('PRIMARY')
+									.setStyle(ButtonStyle.Primary)
 							)
 						);
 					rows.push(row);
@@ -115,7 +115,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 
 					// Disable all buttons after selection
 					const disabledRows = rows.map(row => {
-						return new Discord.MessageActionRow().addComponents(
+						return new ActionRowBuilder().addComponents(
 							row.components.map(button => button.setDisabled(true))
 						);
 					});
@@ -292,7 +292,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 	// Use ONLY the global ticket number for everything
 	let ticketUniqueID = formattedTicketNumber;
 
-		const embed = new Discord.MessageEmbed()
+		const embed = new EmbedBuilder()
 		.setAuthor({ name: authorName, iconURL: user.displayAvatarURL()})
 		    .setTitle(`${ticketType} #${formattedTicketNumber}`)
 		.setDescription(trimmedResponses.substring(0, 4000))
@@ -370,8 +370,8 @@ const openResult = await func.openTicket(client, interaction, questionFilesystem
             try { thread = await user.client.channels.fetch(threadId).catch(() => null); } catch (_) { thread = null; }
         }
         if (thread && typeof thread.send === 'function') {
-            const Discord = require('discord.js');
-            const staffEmbed = new Discord.MessageEmbed()
+            const { EmbedBuilder } = require('discord.js');
+            const staffEmbed = new EmbedBuilder()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('User Info')
                 .setAuthor({ name: `${user.username} (${user.id})`, iconURL: user.displayAvatarURL() })
@@ -395,44 +395,43 @@ const openResult = await func.openTicket(client, interaction, questionFilesystem
 try {
 	const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
 	const serverVal = m && m[1] ? m[1] : 'none';
-	const metrics = require('./metrics');
 	const scope = questionFilesystem && questionFilesystem.internal ? 'internal' : 'public';
-	metrics.ticketOpened(ticketType, serverVal, user.id, user.username, scope);
+	// Ticket open metrics are now derived directly from the tickets table; Prometheus metrics removed.
 } catch (_) {}
 
         } else {
         try { logger.event('TicketHoldChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 
-		const row = new Discord.MessageActionRow()
+		const row = new ActionRowBuilder()
 		if (questionFilesystem.active_ticket_button_content.accept.enabled == true) {
 			if (questionFilesystem.active_ticket_button_content.accept.emoji != "") {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportaccept`).setLabel(questionFilesystem.active_ticket_button_content.accept.title == "" ? "Accept" : questionFilesystem.active_ticket_button_content.accept.title).setStyle("SUCCESS").setEmoji(questionFilesystem.active_ticket_button_content.accept.emoji));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportaccept`).setLabel(questionFilesystem.active_ticket_button_content.accept.title == "" ? "Accept" : questionFilesystem.active_ticket_button_content.accept.title).setStyle(ButtonStyle.Success).setEmoji(questionFilesystem.active_ticket_button_content.accept.emoji));
 			} else {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportaccept`).setLabel(questionFilesystem.active_ticket_button_content.accept.title == "" ? "Accept" : questionFilesystem.active_ticket_button_content.accept.title).setStyle("SUCCESS"));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportaccept`).setLabel(questionFilesystem.active_ticket_button_content.accept.title == "" ? "Accept" : questionFilesystem.active_ticket_button_content.accept.title).setStyle(ButtonStyle.Success));
 			}
 		}
 
 		if (questionFilesystem.active_ticket_button_content.deny.enabled == true) {
 			if (questionFilesystem.active_ticket_button_content.deny.emoji != "") {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportdeny`).setLabel(questionFilesystem.active_ticket_button_content.deny.title == "" ? "Deny" : questionFilesystem.active_ticket_button_content.deny.title).setStyle("DANGER").setEmoji(questionFilesystem.active_ticket_button_content.deny.emoji));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportdeny`).setLabel(questionFilesystem.active_ticket_button_content.deny.title == "" ? "Deny" : questionFilesystem.active_ticket_button_content.deny.title).setStyle(ButtonStyle.Danger).setEmoji(questionFilesystem.active_ticket_button_content.deny.emoji));
 			} else {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportdeny`).setLabel(questionFilesystem.active_ticket_button_content.deny.title == "" ? "Deny" : questionFilesystem.active_ticket_button_content.deny.title).setStyle("DANGER"));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportdeny`).setLabel(questionFilesystem.active_ticket_button_content.deny.title == "" ? "Deny" : questionFilesystem.active_ticket_button_content.deny.title).setStyle(ButtonStyle.Danger));
 			}
 		}
 
 		if (questionFilesystem.active_ticket_button_content.custom_response_message.enabled == true) {
 			if (questionFilesystem.active_ticket_button_content.custom_response_message.emoji != "") {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportcustom`).setLabel(questionFilesystem.active_ticket_button_content.custom_response_message.title == "" ? "Custom Close Response" : questionFilesystem.active_ticket_button_content.custom_response_message.title).setStyle("PRIMARY").setEmoji(questionFilesystem.active_ticket_button_content.custom_response_message.emoji));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportcustom`).setLabel(questionFilesystem.active_ticket_button_content.custom_response_message.title == "" ? "Custom Close Response" : questionFilesystem.active_ticket_button_content.custom_response_message.title).setStyle(ButtonStyle.Primary).setEmoji(questionFilesystem.active_ticket_button_content.custom_response_message.emoji));
 			} else {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportcustom`).setLabel(questionFilesystem.active_ticket_button_content.custom_response_message.title == "" ? "Custom Close Response" : questionFilesystem.active_ticket_button_content.custom_response_message.title).setStyle("PRIMARY"));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportcustom`).setLabel(questionFilesystem.active_ticket_button_content.custom_response_message.title == "" ? "Custom Close Response" : questionFilesystem.active_ticket_button_content.custom_response_message.title).setStyle(ButtonStyle.Primary));
 			}
 		}
 
 		if (questionFilesystem.active_ticket_button_content.make_a_ticket.enabled == true) {
 			if (questionFilesystem.active_ticket_button_content.make_a_ticket.emoji != "") {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportticket`).setLabel(questionFilesystem.active_ticket_button_content.make_a_ticket.title == "" ? "Open Support Ticket" : questionFilesystem.active_ticket_button_content.make_a_ticket.title).setStyle("PRIMARY").setEmoji(questionFilesystem.active_ticket_button_content.make_a_ticket.emoji));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportticket`).setLabel(questionFilesystem.active_ticket_button_content.make_a_ticket.title == "" ? "Open Support Ticket" : questionFilesystem.active_ticket_button_content.make_a_ticket.title).setStyle(ButtonStyle.Primary).setEmoji(questionFilesystem.active_ticket_button_content.make_a_ticket.emoji));
 			} else {
-				row.addComponents(new Discord.MessageButton().setCustomId(`supportticket`).setLabel(questionFilesystem.active_ticket_button_content.make_a_ticket.title == "" ? "Open Support Ticket" : questionFilesystem.active_ticket_button_content.make_a_ticket.title).setStyle("PRIMARY"));
+				row.addComponents(new ButtonBuilder().setCustomId(`supportticket`).setLabel(questionFilesystem.active_ticket_button_content.make_a_ticket.title == "" ? "Open Support Ticket" : questionFilesystem.active_ticket_button_content.make_a_ticket.title).setStyle(ButtonStyle.Primary));
 			}
 		}
 

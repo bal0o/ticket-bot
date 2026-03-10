@@ -1,4 +1,4 @@
-const Discord = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, DiscordAPIError } = require("discord.js");
 const path = require("path");
 let messageId = { messageId: "", internalMessageId: "" };
 try {
@@ -40,18 +40,6 @@ module.exports = async function (client, message) {
     } catch (e) {
         console.error('[Ready] Failed to fetch staff guild members:', e);
     }
-    
-    // Initialize staff metrics with actual user IDs from roles
-    try {
-        const metrics = require('../utils/metrics');
-        await metrics.initStaffMetrics(client);
-        
-        // Run cleanup once to fix any existing role ID entries
-        console.log('[Ready] Running one-time cleanup of incorrect role IDs...');
-        await metrics.cleanupRoleIds(client);
-    } catch (error) {
-        console.error('[Ready] Error initializing staff metrics:', error);
-    }
 
     const db = createDB();
 
@@ -62,7 +50,7 @@ module.exports = async function (client, message) {
         func.handle_errors(null, client, `ready.js`, `Could not find the 'post_embed_channel_id' for ticket creation, please make sure it is defined in your config and the bot is in the correct discord server.`)
     } else {
         buttonEmbed = await postChannel.messages.fetch(messageId.messageId).catch((e) => {
-            if (e.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;
+            if (e.code === 10008) return;
         })
 
         if (buttonEmbed == undefined) {
@@ -70,19 +58,19 @@ module.exports = async function (client, message) {
             const handlerRaw = require("../content/handler/handler.json");
             const handlerData = require("../content/handler/options.json");
             
-            if (!handlerRaw.description || handlerRaw.description == "") return func.handle_errors(null, client, `ready.js`, `Embed Description can not be found or is listed as a blank space. Please go to your handler file to add a description.`)
-            let TypeCount = Object.keys(handlerData.options).length
-            if (TypeCount > 10) return func.handle_errors(null, client, `ready.js`, `There are too many ticket types in your options.json file. The limit is 10!`)
-            const rowOne = new Discord.MessageActionRow()
-            const rowTwo = new Discord.MessageActionRow()
-            let TwoRow = 0
+            if (!handlerRaw.description || handlerRaw.description == "") {
+                return func.handle_errors(null, client, `ready.js`, `Embed Description can not be found or is listed as a blank space. Please go to your handler file to add a description.`);
+            }
+
             const keys = Object.keys(handlerData.options);
-            let usedCustoms = ""
-            for (let i = 0; i < 5; i++) {
+            const rows = [];
+            let usedCustoms = "";
 
-                if (!handlerData.options[`${keys[i]}`]) continue;
+            for (const key of keys) {
+                const opt = handlerData.options[key];
+                if (!opt) continue;
 
-                let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
+                const questionFilesystem = require(`../content/questions/${opt.question_file}`);
                 if (questionFilesystem.internal) continue;
 
                 // Skip validation for question files that don't have button content structure
@@ -95,109 +83,60 @@ module.exports = async function (client, message) {
                     questionFilesystem.active_ticket_button_content.custom_response_message.enabled == false &&
                     questionFilesystem.active_ticket_button_content.make_a_ticket && 
                     questionFilesystem.active_ticket_button_content.make_a_ticket.enabled == false
-                    ) {
-                        func.handle_errors(null, client, `ready.js`, `You need to enabled at least one of the holding channel buttons in your question file for ${keys[i]}.`)
-                        continue;
-                    }
-
-                if (!["PRIMARY", "SECONDARY", "DANGER", "SUCCESS"].includes(handlerData.options[`${keys[i]}`]?.button_type)) {
-                    func.handle_errors(null, client, `ready.js`, `Could not add number ${i + 1} of your options due to the button type being incorrect. Please use "PRIMARY", "SECONDARY", "DANGER" or "SUCCESS" only.`)
+                ) {
+                    func.handle_errors(null, client, `ready.js`, `You need to enabled at least one of the holding channel buttons in your question file for ${key}.`);
                     continue;
                 }
-                if (!handlerData.options[`${keys[i]}`]?.unique_button_identifier || handlerData.options[`${keys[i]}`]?.unique_button_identifier == "") {
-                    func.handle_errors(null, client, `ready.js`, `Could not add number ${i + 1} of your options due to there being no unique identifer set.`)
+
+                if (!["PRIMARY", "SECONDARY", "DANGER", "SUCCESS"].includes(opt.button_type)) {
+                    func.handle_errors(null, client, `ready.js`, `Could not add ticket type "${key}" due to the button type being incorrect. Please use "PRIMARY", "SECONDARY", "DANGER" or "SUCCESS" only.`);
                     continue;
                 }
-                if (usedCustoms.includes(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))) {
-                    func.handle_errors(null, client, `ready.js`, `Could not submit a ticket type button due to conflicting unique identifiers. (${keys[i]} - the name \`${handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``)}\` is duplicated)`)
+                if (!opt.unique_button_identifier || opt.unique_button_identifier == "") {
+                    func.handle_errors(null, client, `ready.js`, `Could not add ticket type "${key}" due to there being no unique identifier set.`);
                     continue;
                 }
-                usedCustoms = usedCustoms + ` - ` + handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``)
-                if (handlerData.options[`${keys[i]}`].button_emoji == "") {
-                    rowOne.addComponents(
-                        new Discord.MessageButton()
-                            .setCustomId(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))
-                            .setLabel(keys[i])
-                            .setStyle(handlerData.options[`${keys[i]}`]?.button_type != "" ? handlerData.options[`${keys[i]}`]?.button_type.toUpperCase() : "PRIMARY"),
-                    );
-                } else {
-                    rowOne.addComponents(
-                        new Discord.MessageButton()
-                            .setCustomId(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))
-                            .setLabel(keys[i])
-                            .setStyle(handlerData.options[`${keys[i]}`]?.button_type != "" ? handlerData.options[`${keys[i]}`]?.button_type.toUpperCase() : "PRIMARY")
-                            .setEmoji(handlerData.options[`${keys[i]}`]?.button_emoji),
-                    );
+                const customId = opt.unique_button_identifier.toLowerCase().replace(/ /g, '');
+                if (usedCustoms.includes(customId)) {
+                    func.handle_errors(null, client, `ready.js`, `Could not submit a ticket type button due to conflicting unique identifiers. (${key} - the name \`${customId}\` is duplicated)`);
+                    continue;
                 }
-            }
-            if (TypeCount > 5) {
-                TwoRow++
-                for (let i = 5; i < 10; i++) {
+                usedCustoms = usedCustoms + ` - ` + customId;
 
-                    if (!handlerData.options[`${keys[i]}`]) continue;
+                const styleKey = (opt.button_type || "PRIMARY").toUpperCase();
+                const styleEnum = ButtonStyle[styleKey] || ButtonStyle.Primary;
 
-                    let questionFilesystem = require(`../content/questions/${handlerData.options[`${keys[i]}`]?.question_file}`);
-                    if (questionFilesystem.internal) continue;
+                // Create new row when the last row already has 5 components
+                let row = rows[rows.length - 1];
+                if (!row || row.components.length >= 5) {
+                    row = new ActionRowBuilder();
+                    rows.push(row);
+                }
 
-                    // Skip validation for question files that don't have button content structure
-                    if (questionFilesystem.active_ticket_button_content && 
-                        questionFilesystem.active_ticket_button_content.accept && 
-                        questionFilesystem.active_ticket_button_content.accept.enabled == false &&
-                        questionFilesystem.active_ticket_button_content.deny && 
-                        questionFilesystem.active_ticket_button_content.deny.enabled == false &&
-                        questionFilesystem.active_ticket_button_content.custom_response_message && 
-                        questionFilesystem.active_ticket_button_content.custom_response_message.enabled == false &&
-                        questionFilesystem.active_ticket_button_content.make_a_ticket && 
-                        questionFilesystem.active_ticket_button_content.make_a_ticket.enabled == false
-                        ) {
-                            func.handle_errors(null, client, `ready.js`, `You need to enabled at least one of the holding channel buttons in your question file for ${keys[i]}.`)
-                            continue;
-                        }
+                const btn = new ButtonBuilder()
+                    .setCustomId(customId)
+                    .setLabel(key)
+                    .setStyle(styleEnum);
+                if (opt.button_emoji) btn.setEmoji(opt.button_emoji);
+                row.addComponents(btn);
 
-                    if (!["PRIMARY", "SECONDARY", "DANGER", "SUCCESS"].includes(handlerData.options[`${keys[i]}`]?.button_type)) {
-                        func.handle_errors(null, client, `ready.js`, `Could not add number ${i + 1} of your options due to the button type being incorrect. Please use "PRIMARY", "SECONDARY", "DANGER" or "SUCCESS" only.`)
-                        continue;
-                    }
-                    if (!handlerData.options[`${keys[i]}`]?.unique_button_identifier || handlerData.options[`${keys[i]}`]?.unique_button_identifier == "") {
-                        func.handle_errors(null, client, `ready.js`, `Could not add number ${i + 1} of your options due to there being no unique identifer set.`)
-                        continue;
-                    }
-
-                    if (usedCustoms.includes(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))) {
-                        func.handle_errors(null, client, `ready.js`, `Could not submit a ticket type button due to conflicting unique identifiers. (${keys[i]} - the name \`${handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``)}\` is duplicated)`)
-                        continue;
-                    }
-
-                    if (handlerData.options[`${keys[i]}`].button_emoji == "") {
-                        rowTwo.addComponents(
-                            new Discord.MessageButton()
-                                .setCustomId(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))
-                                .setLabel(keys[i])
-                                .setStyle(handlerData.options[`${keys[i]}`]?.button_type != "" ? handlerData.options[`${keys[i]}`]?.button_type.toUpperCase() : "PRIMARY"),
-                        );
-                    } else {
-                        rowTwo.addComponents(
-                            new Discord.MessageButton()
-                                .setCustomId(handlerData.options[`${keys[i]}`]?.unique_button_identifier.toLowerCase().replace(` `,``))
-                                .setLabel(keys[i])
-                                .setStyle(handlerData.options[`${keys[i]}`]?.button_type != "" ? handlerData.options[`${keys[i]}`]?.button_type.toUpperCase() : "PRIMARY")
-                                .setEmoji(handlerData.options[`${keys[i]}`]?.button_emoji),
-                        );
-                    }
+                // Respect Discord's hard limit of 5 rows (25 buttons)
+                if (rows.length >= 5 && row.components.length >= 5) {
+                    break;
                 }
             }
 
-            const FinalEmbed = new Discord.MessageEmbed()
+            if (rows.length === 0) {
+                return func.handle_errors(null, client, `ready.js`, `No valid ticket types could be rendered for the main embed.`);
+            }
+
+            const FinalEmbed = new EmbedBuilder()
                 .setTitle(handlerRaw.title.replace("{{SERVER}}", client.guilds?.cache.get(client.config.channel_ids.public_guild_id).name))
                 .setColor(client.config.bot_settings.main_color)
                 .setDescription(handlerRaw.description)
                 .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()})
 
-            if (TwoRow == 0) {
-                buttonEmbed = await postChannel.send({embeds: [FinalEmbed], components: [rowOne]}).catch((e) => func.handle_errors(e, client, `ready.js`, null))
-            } else {
-                buttonEmbed = await postChannel.send({embeds: [FinalEmbed], components: [rowOne, rowTwo]}).catch((e) => func.handle_errors(e, client, `ready.js`, null))
-            }
+            buttonEmbed = await postChannel.send({embeds: [FinalEmbed], components: rows}).catch((e) => func.handle_errors(e, client, `ready.js`, null))
             messageId.messageId = buttonEmbed.id
             fs.writeFileSync('./config/messageid.json', JSON.stringify(messageId), (err) => {
               if (err) func.handle_errors(err, client, `ready.js`, null);
@@ -227,7 +166,7 @@ module.exports = async function (client, message) {
                     const notBot = notPinned.filter(fetchedMsg => fetchedMsg.author.id != client.user.id);
                     TicketTypeChannel.bulkDelete(notBot, true).catch(error => {
                         // If the message is deleted, the Discord API will return an unknown message error
-                        if (error instanceof Discord.DiscordAPIError && error.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;
+                        if (error instanceof DiscordAPIError && error.code === 10008) return;
                         // handle error
                         console.error(error)
                       })
@@ -254,7 +193,7 @@ module.exports = async function (client, message) {
                 func.handle_errors(null, client, `ready.js`, `Could not find the 'internal_post_embed_channel_id' for internal ticket creation.`)
             } else {
                 let internalEmbedMessage = await internalChannel.messages.fetch(messageId.internalMessageId).catch((e) => {
-                    if (e.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;
+                    if (e.code === 10008) return;
                 });
                 if (internalEmbedMessage == undefined) {
                     const handlerRaw = require("../content/handler/handler.json");
@@ -264,50 +203,49 @@ module.exports = async function (client, message) {
                         try { const qf = require(`../content/questions/${handlerData.options[k]?.question_file}`); return !!qf.internal; } catch(_) { return false; }
                     });
                     if (internalKeys.length > 0) {
-                        const rowOne = new Discord.MessageActionRow();
-                        const rowTwo = new Discord.MessageActionRow();
-                        let TwoRow = internalKeys.length > 5 ? 1 : 0;
+                        const rows = [];
                         let usedCustoms = "";
-                        for (let i = 0; i < Math.min(5, internalKeys.length); i++) {
-                            const key = internalKeys[i];
+
+                        for (const key of internalKeys) {
                             const opt = handlerData.options[key];
                             if (!opt || !opt.unique_button_identifier) continue;
+
                             const customId = opt.unique_button_identifier.toLowerCase().replace(/ /g, '');
                             if (usedCustoms.includes(customId)) continue;
                             usedCustoms = usedCustoms + ` - ` + customId;
-                            const btn = new Discord.MessageButton()
+
+                            const styleKey = (opt.button_type || 'PRIMARY').toUpperCase();
+                            const styleEnum = ButtonStyle[styleKey] || ButtonStyle.Primary;
+
+                            let row = rows[rows.length - 1];
+                            if (!row || row.components.length >= 5) {
+                                row = new ActionRowBuilder();
+                                rows.push(row);
+                            }
+
+                            const btn = new ButtonBuilder()
                                 .setCustomId(customId)
                                 .setLabel(key)
-                                .setStyle((opt.button_type || 'PRIMARY').toUpperCase());
+                                .setStyle(styleEnum);
                             if (opt.button_emoji) btn.setEmoji(opt.button_emoji);
-                            rowOne.addComponents(btn);
-                        }
-                        if (TwoRow) {
-                            for (let i = 5; i < Math.min(10, internalKeys.length); i++) {
-                                const key = internalKeys[i];
-                                const opt = handlerData.options[key];
-                                if (!opt || !opt.unique_button_identifier) continue;
-                                const customId = opt.unique_button_identifier.toLowerCase().replace(/ /g, '');
-                                if (usedCustoms.includes(customId)) continue;
-                                usedCustoms = usedCustoms + ` - ` + customId;
-                                const btn = new Discord.MessageButton()
-                                    .setCustomId(customId)
-                                    .setLabel(key)
-                                    .setStyle((opt.button_type || 'PRIMARY').toUpperCase());
-                                if (opt.button_emoji) btn.setEmoji(opt.button_emoji);
-                                rowTwo.addComponents(btn);
+                            row.addComponents(btn);
+
+                            if (rows.length >= 5 && row.components.length >= 5) {
+                                break;
                             }
                         }
-                        const embed = new Discord.MessageEmbed()
+
+                        if (rows.length === 0) {
+                            return func.handle_errors(null, client, `ready.js`, `No valid internal ticket types could be rendered for the internal embed.`);
+                        }
+
+                        const embed = new EmbedBuilder()
                             .setTitle('Internal Tickets')
                             .setColor(client.config.bot_settings.main_color)
                             .setDescription(require("../content/handler/handler.json").description)
                             .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()});
-                        if (TwoRow) {
-                            internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: [rowOne, rowTwo] }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
-                        } else {
-                            internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: [rowOne] }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
-                        }
+
+                        internalEmbedMessage = await internalChannel.send({ embeds: [embed], components: rows }).catch((e) => func.handle_errors(e, client, `ready.js`, null));
                         try {
                             messageId.internalMessageId = internalEmbedMessage.id;
                             fs.writeFileSync('./config/messageid.json', JSON.stringify(messageId), (err) => {

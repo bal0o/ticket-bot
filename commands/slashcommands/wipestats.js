@@ -1,4 +1,3 @@
-const Discord = require("discord.js");
 const moment = require("moment");
 const { SlashCommandBuilder } = require("@discordjs/builders")
 const config = require("../../config/config.json");
@@ -37,7 +36,7 @@ module.exports = {
 
 		if (access == 0) {
 			return interaction.editReply({content:`Sorry! You can not use this command.`, ephemeral: true}).catch(err => {
-				if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+				if (err.code === 10008) return;  
 				func.handle_errors(err, client, `stats.js`, null)
 				})
 		}
@@ -47,7 +46,7 @@ module.exports = {
 			await db.delete('StaffStats');
 
 			return interaction.editReply({content:`Successfully deleted all staff statistics.`, ephemeral: true}).catch(err => {
-				if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+				if (err.code === 10008) return;  
 				func.handle_errors(err, client, `wipestats.js`, null)
 				})
 
@@ -59,7 +58,7 @@ module.exports = {
 			await db.delete(`StaffStats.${userId}`);
 
 				return interaction.editReply({content:`Successfully deleted statistics for <@${userId}> (${userId}).`, ephemeral: true}).catch(err => {
-					if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+					if (err.code === 10008) return;  
 					func.handle_errors(err, client, `wipestats.js`, null)
 					})
 
@@ -69,7 +68,7 @@ module.exports = {
 			await db.delete(`ServerStats.ResponseTimes`);
 
 				return interaction.editReply({content:`Successfully deleted all response time statistics.`, ephemeral: true}).catch(err => {
-					if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+					if (err.code === 10008) return;  
 					func.handle_errors(err, client, `wipestats.js`, null)
 					})
 		}

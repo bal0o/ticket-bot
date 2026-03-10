@@ -1,4 +1,4 @@
-const Discord = require("discord.js");
+const { EmbedBuilder, AttachmentBuilder } = require("discord.js");
 const { SlashCommandBuilder } = require("@discordjs/builders");
 const config = require("../../config/config.json");
 const func = require("../../utils/functions.js");
@@ -269,7 +269,7 @@ module.exports = {
             const steamId = await resolveSteamId(client, targetId);
             const bm = steamId ? await fetchBattlemetricsInfo(client, steamId) : null;
 
-            const embed = new Discord.MessageEmbed()
+            const embed = new EmbedBuilder()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('Cheetos Scan')
                 .setDescription(summary)
@@ -326,7 +326,7 @@ module.exports = {
             if (overflow || detail.length > 4000) {
                 const { Readable } = require('stream');
                 const stream = Readable.from([detail]);
-                payload.files = [new Discord.MessageAttachment(stream, `checkcc_${targetId}.txt`)];
+                payload.files = [new AttachmentBuilder(stream, { name: `checkcc_${targetId}.txt` })];
             }
             await interaction.editReply(payload);
         } catch (e) {

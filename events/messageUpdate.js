@@ -7,7 +7,7 @@ module.exports = async function (client, oldMessage, newMessage) {
         if (!newMessage || !newMessage.channel || newMessage.author?.bot) return;
 
         // User DM edits -> update staff side
-        if (newMessage.channel.type === "DM") {
+        if (newMessage.channel.type === require('discord.js').ChannelType.DM) {
             const map = await db.get(`ForwardMap.${newMessage.id}`);
             if (!map || !map.channelId) return;
 

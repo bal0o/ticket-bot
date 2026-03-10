@@ -1,4 +1,4 @@
-const Discord = require("discord.js");
+const { EmbedBuilder } = require("discord.js");
 const moment = require("moment");
 const { SlashCommandBuilder } = require("@discordjs/builders")
 const config = require("../../config/config.json");
@@ -69,7 +69,7 @@ module.exports = {
 
 		if (access == 0) {
 			return interaction.editReply({content:`Sorry! You can not use this command.`, ephemeral: true}).catch(err => {
-				if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+				if (err.code === 10008) return;  
 				func.handle_errors(err, client, `stats.js`, null)
 				})
 		}
@@ -90,7 +90,7 @@ module.exports = {
 			if (userStats == null) {
 
 				return interaction.editReply({content:`Sorry, there is no data available at this time!`, ephemeral: true}).catch(err => {
-					if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+					if (err.code === 10008) return;  
 					func.handle_errors(err, client, `stats.js`, null)
 					})
 			}
@@ -112,14 +112,13 @@ module.exports = {
 				let usersSortedSliced = usersSorted.slice(0, 9);
 				let i = 1
 				let statsDesc = ""
-				const StatsEmbed = new Discord.MessageEmbed()
+				const StatsEmbed = new Discord.EmbedBuilder()
 				.setAuthor({name: `Ticket Statistics - Top 10 Staff Members`, iconURL: client.user.displayAvatarURL()})
 				.setColor(config.bot_settings.main_color)
 
 				for (let singleUser of usersSortedSliced) {
 					let memberuser = await interaction.guild.members.fetch(`${singleUser.ID}`).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MEMBER) return;
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_USER) return;
+						if (err.code === 10007 || err.code === 10013) return;
 						func.handle_errors(err, client, `stats.js`, null)
 					})
 					if (memberuser) {
@@ -132,7 +131,7 @@ module.exports = {
 				StatsEmbed.setDescription(`\`\`\`md\n${statsDesc}\`\`\``)
 
 				return interaction.editReply({embeds: [StatsEmbed], ephemeral: true}).catch(err => {
-					if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+					if (err.code === 10008) return;  
 					func.handle_errors(err, client, `stats.js`, null)
 					})
 
@@ -142,14 +141,14 @@ module.exports = {
 				let soloUserStats = userStats?.[interaction.options._hoistedOptions[0].value]
 				if (soloUserStats == null) {
 					return interaction.editReply({content:`Sorry! That user is not in the database.`, ephemeral: true}).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+						if (err.code === 10008) return;  
 						func.handle_errors(err, client, `stats.js`, null)
 						})
 				}
 
 				let user = await interaction.guild.members.fetch(interaction.options._hoistedOptions[0].value);
 
-				const StatsEmbed = new Discord.MessageEmbed()
+				const StatsEmbed = new Discord.EmbedBuilder()
 				.setAuthor({name: `Ticket Statistics for ${user.user.username}/${user.user.id}`, iconURL: user.user.displayAvatarURL()})
 				.setColor(config.bot_settings.main_color)
 
@@ -219,7 +218,7 @@ module.exports = {
 					StatsEmbed.addFields({ name: `User Facts`, value: `***Last Ticket Interaction:*** \`${moment(userStats.lastAction).format('MMMM Do YYYY, h:mm:ss a')}\`\n***Favourite Ticket Type:*** \`${favouriteTicketType}\`\n***Least Favourite Ticket Type:*** \`${leastFavouriteTicketType}\`\n***Total Tickets:*** \`${userStats.totalTickets}\`\n***Total Actions:*** \`${userStats.totalActions}\`\n***Total Accepts:*** \`${userStats.totalAccepts}\`\n***Total Denies:*** \`${userStats.totalDenies}\`\n***Total Custom Closes:*** \`${userStats.totalCustomCloses}\`\n***Total Feedback:*** \`${userStats.totalFeedback}\`\n` });
 
 					return interaction.editReply({embeds: [StatsEmbed], ephemeral: true}).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+						if (err.code === 10008) return;  
 						func.handle_errors(err, client, `stats.js`, null)
 						})
 
@@ -276,14 +275,13 @@ module.exports = {
 				let usersSortedSliced = usersSorted.slice(0, 9);
 				let i = 1
 				let statsDesc = ""
-				const StatsEmbed = new Discord.MessageEmbed()
+				const StatsEmbed = new Discord.EmbedBuilder()
 				.setAuthor({name: `${actionTypeName} Action - Top 10 Staff Members`, iconURL: client.user.displayAvatarURL()})
 				.setColor(config.bot_settings.main_color)
 
 				for (let singleUser of usersSortedSliced) {
 					let memberuser = await interaction.guild.members.fetch(`${singleUser.ID}`).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MEMBER) return;
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_USER) return;
+						if (err.code === 10007 || err.code === 10013) return;
 						func.handle_errors(err, client, `stats.js`, null)
 					})
 					
@@ -297,7 +295,7 @@ module.exports = {
 				StatsEmbed.setDescription(`\`\`\`md\n${statsDesc}\`\`\``)
 
 				return interaction.editReply({embeds: [StatsEmbed], ephemeral: true}).catch(err => {
-					if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+					if (err.code === 10008) return;  
 					func.handle_errors(err, client, `stats.js`, null)
 					})
 			}
@@ -313,14 +311,14 @@ module.exports = {
 					let i = 0
 					let embedDescription = ``
 
-					const OrgStatsEmbed = new Discord.MessageEmbed()
+					const OrgStatsEmbed = new EmbedBuilder()
 						.setAuthor({name: `Average Response Times per Ticket Type`, iconURL: client.user.displayAvatarURL()})
 						.setColor(config.bot_settings.main_color)
 
 						if (!orgStats?.ResponseTimes) {
 
 							return interaction.editReply({content:`Sorry, there is no data available at this time!`, ephemeral: true}).catch(err => {
-								if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+								if (err.code === 10008) return;  
 								func.handle_errors(err, client, `stats.js`, null)
 								})
 	
@@ -350,7 +348,7 @@ module.exports = {
 					OrgStatsEmbed.setDescription(`\`\`\`ml\n${embedDescription}\`\`\``)
 
 					return interaction.editReply({embeds: [OrgStatsEmbed], ephemeral: true}).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+						if (err.code === 10008) return;  
 						func.handle_errors(err, client, `stats.js`, null)
 						})
 				} else if (interaction.options._subcommand == `totaltickets`) {
@@ -359,14 +357,14 @@ module.exports = {
 					let i = 0
 					let embedDescription = ``
 
-					const OrgStatsEmbed = new Discord.MessageEmbed()
+					const OrgStatsEmbed = new EmbedBuilder()
 						.setAuthor({name: `Total Ticket Count per Ticket Type`, iconURL: client.user.displayAvatarURL()})
 						.setColor(config.bot_settings.main_color)
 
 					if (!orgStats?.ResponseTimes) {
 
 						return interaction.editReply({content:`Sorry, there is no data available at this time!`, ephemeral: true}).catch(err => {
-							if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+							if (err.code === 10008) return;  
 							func.handle_errors(err, client, `stats.js`, null)
 							})
 
@@ -389,7 +387,7 @@ module.exports = {
 					OrgStatsEmbed.setDescription(`\`\`\`ml\n${embedDescription}\`\`\``)
 
 					return interaction.editReply({embeds: [OrgStatsEmbed], ephemeral: true}).catch(err => {
-						if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+						if (err.code === 10008) return;  
 						func.handle_errors(err, client, `stats.js`, null)
 						})
 

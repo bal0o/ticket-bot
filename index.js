@@ -1,5 +1,12 @@
 // Environment variables are now loaded from config.json
-const { Client,Collection,Intents } = require("discord.js");
+const {
+	Client,
+	Collection,
+	GatewayIntentBits,
+	Partials,
+	ChannelType,
+	PermissionsBitField
+} = require("discord.js");
 const config = require("./config/config.json");
 const axios = require("axios");
 // Debug helper toggled via config.debug
@@ -7,14 +14,23 @@ const isDebugEnabled = !!config.debug;
 const debugLog = (...args) => { if (isDebugEnabled) console.log(...args); };
 const logger = require('./utils/logger');
 
-const client = new Client({ intents: [
-	Intents.FLAGS.GUILDS,
-	Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
-	Intents.FLAGS.GUILD_EMOJIS_AND_STICKERS,
-	Intents.FLAGS.GUILD_MEMBERS,
-	Intents.FLAGS.GUILD_MESSAGES,
-	Intents.FLAGS.DIRECT_MESSAGES
-], partials: ["MESSAGE", "CHANNEL", "REACTION", "GUILD_MEMBER"]	});
+const client = new Client({
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessageReactions,
+		GatewayIntentBits.GuildEmojisAndStickers,
+		GatewayIntentBits.GuildMembers,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent
+	],
+	partials: [
+		Partials.Message,
+		Partials.Channel,
+		Partials.Reaction,
+		Partials.GuildMember
+	]
+});
 
 client.commands = new Collection();
 client.blocked_users = new Set();
@@ -41,7 +57,6 @@ client.login(config.tokens.bot_token).then(() => {
 
 	let difference = Math.round(endTime - startTime);
     logger.info(`[Startup] Logged in as ${client.user.username} in ${difference}ms`);
-	try { require('./utils/metrics').initPersisted?.(); } catch (_) {}
 
 	// Start application interview scheduler loop
 	try {
@@ -92,15 +107,15 @@ client.login(config.tokens.bot_token).then(() => {
 							debugLog(`[Interview Scheduler] Guild permissions:`, guild.members.me?.permissions?.toArray() || 'unknown');
 							// Build permission overwrites with proper user/role resolution
 							const perms = [
-								{ id: guild.id, deny: ['VIEW_CHANNEL'] },
-								{ id: client.user.id, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] }
+								{ id: guild.id, deny: ['ViewChannel'] },
+								{ id: client.user.id, allow: ['ViewChannel','Connect','Speak'] }
 							];
 							
 							// Add admin role if it exists
 							if (adminRoleId) {
 								const adminRole = guild.roles.cache.get(adminRoleId);
 								if (adminRole) {
-									perms.push({ id: adminRole, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+									perms.push({ id: adminRole, allow: ['ViewChannel','Connect','Speak'] });
 								} else {
 									debugLog(`[Interview Scheduler] Admin role ${adminRoleId} not found in guild`);
 								}
@@ -109,24 +124,24 @@ client.login(config.tokens.bot_token).then(() => {
 							// Add staff member
 							try {
 								const staffMember = await guild.members.fetch(job.staffId);
-								perms.push({ id: staffMember, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+								perms.push({ id: staffMember, allow: ['ViewChannel','Connect','Speak'] });
 							} catch (staffError) {
 								debugLog(`[Interview Scheduler] Staff member ${job.staffId} not found in guild, using ID directly`);
-								perms.push({ id: job.staffId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+								perms.push({ id: job.staffId, allow: ['ViewChannel','Connect','Speak'] });
 							}
 							
 							// Add applicant
 							try {
 								const applicantMember = await guild.members.fetch(appRec.userId);
-								perms.push({ id: applicantMember, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+								perms.push({ id: applicantMember, allow: ['ViewChannel','Connect','Speak'] });
 							} catch (applicantError) {
 								debugLog(`[Interview Scheduler] Applicant ${appRec.userId} not found in guild, using ID directly`);
-								perms.push({ id: appRec.userId, allow: ['VIEW_CHANNEL','CONNECT','SPEAK'] });
+								perms.push({ id: appRec.userId, allow: ['ViewChannel','Connect','Speak'] });
 							}
 							const baseUsername = String(appRec.username || appRec.userId || 'user');
 							const safeUser = baseUsername.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 							const name = `interview-${safeUser || 'user'}`;
-							const createOpts = { type: 'GUILD_VOICE', permissionOverwrites: perms };
+							const createOpts = { type: ChannelType.GuildVoice, permissionOverwrites: perms };
 							if (interviewCategory) {
 								createOpts.parent = interviewCategory;
 								debugLog(`[Interview Scheduler] Using category ${interviewCategory} for channel creation`);
@@ -217,29 +232,29 @@ client.login(config.tokens.bot_token).then(() => {
 			try {
 				const cleanups = await db.get('InterviewCleanup') || {};
 				const now = Date.now();
-				console.log(`[Interview Cleanup] Checking ${Object.keys(cleanups).length} cleanup jobs at ${new Date(now).toISOString()}`);
+				debugLog(`[Interview Cleanup] Checking ${Object.keys(cleanups).length} cleanup jobs at ${new Date(now).toISOString()}`);
 				
 				for (const channelId of Object.keys(cleanups)) {
 					const cleanup = cleanups[channelId];
 					if (!cleanup || now < cleanup.cleanupAt) {
 						if (cleanup) {
-							console.log(`[Interview Cleanup] Channel ${channelId} cleanup scheduled for ${new Date(cleanup.cleanupAt).toISOString()}, skipping`);
+							debugLog(`[Interview Cleanup] Channel ${channelId} cleanup scheduled for ${new Date(cleanup.cleanupAt).toISOString()}, skipping`);
 						}
 						continue;
 					}
 					
 					try {
-						console.log(`[Interview Cleanup] Processing cleanup for channel ${channelId}`);
+						debugLog(`[Interview Cleanup] Processing cleanup for channel ${channelId}`);
 						const guild = client.guilds.cache.get(guildId);
 						if (!guild) {
-							console.log(`[Interview Cleanup] Guild ${guildId} not found for channel ${channelId}`);
+							debugLog(`[Interview Cleanup] Guild ${guildId} not found for channel ${channelId}`);
 							continue;
 						}
 						
-						console.log(`[Interview Cleanup] Found guild: ${guild.name} (${guild.id})`);
+						debugLog(`[Interview Cleanup] Found guild: ${guild.name} (${guild.id})`);
 						const channel = guild.channels.cache.get(channelId);
 						if (!channel) {
-							console.log(`[Interview Cleanup] Channel ${channelId} not found in guild ${guild.name}, removing from cleanup list`);
+							debugLog(`[Interview Cleanup] Channel ${channelId} not found in guild ${guild.name}, removing from cleanup list`);
 							// Channel doesn't exist, remove from cleanup list
 							delete cleanups[channelId];
 							await db.set('InterviewCleanup', cleanups);
@@ -248,34 +263,34 @@ client.login(config.tokens.bot_token).then(() => {
 						
 						// Check if anyone is in the channel
 						const memberCount = channel.members.size;
-						console.log(`[Interview Cleanup] Channel ${channelId} has ${memberCount} members`);
+						debugLog(`[Interview Cleanup] Channel ${channelId} has ${memberCount} members`);
 						
 						if (memberCount === 0) {
 							// No one in channel, delete it
-							console.log(`[Interview Cleanup] Deleting empty channel ${channelId}`);
+							debugLog(`[Interview Cleanup] Deleting empty channel ${channelId}`);
 							await channel.delete();
 							delete cleanups[channelId];
 							await db.set('InterviewCleanup', cleanups);
-							console.log(`[Interview Cleanup] Successfully deleted empty interview channel: ${channelId}`);
+							debugLog(`[Interview Cleanup] Successfully deleted empty interview channel: ${channelId}`);
 						} else {
 							// People still in channel, reschedule cleanup in 5 minutes
 							cleanup.cleanupAt = now + (5 * 60 * 1000); // 5 minutes
 							cleanup.attempts = (cleanup.attempts || 0) + 1;
 							
-							console.log(`[Interview Cleanup] Channel ${channelId} still has members, rescheduling cleanup (attempt ${cleanup.attempts}/12)`);
+							debugLog(`[Interview Cleanup] Channel ${channelId} still has members, rescheduling cleanup (attempt ${cleanup.attempts}/12)`);
 							
 							// Don't reschedule more than 12 times (1 hour total)
 							if (cleanup.attempts < 12) {
 								cleanups[channelId] = cleanup;
 								await db.set('InterviewCleanup', cleanups);
-								console.log(`[Interview Cleanup] Rescheduled cleanup for channel ${channelId} to ${new Date(cleanup.cleanupAt).toISOString()}`);
+								debugLog(`[Interview Cleanup] Rescheduled cleanup for channel ${channelId} to ${new Date(cleanup.cleanupAt).toISOString()}`);
 							} else {
 								// Force delete after 1 hour
-								console.log(`[Interview Cleanup] Force deleting channel ${channelId} after 1 hour of attempts`);
+								debugLog(`[Interview Cleanup] Force deleting channel ${channelId} after 1 hour of attempts`);
 								await channel.delete();
 								delete cleanups[channelId];
 								await db.set('InterviewCleanup', cleanups);
-								console.log(`[Interview Cleanup] Force deleted interview channel after 1 hour: ${channelId}`);
+								debugLog(`[Interview Cleanup] Force deleted interview channel after 1 hour: ${channelId}`);
 							}
 						}
 					} catch (cleanupError) {
@@ -321,13 +336,15 @@ process.on('warning', (warning) => {
     } catch (_) { console.warn('[Process] Warning', warning); }
 });
 
-// Periodic health log: event loop/memory snapshot
+// Periodic health log: event loop/memory snapshot (debug only to avoid log spam)
 const HEALTH_INTERVAL_MS = 60 * 1000;
-setInterval(() => {
-    try {
-        const mem = process.memoryUsage();
-        const rssMb = Math.round((mem.rss || 0) / 1024 / 1024);
-        const heapMb = Math.round((mem.heapUsed || 0) / 1024 / 1024);
-        logger.info('[Health] Memory', { rssMb, heapMb });
-    } catch (_) {}
-}, HEALTH_INTERVAL_MS).unref();
+if (isDebugEnabled) {
+	setInterval(() => {
+		try {
+			const mem = process.memoryUsage();
+			const rssMb = Math.round((mem.rss || 0) / 1024 / 1024);
+			const heapMb = Math.round((mem.heapUsed || 0) / 1024 / 1024);
+			logger.info('[Health] Memory', { rssMb, heapMb });
+		} catch (_) {}
+	}, HEALTH_INTERVAL_MS).unref();
+}

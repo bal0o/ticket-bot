@@ -1,7 +1,7 @@
 const { readdirSync } = require("fs");
 const func = require("./functions.js")
 const { REST } = require("@discordjs/rest");
-const { Routes } = require("discord-api-types/v9")
+const { Routes } = require("discord-api-types/v10")
 
 module.exports = function (client) {
 	let commands = readdirSync("./commands/").filter(x => x.endsWith(".js")).map(x => x.split(".")[0]);
@@ -21,12 +21,15 @@ module.exports = function (client) {
 		console.log(`Initialized ${file} Slash-Command`);
 	});
 
-	events.forEach(file => {
-		client.on(file, require(`../events/${file}`).bind(null, client));
-		console.log(`Initialized ${file} Event`);
-	});
+    events.forEach(file => {
+        const handler = require(`../events/${file}`).bind(null, client);
+        // Use 'clientReady' instead of deprecated 'ready' to be forward compatible.
+        const eventName = file === 'ready' ? 'clientReady' : file;
+        client.on(eventName, handler);
+        console.log(`Initialized ${file} Event (listening on '${eventName}')`);
+    });
 
-	const restClient = new REST({ version: "9" }).setToken(client.config.tokens.bot_token)
+	const restClient = new REST({ version: "10" }).setToken(client.config.tokens.bot_token)
 
 		restClient.put(Routes.applicationGuildCommands(client.user.id, client.config.channel_ids.staff_guild_id),
 		{ body: CommandsList })

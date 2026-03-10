@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require("@discordjs/builders");
-const { MessageEmbed, MessageActionRow, MessageButton } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require("discord.js");
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const func = require("../../utils/functions.js");
@@ -56,7 +56,7 @@ module.exports = {
             const embeds = [];
 
             for (const [index, ticket] of ticketArray.entries()) {
-                const embed = new MessageEmbed()
+                const embed = new EmbedBuilder()
                     .setTitle(`Ticket #${ticket.globalTicketNumber}`)
                     .setColor(client.config.bot_settings.main_color)
                     .setFooter({ text: `Page ${index + 1} of ${ticketArray.length}` })
@@ -81,17 +81,17 @@ module.exports = {
 
             let currentPage = 0;
             const generateButtons = () => {
-                return new MessageActionRow().addComponents(
-                    new MessageButton()
+                return new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
                         .setCustomId('prev_page')
                         .setLabel('Previous')
-                        .setStyle('SUCCESS')
+                        .setStyle(ButtonStyle.Success)
                         .setEmoji('⬅️')
                         .setDisabled(currentPage === 0),
-                    new MessageButton()
+                    new ButtonBuilder()
                         .setCustomId('next_page')
                         .setLabel('Next')
-                        .setStyle('SUCCESS')
+                        .setStyle(ButtonStyle.Success)
                         .setEmoji('➡️')
                         .setDisabled(currentPage === embeds.length - 1)
                 );
@@ -99,7 +99,7 @@ module.exports = {
             
             const message = await interaction.editReply({ embeds: [embeds[currentPage]], components: [generateButtons()], fetchReply: true });
 
-            const collector = message.createMessageComponentCollector({ componentType: 'BUTTON', time: 120000 });
+            const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 120000 });
 
             collector.on('collect', async i => {
                 if (i.user.id !== interaction.user.id) {
@@ -118,9 +118,9 @@ module.exports = {
             });
 
             collector.on('end', async () => {
-                const finalButtons = new MessageActionRow().addComponents(
-                    new MessageButton().setCustomId('prev_page').setLabel('Previous').setStyle('SUCCESS').setEmoji('⬅️').setDisabled(true),
-                    new MessageButton().setCustomId('next_page').setLabel('Next').setStyle('SUCCESS').setEmoji('➡️').setDisabled(true)
+                const finalButtons = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('prev_page').setLabel('Previous').setStyle(ButtonStyle.Success).setEmoji('⬅️').setDisabled(true),
+                    new ButtonBuilder().setCustomId('next_page').setLabel('Next').setStyle(ButtonStyle.Success).setEmoji('➡️').setDisabled(true)
                 );
                 await interaction.editReply({ components: [finalButtons] }).catch(()=>{});
             });

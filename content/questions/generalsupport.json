@@ -3,16 +3,9 @@
         "enabled": true,
         "question": "Which server are you playing on?",
         "servers": [
-            "EU1",
-            "EU2",
-            "EU3",
-            "EU4",
-            "EU5",
-            "US1",
-            "US2",
-            "US3",
-            "US4",
-            "US5"
+  "EU",
+  "US",
+  "AU"
         ]
     },
     "questions": [
@@ -25,10 +18,10 @@
     "accept-message": "Your support request has been resolved. If you need further assistance, feel free to open another ticket.",
     "deny-message": "Your support request has been closed. If you have further questions, please contact us again.",
     "post-channel": "",
-    "transcript-channel": "1379458808195317852",
-    "ticket-category": "1379551738343723068",
-    "access-role-id": ["1368696296365621331", "1368692575674044447", "1368696874177134745", "1368697297453715496", "1368697881740967966", "1368697870215024732"],
-    "ping-role-id": ["1368697870215024732", "1368697881740967966"],
+    "transcript-channel": "1406643035411841205",
+    "ticket-category": "1406643110506926131",
+    "access-role-id": ["1264858598345801740", "1264858597427384467"],
+    "ping-role-id": ["1264858598345801740", "1264858597427384467"],
     "anonymous-only-replies": false,
     "check-cheetos": false,
     "check-steamid": true,

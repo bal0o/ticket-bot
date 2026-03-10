@@ -1,5 +1,4 @@
-const Discord = require("discord.js");
-const metrics = require('./metrics');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
 const func = require("./functions.js")
@@ -74,6 +73,7 @@ module.exports.shouldExcludeFromTicketCount = function(ticketType) {
 /**
  * Send a DM with retries and delivery verification.
  * Returns { delivered: boolean, message: Message|null, error: Error|null }
+ * On final failure, logs to the configured error channel via handle_errors.
  */
 module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
     // Guard against accidentally sending completely empty DMs
@@ -120,11 +120,28 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
     };
     while (attempt < maxAttempts) {
         try {
+            try {
+                const logger = require('./logger');
+                logger.event('sendDMWithRetry.attempt', {
+                    userId: user && user.id ? user.id : 'unknown',
+                    attempt,
+                    maxAttempts,
+                    hasContent: typeof payload === 'string' ? !!payload.trim() : !!(payload && typeof payload === 'object' && typeof payload.content === 'string' && payload.content.trim() !== ''),
+                    hasEmbeds: !!(payload && typeof payload === 'object' && Array.isArray(payload.embeds) && payload.embeds.length > 0),
+                    hasFiles: !!(payload && typeof payload === 'object' && Array.isArray(payload.files) && payload.files.length > 0)
+                });
+            } catch (_) {}
             const message = await user.send(payload);
             return { delivered: !!(message && message.id), message: message || null, error: null };
         } catch (err) {
             attempt++;
             if (!isRetryable(err) || attempt >= maxAttempts) {
+                // Surface the failure to the bot's error channel
+                try {
+                    const client = user && user.client ? user.client : null;
+                    const context = `sendDMWithRetry final failure for user ${user && user.id ? user.id : 'unknown'}`;
+                    module.exports.handle_errors(err, client, 'functions.js', context);
+                } catch (_) {}
                 return { delivered: false, message: null, error: err };
             }
             const jitter = Math.floor(Math.random() * 200);
@@ -272,7 +289,7 @@ async function getCategoryWithRoom(client, staffGuild, preferredCategoryId, tick
         staffGuild.channels.cache.filter((c) => c.parentId === categoryId).size;
 
     const tryCategory = (cat) => {
-        if (!cat || cat.type !== 'GUILD_CATEGORY') return null;
+        if (!cat || cat.type !== ChannelType.GuildCategory) return null;
         return countChildren(cat.id) < MAX_CHANNELS_PER_CATEGORY ? cat.id : null;
     };
 
@@ -284,7 +301,7 @@ async function getCategoryWithRoom(client, staffGuild, preferredCategoryId, tick
         // Preferred is full: look for existing overflow categories (same name + " (2)", " (3)", ...)
         const baseName = preferred?.name || 'Tickets';
         const overflowCats = staffGuild.channels.cache.filter(
-            (c) => c.type === 'GUILD_CATEGORY' && c.name.startsWith(baseName)
+            (c) => c.type === ChannelType.GuildCategory && c.name.startsWith(baseName)
         );
         for (const [, cat] of overflowCats) {
             const id = tryCategory(cat);
@@ -299,7 +316,7 @@ async function getCategoryWithRoom(client, staffGuild, preferredCategoryId, tick
             name = `${baseName} (${n})`;
         }
         try {
-            const newCat = await staffGuild.channels.create(name, { type: 'GUILD_CATEGORY' });
+            const newCat = await staffGuild.channels.create({ name, type: ChannelType.GuildCategory });
             if (client) func.handle_errors(null, client, 'functions.js', `Category "${baseName}" was full; created overflow category "${name}" for ticket type '${ticketType}'.`);
             return newCat.id;
         } catch (e) {
@@ -321,7 +338,7 @@ async function getCategoryWithRoom(client, staffGuild, preferredCategoryId, tick
 async function deleteEmptyOverflowCategory(client, guild, parentCategoryId) {
     if (!guild?.channels?.cache || !parentCategoryId) return;
     const category = guild.channels.cache.get(parentCategoryId);
-    if (!category || category.type !== 'GUILD_CATEGORY') return;
+    if (!category || category.type !== ChannelType.GuildCategory) return;
     // Overflow categories we create are named "BaseName (2)", "BaseName (3)", etc.
     if (!/^.+\s+\(\d+\)$/.test(category.name)) return;
     const childCount = guild.channels.cache.filter((c) => c.parentId === parentCategoryId).size;
@@ -340,7 +357,7 @@ module.exports.handle_errors = async (err, client, file, message) => {
 
 	let ErrorChannel = client.channels.cache.get(client.config.channel_ids.error_channel)
 
-    let errorEmbed = new Discord.MessageEmbed()
+    let errorEmbed = new EmbedBuilder()
     .setColor(0x990000)
     .setTitle(`Error Found!`)
 
@@ -543,18 +560,18 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     creatorName = creatorName.substring(0, 8).replace(`-`, ``).replace(` `, ``);;
     let creatorID = recepientMember.id
 
-    let overwrites = [
+let overwrites = [
         {
             id: staffGuild.id,
-            deny: ['VIEW_CHANNEL', 'ADD_REACTIONS'],
+            deny: ['ViewChannel', 'AddReactions'],
         },
         {
             id: client.user.id,
-            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'ADD_REACTIONS', 'MANAGE_THREADS'],
+            allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
         },
         {
             id: client.config.role_ids.default_admin_role_id,
-            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
+            allow: ['ViewChannel', 'SendMessages'],
         }
     ];
 
@@ -568,7 +585,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
         } else {
             let add = {
                 id: role,
-                allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
+                allow: ['ViewChannel', 'SendMessages'],
             }
             overwrites.push(add)
         }
@@ -579,7 +596,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     if (questionFile.internal) {
         overwrites.push({
             id: recepientMember.id,
-            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY'],
+            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
         });
     }
 
@@ -611,11 +628,11 @@ if (typesRequireServer.includes(ticketType.toLowerCase())) {
 let parentId = null;
 try {
     const desired = ticketCategory ? staffGuild.channels.cache.get(ticketCategory) : null;
-    if (desired && desired.type === 'GUILD_CATEGORY') {
+    if (desired && desired.type === ChannelType.GuildCategory) {
         parentId = desired.id;
     } else if (postchannelCategory) {
         const p = staffGuild.channels.cache.get(postchannelCategory);
-        if (p && p.type === 'GUILD_CATEGORY') parentId = p.id;
+        if (p && p.type === ChannelType.GuildCategory) parentId = p.id;
     }
     if (!parentId) {
         func.handle_errors(null, client, 'functions.js', `Configured category invalid or missing for ticket type '${ticketType}'. Creating in guild root.`);
@@ -627,8 +644,9 @@ parentId = await getCategoryWithRoom(client, staffGuild, parentId, ticketType);
 
 let ticketChannel;
 try {
-    ticketChannel = await staffGuild.channels.create(channelName, {
-        type: "text",
+    ticketChannel = await staffGuild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
         topic: recepientMember.id,
         parent: parentId || null,
         permissionOverwrites: overwrites,
@@ -639,8 +657,9 @@ try {
         // Retry with a fresh category (overflow); getCategoryWithRoom will create/find one
         try {
             const fallbackParentId = await getCategoryWithRoom(client, staffGuild, parentId, ticketType);
-            ticketChannel = await staffGuild.channels.create(channelName, {
-                type: "text",
+            ticketChannel = await staffGuild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildText,
                 topic: recepientMember.id,
                 parent: fallbackParentId || null,
                 permissionOverwrites: overwrites,
@@ -675,34 +694,34 @@ try {
 } catch (e) {}
 
     // Build action buttons. For application tickets, only show application actions.
-    let actionRow = new Discord.MessageActionRow();
+    let actionRow = new ActionRowBuilder();
     const isApplication = ticketType && ticketType.toLowerCase().includes('application');
     if (isApplication) {
         actionRow.addComponents(
-            new Discord.MessageButton().setCustomId('app_next_stage').setLabel('Move to Next Stage').setStyle('PRIMARY'),
-            new Discord.MessageButton().setCustomId('app_deny').setLabel('Deny').setStyle('DANGER')
+            new ButtonBuilder().setCustomId('app_next_stage').setLabel('Move to Next Stage').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('app_deny').setLabel('Deny').setStyle(ButtonStyle.Danger)
         );
     } else {
         actionRow.addComponents(
-            new Discord.MessageButton()
+            new ButtonBuilder()
                 .setCustomId(`ticketclose`)
                 .setLabel(lang.close_ticket["close-ticket-button-title"] != "" ? lang.close_ticket["close-ticket-button-title"] : `Close Ticket`)
-                .setStyle("DANGER")
+                .setStyle(ButtonStyle.Danger)
                 .setEmoji("📝"),
-            new Discord.MessageButton()
+            new ButtonBuilder()
                 .setCustomId(`moveticket`)
                 .setLabel("Move Ticket")
-                .setStyle("PRIMARY")
+                .setStyle(ButtonStyle.Primary)
                 .setEmoji("↗️")
         );
         // Optional claim button for non-application tickets
         try {
             if (client.config?.claims?.enabled) {
                 actionRow.addComponents(
-                    new Discord.MessageButton()
+                    new ButtonBuilder()
                         .setCustomId(`claimticket`)
                         .setLabel('Claim Ticket')
-                        .setStyle('SUCCESS')
+                        .setStyle(ButtonStyle.Success)
                         .setEmoji('🧾')
                 );
             }
@@ -734,7 +753,7 @@ try {
     } else {
         replyInfo = `Replies are sent **as yourself** by default. Use \`!r <message>\` to reply anonymously.`;
     }
-    const instructionEmbed = new Discord.MessageEmbed()
+    const instructionEmbed = new EmbedBuilder()
         .setColor(client.config.bot_settings.main_color)
         .setTitle('How to Reply')
         .setDescription(replyInfo);
@@ -825,7 +844,7 @@ try {
                 const rolesVal = (r['Roles'] || '').trim();
                 if (rolesVal && rolesVal.length > 0) wr++;
             }
-            const cheetosEmbed = new Discord.MessageEmbed()
+            const cheetosEmbed = new EmbedBuilder()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle('Cheetos Check')
                 .setDescription(records.length > 0 ? `Result: ${records.length} CC LTS ${ltsStr} ${wr} WR` : `Cheetos Check: Clean`);
@@ -842,7 +861,7 @@ try {
             name: `staff-chat-${formattedTicketNumber}`,
             autoArchiveDuration: 10080,
             reason: `Private staff discussion for ticket #${formattedTicketNumber}`,
-            type: 'GUILD_PUBLIC_THREAD'
+            type: ChannelType.PublicThread
         });
         console.log(`[Functions] Staff thread created successfully: ${thread.name} (${thread.id})`);
         console.log(`[Functions] Thread type: ${thread.type}, archived: ${thread.archived}, locked: ${thread.locked}`);
@@ -903,7 +922,7 @@ try {
         } catch (_) {}
 
         if (bmInfo) {
-            const staffEmbed = new Discord.MessageEmbed()
+            const staffEmbed = new EmbedBuilder()
                 .setColor(client.config.bot_settings.main_color)
                 .setTitle(`User Info`)
                 .setAuthor({ name: `${recepientMember.username} (${recepientMember.id})`, iconURL: recepientMember.displayAvatarURL() })
@@ -944,19 +963,19 @@ try {
                                             // For public threads, we can use permissionOverwrites
                                             if (thread.permissionOverwrites && typeof thread.permissionOverwrites.create === 'function') {
                                                 await thread.permissionOverwrites.create(role, {
-                                                    VIEW_CHANNEL: true,
-                                                    SEND_MESSAGES: true,
-                                                    READ_MESSAGE_HISTORY: true
+                                                    ViewChannel: true,
+                                                    SendMessages: true,
+                                                    ReadMessageHistory: true
                                                 });
                                                 console.log(`[Functions] Successfully added role ${role.name} to thread permissions via permissionOverwrites`);
                                             } else {
                                                 // Fallback: try to edit the thread with permissionOverwrites
-                                                await thread.edit({
+                                                    await thread.edit({
                                                     permissionOverwrites: [
                                                         {
                                                             id: roleId,
                                                             type: 'role',
-                                                            allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+                                                            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory']
                                                         }
                                                     ]
                                                 });
@@ -981,9 +1000,9 @@ try {
                 const adminRole = staffGuild.roles.cache.get(client.config.role_ids.default_admin_role_id);
                 if (adminRole && thread.permissionOverwrites?.create) {
                     await thread.permissionOverwrites.create(adminRole, {
-                        VIEW_CHANNEL: true,
-                        SEND_MESSAGES: true,
-                        READ_MESSAGE_HISTORY: true
+                        ViewChannel: true,
+                        SendMessages: true,
+                        ReadMessageHistory: true
                     });
                 }
             } catch (_) {}
@@ -993,7 +1012,7 @@ try {
         try {
             console.log(`[Functions] Converting thread to private for ticket #${formattedTicketNumber}...`);
             await thread.edit({
-                type: 'GUILD_PRIVATE_THREAD'
+                type: ChannelType.PrivateThread
             });
             console.log(`[Functions] Successfully converted thread to private`);
         } catch (convertError) {
@@ -1088,8 +1107,7 @@ module.exports.updateTicketStatus = async function(client) {
         // Count channels that have a topic matching Discord ID pattern (indicating they are ticket channels)
         // Exclude internal tickets from the count by matching against database
         const ticketCount = channels.filter(channel => {
-            // Discord.js v13 uses string constants
-            const isTextChannel = channel.type === 'GUILD_TEXT' || channel.type === 0;
+            const isTextChannel = channel.type === ChannelType.GuildText;
             const hasTicketTopic = channel.topic && /^\d{17,19}$/.test(channel.topic);
             if (!isTextChannel || !hasTicketTopic) return false;
             
@@ -1116,13 +1134,6 @@ module.exports.updateTicketStatus = async function(client) {
         }).size;
 
         console.log(`[updateTicketStatus] Found ${ticketCount} open ticket channels`);
-
-        // Update Prometheus metrics gauge (if available)
-        try { 
-            metrics.setOpenTickets(ticketCount); 
-        } catch (metricsError) {
-            // Metrics not critical - continue even if it fails
-        }
 
         // Get activity configuration from config
         const activityConfig = client.config?.activityInfo;
@@ -1208,8 +1219,9 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
             return;
         }
         // Parse ticket info
-        const embed = LastPin.embeds[0];
-        const footerParts = embed.footer.text.split("|");
+        const rawEmbed = LastPin.embeds[0];
+        const embed = EmbedBuilder.from(rawEmbed);
+        const footerParts = rawEmbed.footer.text.split("|");
         const idParts = footerParts[0].trim().split('-');
         let ticketType = footerParts[1]?.trim() || 'Unknown';
         if (ticketType.includes('#')) {
@@ -1272,172 +1284,26 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             await logs_channel.send({embeds: [embed]}).catch(e => module.exports.handle_errors(e, client, "functions.js", null));
         }
 
-        const transcript = require("./fetchTranscript.js");
+        // Compute transcript URL (DB-backed; no HTML generation here)
         let savedTranscriptURL = null;
-        // Collect IDs of staff -> user messages during session (anon or not)
-        const allowedIds = [];
         try {
-            const recent = await channel.messages.fetch({ limit: 50 });
-            recent.forEach(m => {
-                if (m.author?.id === client.user.id) return; // skip bot markers
-                // Include explicit recent staff-to-user signals by prefix commands or our own markers
-                const isAnonCmd = typeof m.content === 'string' && m.content.startsWith('!r');
-                const isStaffEmbed = m.embeds && m.embeds[0] && m.embeds[0].author && /Sent to user/i.test(m.embeds[0].author.name || '');
-                if (isAnonCmd || isStaffEmbed) allowedIds.push(m.id);
-            });
-        } catch (_) {}
-
-        // Offload transcript rendering to a worker thread to avoid blocking
-        try {
-            const { Worker } = require('worker_threads');
-            const path = require('path');
-            const { save_path, base_url } = client.config.transcript_settings;
-            if (!fs.existsSync(save_path)) fs.mkdirSync(save_path, { recursive: true });
-
-            // Collect raw messages for worker
-            const collectAll = async (chan) => {
-                let all = [];
-                let lastId = undefined;
-                for (;;) {
-                    const fetched = await chan.messages.fetch({ limit: 100, before: lastId }).catch(() => null);
-                    if (!fetched || fetched.size === 0) break;
-                    for (const m of fetched.values()) {
-                        all.push({
-                            id: m.id,
-                            createdAt: m.createdAt ? m.createdAt.getTime() : Date.now(),
-                            content: m.content || '',
-                            pinned: !!m.pinned,
-                            type: m.type || '',
-                            webhookId: m.webhookId || null,
-                            author: m.author ? { id: m.author.id, username: m.author.username, tag: m.author.tag, avatarURL: (typeof m.author.displayAvatarURL === 'function' ? m.author.displayAvatarURL() : '') } : null,
-                            embeds: Array.isArray(m.embeds) ? m.embeds.map(e => ({ title: e.title || '', description: e.description || '', fields: Array.isArray(e.fields) ? e.fields.map(f => ({ name: f.name || '', value: f.value || '' })) : [] })) : [],
-                            attachments: m.attachments && m.attachments.size ? Array.from(m.attachments.values()).map(a => a.url) : []
-                        });
-                    }
-                    lastId = fetched.lastKey();
-                }
-                return all;
-            };
-
-            let staffThread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-            if (!staffThread && channel.threads && channel.threads.fetchActive) {
-                const fetched = await channel.threads.fetchActive().catch(() => null);
-                if (fetched && fetched.threads) {
-                    staffThread = fetched.threads.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-                }
-            }
-
-            // Start message collection asynchronously (don't block close response)
+            const { base_url } = client.config.transcript_settings;
             const transcriptURL = `${base_url}${channel.name}.full.html`;
             savedTranscriptURL = transcriptURL;
-            
-            // Send notification to channel that it will be deleted after transcript generation
-            try {
-                await channel.send('🔒 **This ticket has been closed.**\n\n📝 Generating transcript... This channel will be deleted once the transcript is complete.');
-            } catch (_) {}
-            
-            // Fire-and-forget: collect messages and generate transcript without blocking
-            // Delete channel only after messages are collected to ensure transcript success
-            setImmediate(async () => {
-                try {
-                    // Collect messages (this is slow, happens after response)
-                    const messagesMain = await collectAll(channel);
-                    const messagesStaff = staffThread ? await collectAll(staffThread) : [];
-                    
-                    const job = {
-                        savePath: save_path,
-                        baseUrl: base_url,
-                        channelName: channel.name,
-                        DiscordID,
-                        isAnonTicket: !!typeFile["anonymous-only-replies"],
-                        closeReason: reason,
-                        closedBy: staffMember.username || staffMember.user?.username,
-                        responseTime: await module.exports.convertMsToTime(Date.now() - embed.timestamp),
-                        messagesMain,
-                        messagesStaff
-                    };
 
-                    // Fire-and-forget rendering
-                    const worker = new Worker(path.join(__dirname, 'transcript_worker.js'), { workerData: job });
-                    
-                    // Delete channel only when worker confirms completion
-                    worker.on('message', async (msg) => {
-                        try {
-                            if (msg && msg.ok === true) {
-                                // Transcript successfully generated, safe to delete channel
-                                const parentId = channel.parentId;
-                                const guild = channel.guild;
-                                try {
-                                    await channel.delete();
-                                    await deleteEmptyOverflowCategory(client, guild, parentId);
-                                } catch (err) {
-                                    if (err && err.code === 10003) {
-                                        module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003). Likely already deleted.`);
-                                    } else {
-                                        module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
-                                    }
-                                }
-                            } else {
-                                // Fallback: write minimal placeholder so links are valid
-                                const html = `<!doctype html><html><head><meta charset="utf-8"><title>Transcript generating...</title></head><body><p>Transcript is being generated. Please refresh in a moment.</p></body></html>`;
-                                await fs.promises.writeFile(`${save_path}/${channel.name}.full.html`, html).catch(()=>{});
-                                await fs.promises.writeFile(`${save_path}/${channel.name}.html`, html).catch(()=>{});
-                                
-                                // Still delete on failure after fallback
-                                const parentIdFallback = channel.parentId;
-                                const guildFallback = channel.guild;
-                                setTimeout(async () => {
-                                    try {
-                                        await channel.delete();
-                                        await deleteEmptyOverflowCategory(client, guildFallback, parentIdFallback);
-                                    } catch (err) {
-                                        if (err && err.code === 10003) {
-                                            module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
-                                        }
-                                    }
-                                }, 2000);
-                            }
-                        } catch (_) {}
-                    });
-                    
-                    // On worker error, still try to delete after a delay
-                    worker.on('error', async (err) => { 
-                        try { func.handle_errors(err, client, 'functions.js', 'Transcript worker error'); } catch(_) {}
-                        const parentIdError = channel.parentId;
-                        const guildError = channel.guild;
-                        setTimeout(async () => {
-                            try {
-                                await channel.delete();
-                                await deleteEmptyOverflowCategory(client, guildError, parentIdError);
-                            } catch (err) {
-                                if (err && err.code === 10003) {
-                                    module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
-                                }
-                            }
-                        }, 2000);
-                    });
-                } catch (e) {
-                    try { func.handle_errors(e, client, 'functions.js', 'Failed to collect messages for transcript'); } catch(_) {}
-                    const parentIdCatch = channel.parentId;
-                    const guildCatch = channel.guild;
-                    setTimeout(async () => {
-                        try {
-                            await channel.delete();
-                            await deleteEmptyOverflowCategory(client, guildCatch, parentIdCatch);
-                        } catch (err) {
-                            if (err && err.code === 10003) {
-                                module.exports.handle_errors(null, client, "functions.js", `Delete skipped for channel ${channel.name}(${channel.id}): Unknown Channel (10003).`);
-                            } else {
-                                module.exports.handle_errors(err, client, "functions.js", `Failed to delete ticket channel ${channel.name}(${channel.id})`);
-                            }
-                        }
-                    }, 2000);
-                }
-            });
-            
-            await func.closeDataAddDB(DiscordID, globalTicketNumber, 'closed', staffMember.user.username, staffMember.id, Date.now(), reason, savedTranscriptURL);
-            
-            // Write ticket data to MySQL
+            // Persist close data in tickets table
+            await func.closeDataAddDB(
+                DiscordID,
+                globalTicketNumber,
+                'closed',
+                staffMember.user.username,
+                staffMember.id,
+                Date.now(),
+                reason,
+                savedTranscriptURL
+            );
+
+            // Write ticket data to MySQL (including transcript mapping for dynamic renderer)
             try {
                 const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
                 // Get responses and server from MySQL tickets table instead of PlayerStats
@@ -1467,8 +1333,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     transcriptFilename: `${channel.name}.html`,
                     transcriptURL: savedTranscriptURL || null
                 };
-                
-                // Write to MySQL tickets table
+
                 if (typeof db.writeTicket === 'function') {
                     await db.writeTicket(ticketRow);
                 } else {
@@ -1477,59 +1342,23 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             } catch (err) {
                 console.error('[closeTicket] Error writing ticket data:', err.message);
             }
-            try { 
+
+            try {
                 const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
-                metrics.ticketClosed(ticketType, staffMember.id || staffMember.user?.id || staffMember.username, staffUsername); 
+                // Staff close activity is now derived from the tickets table; Prometheus metrics removed.
             } catch (_) {}
-            if (logs_channel) {
-                logs_channel.send({ content: `Transcript saved: <${transcriptURL}>` }).catch(e => func.handle_errors(e, client, "functions.js", null));
+
+            if (logs_channel && savedTranscriptURL) {
+                logs_channel
+                    .send({ content: `Transcript saved: <${savedTranscriptURL}>` })
+                    .catch(e => func.handle_errors(e, client, 'functions.js', null));
             }
         } catch (e) {
-            func.handle_errors(e, client, 'functions.js', 'Transcript worker setup failed');
+            func.handle_errors(e, client, 'functions.js', 'Transcript DB close setup failed');
         }
-        // After transcript generation, compute metrics
-        try {
-            const metrics = require('./metrics');
-            const footerParts = embed.footer.text.split("|");
-            let ticketType = footerParts[1]?.trim() || 'Unknown';
-            if (ticketType.includes('#')) ticketType = ticketType.split('#')[0].trim();
-            // Get responses and server from MySQL tickets table instead of PlayerStats
-            let server = 'none';
-            if (typeof db.query === 'function') {
-                const [rows] = await db.query(
-                    'SELECT responses, server FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
-                    [String(DiscordID), String(globalTicketNumber)]
-                );
-                if (rows && rows[0]) {
-                    const responsesText = rows[0].responses || '';
-                    const m = typeof responsesText === 'string' && responsesText.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);
-                    server = (m && m[1]) ? m[1] : (rows[0].server || 'none');
-                }
-            }
-            const openedAt = embed.timestamp ? new Date(embed.timestamp).getTime() : null;
-            const durationSec = openedAt ? Math.floor((Date.now() - openedAt) / 1000) : 0;
-            let messageCount = 0;
-            let userMessages = 0;
-            let staffMessages = 0;
-            try {
-                const fetched = await channel.messages.fetch({ limit: 100 });
-                messageCount = fetched ? fetched.size : 0;
-                fetched?.forEach(msg => {
-                    if (!msg.author) return;
-                    if (msg.author.bot) {
-                        // Bot messages are often staff relays or system; count as staff
-                        staffMessages++;
-                    } else if (msg.author.id === DiscordID) {
-                        userMessages++;
-                    } else {
-                        // Messages from guild members (not the user) are staff
-                        staffMessages++;
-                    }
-                });
-            } catch (_) {}
-            const scope = typeFile && typeFile.internal ? 'internal' : 'public';
-            metrics.recordTicketAggregates(ticketType, server, durationSec, messageCount, userMessages, staffMessages, DiscordID, user?.username || 'unknown', scope);
-        } catch (_) {}
+
+        // After ticket close, aggregates are now derived directly from the MySQL tickets/message tables; 
+        // legacy Prometheus aggregation has been removed.
         // removed debug
         // DM user
         if (typeFile.send_close_dm !== false) {
@@ -1567,13 +1396,33 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
 			}
 		}
 
-        // Remove from user's ticket index (channel deletion happens in background after transcript)
+        // Remove from user's ticket index
         try {
             const key = `UserTicketIndex.${DiscordID}`;
             const list = (await db.get(key)) || [];
             const updated = list.filter(id => id !== channel.id);
             await db.set(key, updated);
         } catch (_) {}
+
+        // Delete the ticket channel after a short delay so logs/embeds finish
+        try {
+            const parentId = channel.parentId;
+            const guild = channel.guild;
+            setTimeout(async () => {
+                try {
+                    // Re-check existence to avoid throwing if already deleted
+                    const liveChannel = guild.channels.cache.get(channel.id);
+                    if (!liveChannel) return;
+                    await liveChannel.delete('Ticket closed');
+                    // Clean up overflow category if now empty
+                    await module.exports.deleteEmptyOverflowCategory(client, guild, parentId);
+                } catch (e) {
+                    module.exports.handle_errors(e, client, "functions.js", `Failed to delete ticket channel ${channel.id} after close`);
+                }
+            }, 1000);
+        } catch (e) {
+            module.exports.handle_errors(e, client, "functions.js", `Error scheduling delete for ticket channel ${channel.id}`);
+        }
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
     }

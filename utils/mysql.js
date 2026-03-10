@@ -51,8 +51,42 @@ function createDB() {
             try {
                 const conn = await __pool.getConnection();
                 await conn.query('SELECT 1');
+                // Ensure core tables exist so the bot doesn't crash on first use
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS ticket_messages (
+                        message_id VARCHAR(32) NOT NULL PRIMARY KEY,
+                        channel_id VARCHAR(32) NOT NULL,
+                        channel_name VARCHAR(255),
+                        guild_id VARCHAR(32),
+                        author_id VARCHAR(32) NOT NULL,
+                        author_tag VARCHAR(64),
+                        author_username VARCHAR(64),
+                        author_is_bot TINYINT(1) DEFAULT 0,
+                        created_at BIGINT NOT NULL,
+                        content LONGTEXT,
+                        pinned TINYINT(1) DEFAULT 0,
+                        type SMALLINT,
+                        webhook_id VARCHAR(32),
+                        embeds JSON,
+                        attachments JSON,
+                        INDEX idx_channel_created (channel_id, created_at),
+                        INDEX idx_channel_name_created (channel_name, created_at),
+                        INDEX idx_author (author_id),
+                        INDEX idx_guild_channel (guild_id, channel_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS transcript_index (
+                        filename VARCHAR(255) NOT NULL PRIMARY KEY,
+                        user_id VARCHAR(255) NOT NULL,
+                        ticket_id VARCHAR(255) NOT NULL,
+                        ticket_type VARCHAR(100),
+                        INDEX idx_user_id (user_id),
+                        INDEX idx_ticket_id (ticket_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
                 conn.release();
-                console.log('[mysql] ✓ Connection test successful');
+                console.log('[mysql] ✓ Connection test and core table check successful');
             } catch (err) {
                 console.error('[mysql] ✗ CRITICAL: MySQL connection test failed!');
                 console.error('[mysql] Error:', err.message);
@@ -64,7 +98,7 @@ function createDB() {
                 console.error('[mysql]   4. Database exists: ' + poolConfig.database);
             }
         })();
-        
+
         __adapter = new MySQLAdapter(__pool);
     }
     return __adapter;
@@ -358,40 +392,99 @@ class MySQLAdapter {
         }
     }
     
-    // Get transcript index entry by filename
+    // Ensure transcript_index table exists (idempotent)
+    async ensureTranscriptIndexTable(conn) {
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS transcript_index (
+                filename VARCHAR(255) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(255) NOT NULL,
+                ticket_id VARCHAR(255) NOT NULL,
+                ticket_type VARCHAR(100),
+                INDEX idx_user_id (user_id),
+                INDEX idx_ticket_id (ticket_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+    }
+    
+    // Get transcript index entry by filename (auto-creates table if missing)
     async getTranscriptIndex(filename) {
         const conn = await this.pool.getConnection();
         try {
-            const [rows] = await conn.query(
-                'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
-                [filename]
-            );
-            
-            if (rows.length === 0) {
-                // Try alternative filename variants
-                const altFilename = filename.endsWith('.full.html') 
-                    ? filename.replace(/\.full\.html$/i, '.html')
-                    : filename.replace(/\.html$/i, '.full.html');
-                const [altRows] = await conn.query(
+            try {
+                const [rows] = await conn.query(
                     'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
-                    [altFilename]
+                    [filename]
                 );
-                if (altRows.length === 0) return null;
+                
+                if (rows.length === 0) {
+                    // Try alternative filename variants
+                    const altFilename = filename.endsWith('.full.html') 
+                        ? filename.replace(/\.full\.html$/i, '.html')
+                        : filename.replace(/\.html$/i, '.full.html');
+                    const [altRows] = await conn.query(
+                        'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
+                        [altFilename]
+                    );
+                    if (altRows.length === 0) return null;
+                    return {
+                        ownerId: String(altRows[0].user_id || ''),
+                        ticketId: String(altRows[0].ticket_id || ''),
+                        ticketType: altRows[0].ticket_type || null
+                    };
+                }
+                
                 return {
-                    ownerId: String(altRows[0].user_id || ''),
-                    ticketId: String(altRows[0].ticket_id || ''),
-                    ticketType: altRows[0].ticket_type || null
+                    ownerId: String(rows[0].user_id || ''),
+                    ticketId: String(rows[0].ticket_id || ''),
+                    ticketType: rows[0].ticket_type || null
                 };
+            } catch (err) {
+                // If table doesn't exist, create it on the fly and retry once
+                if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146)) {
+                    await this.ensureTranscriptIndexTable(conn);
+                    const [rows] = await conn.query(
+                        'SELECT user_id, ticket_id, ticket_type FROM transcript_index WHERE filename = ? LIMIT 1',
+                        [filename]
+                    );
+                    if (rows.length === 0) return null;
+                    return {
+                        ownerId: String(rows[0].user_id || ''),
+                        ticketId: String(rows[0].ticket_id || ''),
+                        ticketType: rows[0].ticket_type || null
+                    };
+                }
+                throw err;
             }
-            
-            return {
-                ownerId: String(rows[0].user_id || ''),
-                ticketId: String(rows[0].ticket_id || ''),
-                ticketType: rows[0].ticket_type || null
-            };
         } finally {
             conn.release();
         }
+    }
+    
+    // Ensure ticket_messages table exists (idempotent)
+    async ensureTicketMessagesTable(conn) {
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS ticket_messages (
+                message_id VARCHAR(32) NOT NULL PRIMARY KEY,
+                channel_id VARCHAR(32) NOT NULL,
+                channel_name VARCHAR(255),
+                guild_id VARCHAR(32),
+                author_id VARCHAR(32) NOT NULL,
+                author_tag VARCHAR(64),
+                author_username VARCHAR(64),
+                author_is_bot TINYINT(1) DEFAULT 0,
+                created_at BIGINT NOT NULL,
+                content LONGTEXT,
+                pinned TINYINT(1) DEFAULT 0,
+                type SMALLINT,
+                webhook_id VARCHAR(32),
+                embeds JSON,
+                attachments JSON,
+                INDEX idx_channel_created (channel_id, created_at),
+                INDEX idx_channel_name_created (channel_name, created_at),
+                INDEX idx_author (author_id),
+                INDEX idx_guild_channel (guild_id, channel_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
     }
     
     // Get unique user IDs from tickets (for user list caching)
@@ -464,7 +557,21 @@ class MySQLAdapter {
     async query(sql, params = []) {
         const conn = await this.pool.getConnection();
         try {
-            return await conn.query(sql, params);
+            try {
+                return await conn.query(sql, params);
+            } catch (err) {
+                // If ticket_messages table is missing, create it on the fly and retry once
+                if (
+                    err &&
+                    (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) &&
+                    typeof sql === 'string' &&
+                    /ticket_messages/i.test(sql)
+                ) {
+                    await this.ensureTicketMessagesTable(conn);
+                    return await conn.query(sql, params);
+                }
+                throw err;
+            }
         } finally {
             conn.release();
         }
@@ -530,10 +637,11 @@ class MySQLAdapter {
                 changedRows: result.changedRows
             });
             
-            // Also update transcript index
+            // Also update transcript index (auto-create table if missing)
             if (ticketData.transcriptURL || ticketData.transcriptFilename) {
                 const filename = ticketData.transcriptFilename || (ticketData.transcriptURL ? ticketData.transcriptURL.split('/').pop() : null);
                 if (filename) {
+                    await this.ensureTranscriptIndexTable(conn);
                     const baseFilename = filename.replace(/\.full\.html$/i, '.html');
                     await conn.query(`
                         INSERT INTO transcript_index (filename, user_id, ticket_id, ticket_type)
