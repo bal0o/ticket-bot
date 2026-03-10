@@ -94,22 +94,21 @@
          <% } %>
        </p>
      <% } %>
-     
-     <% if ((priorDeniedCount || 0) > 0 || (otherOpenCount || 0) > 0) { %>
-       <div class="notification warning" style="margin-top:12px;">
-         <% if ((priorDeniedCount || 0) > 0) { %>
-           <p><strong>Previous applications:</strong> This user has <%= priorDeniedCount %> earlier staff application<%= priorDeniedCount === 1 ? '' : 's' %> that were <strong>Denied</strong>.</p>
-         <% } %>
-         <% if ((otherOpenCount || 0) > 0) { %>
-           <p><strong>Other active applications:</strong> This user currently has <%= otherOpenCount %> other application<%= otherOpenCount === 1 ? '' : 's' %> that are still in progress.</p>
-         <% } %>
-       </div>
-     <% } %>
     
     <!-- Stages Progress - simplified -->
     <section class="stages-section">
       <h3>Application Progress</h3>
       <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
+      <% if ((priorDeniedCount || 0) > 0 || (otherOpenCount || 0) > 0) { %>
+        <div class="notification warning persistent" style="margin-top:12px; text-align:left;">
+          <% if ((priorDeniedCount || 0) > 0) { %>
+            <p><strong>Previous applications:</strong> This user has <%= priorDeniedCount %> earlier staff application<%= priorDeniedCount === 1 ? '' : 's' %> that were <strong>Denied</strong>.</p>
+          <% } %>
+          <% if ((otherOpenCount || 0) > 0) { %>
+            <p><strong>Other active applications:</strong> This user currently has <%= otherOpenCount %> other application<%= otherOpenCount === 1 ? '' : 's' %> that are still in progress.</p>
+          <% } %>
+        </div>
+      <% } %>
       <% /* Category selector moved up next to Steam/BM section */ %>
     </section>
 
@@ -230,10 +229,11 @@
    </div>
    
    <script>
-    // Auto-hide notifications after 5 seconds
+    // Auto-hide non-persistent notifications after 5 seconds
     document.addEventListener('DOMContentLoaded', function() {
       const notifications = document.querySelectorAll('.notification');
       notifications.forEach(notification => {
+        if (notification.classList.contains('persistent')) return;
         setTimeout(() => {
           notification.style.opacity = '0';
           setTimeout(() => notification.remove(), 300);

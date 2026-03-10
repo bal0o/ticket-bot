@@ -1116,11 +1116,35 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
             console.error('Failed to create application comms staff thread:', threadError?.response?.data || threadError);
         }
         
+        // Before posting the intro message, compute prior/other applications for this user
+        let priorDeniedCount = 0;
+        let otherOpenCount = 0;
+        try {
+            if (appRec.userId) {
+                const allForUser = await applications.listApplications({ userId: appRec.userId });
+                for (const a of allForUser) {
+                    if (!a || a.id === appId) continue;
+                    if (a.stage === 'Denied') priorDeniedCount++;
+                    else if (!['Approved', 'Archived'].includes(a.stage)) otherOpenCount++;
+                }
+            }
+        } catch (_) {}
+        
         // Post intro + close button
         try {
             const staffThreadLine = staffThreadId ? `\n**Staff-only thread:** <#${staffThreadId}>` : '';
+            const historyLines = [];
+            if (priorDeniedCount > 0) {
+                historyLines.push(`• This user has **${priorDeniedCount}** previous application${priorDeniedCount === 1 ? '' : 's'} that were **Denied**.`);
+            }
+            if (otherOpenCount > 0) {
+                historyLines.push(`• This user has **${otherOpenCount}** other application${otherOpenCount === 1 ? '' : 's'} still in progress.`);
+            }
+            const historyBlock = historyLines.length
+                ? `\n\n**Application history:**\n${historyLines.join('\n')}`
+                : '';
             await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
-                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}${staffThreadLine}`,
+                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}${staffThreadLine}${historyBlock}`,
                 components: [
                     { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
                 ]
