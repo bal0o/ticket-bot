@@ -5,6 +5,18 @@ const { createDB } = require('../../utils/mysql');
 
 const db = createDB();
 
+function normalizeStaffAppsFlag(flag, fallback) {
+    if (flag === null || flag === undefined) return !!fallback;
+    if (typeof flag === 'boolean') return flag;
+    if (typeof flag === 'number') return flag !== 0;
+    if (typeof flag === 'string') {
+        const v = flag.trim().toLowerCase();
+        if (v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
+        if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+    }
+    return !!flag;
+}
+
 function getMessageId() {
     try {
         const msgPath = path.join(__dirname, '../../config/messageid.json');
@@ -31,12 +43,10 @@ async function rebuildMainEmbed(client) {
     let usedCustoms = '';
 
     // Resolve staff applications feature flag in the same way as ready.js
-    let staffAppsEnabled = handlerRaw.staff_applications_enabled;
+    let staffAppsEnabled = normalizeStaffAppsFlag(handlerRaw.staff_applications_enabled, true);
     try {
         const flag = await db.get('FeatureFlags.StaffApplications.Enabled');
-        if (flag !== null && flag !== undefined) {
-            staffAppsEnabled = !!flag;
-        }
+        staffAppsEnabled = normalizeStaffAppsFlag(flag, staffAppsEnabled);
     } catch (_) {}
 
     for (const key of keys) {
@@ -112,9 +122,10 @@ module.exports = {
 
         if (sub === 'status') {
             let enabled = await db.get(key);
-            if (enabled === null || enabled === undefined) {
-                enabled = !!client.config.bot_settings.staff_applications_enabled;
-            }
+            enabled = normalizeStaffAppsFlag(
+                enabled,
+                client.config.bot_settings.staff_applications_enabled
+            );
             return interaction.reply({
                 content: `Staff applications are currently **${enabled ? 'ENABLED' : 'DISABLED'}**.`,
                 ephemeral: true

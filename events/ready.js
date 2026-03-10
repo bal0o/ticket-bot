@@ -43,6 +43,18 @@ module.exports = async function (client, message) {
 
     const db = createDB();
 
+    function normalizeStaffAppsFlag(flag, fallback) {
+        if (flag === null || flag === undefined) return !!fallback;
+        if (typeof flag === 'boolean') return flag;
+        if (typeof flag === 'number') return flag !== 0;
+        if (typeof flag === 'string') {
+            const v = flag.trim().toLowerCase();
+            if (v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
+            if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+        }
+        return !!flag;
+    }
+
     // See if the Embed for creating tickets is available and if its not, make one.
     let buttonEmbed = undefined
     let postChannel = client.channels.cache.find(x => x.id == client.config.channel_ids.post_embed_channel_id)
@@ -67,13 +79,10 @@ module.exports = async function (client, message) {
             let usedCustoms = "";
 
             // Resolve staff applications feature flag once
-            let staffAppsEnabled = handlerRaw.staff_applications_enabled;
+            let staffAppsEnabled = normalizeStaffAppsFlag(handlerRaw.staff_applications_enabled, true);
             try {
-                const db = createDB();
                 const flag = await db.get('FeatureFlags.StaffApplications.Enabled');
-                if (flag !== null && flag !== undefined) {
-                    staffAppsEnabled = !!flag;
-                }
+                staffAppsEnabled = normalizeStaffAppsFlag(flag, staffAppsEnabled);
             } catch (_) {}
 
             for (const key of keys) {

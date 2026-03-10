@@ -42,6 +42,11 @@ tr:hover td { background: #141923; }
 /* Allow long content to wrap inside cells instead of overflowing */
 th, td { word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 
+/* Staff tickets table: allow wider transcript column and compact buttons on one line */
+table.staff-tickets-table { table-layout: auto; }
+.staff-tickets-table .transcript-cell { white-space: nowrap; }
+.staff-tickets-table .transcript-cell .btn.btn-compact { margin-right: 4px; }
+
 /* Pagination controls */
 .pagination { display:flex; gap: 12px; align-items:center; justify-content:center; margin-top: 12px; }
 .grid.two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }

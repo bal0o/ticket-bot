@@ -60,7 +60,7 @@
     <% } %>
   </form>
   <div class="table-scroll">
-  <table class="with-filter">
+  <table class="with-filter staff-tickets-table">
     <thead>
       <tr>
         <th>User</th>
@@ -83,12 +83,12 @@
           <td><%= t.closeUser || '' %></td>
           <td class="wrap pre"><%= t.closeReason || '' %></td>
           <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
-          <td>
+          <td class="transcript-cell">
             <% if (t.transcriptFilename) { %>
               <% const base = String(t.transcriptFilename).split('/').pop().replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, ''); %>
-              <a class="btn primary" href="/transcripts/<%= base %>.full.html">Full</a>
-              <a class="btn" href="/transcripts/<%= base %>.html">User</a>
-              <a class="btn" href="/transcripts/<%= base %>.staff.html">Staff</a>
+              <a class="btn btn-compact primary" href="/transcripts/<%= base %>.full.html">Full</a>
+              <a class="btn btn-compact" href="/transcripts/<%= base %>.html">User</a>
+              <a class="btn btn-compact" href="/transcripts/<%= base %>.staff.html">Staff</a>
             <% } else { %>
               <em>Not available</em>
             <% } %>
