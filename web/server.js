@@ -1507,6 +1507,12 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             let channelIds = [];
             try {
                 const ctx = await findTicketContextByFilename(filename);
+                console.log('[transcripts] raw resolver ctx', {
+                    filename,
+                    ownerId: ctx && ctx.ownerId,
+                    ticketId: ctx && ctx.ticketId,
+                    ticketType: ctx && ctx.ticketType
+                });
                 if (ctx && ctx.ownerId && ctx.ticketId) {
                     const [ticketRows] = await db.query(
                         'SELECT channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 5',
@@ -1516,8 +1522,19 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                         .map(r => r.channel_id)
                         .filter(Boolean)
                         .map(id => String(id));
+                    console.log('[transcripts] raw resolver channelIds from tickets', {
+                        filename,
+                        ownerId: ctx.ownerId,
+                        ticketId: ctx.ticketId,
+                        channelIds
+                    });
                 }
-            } catch (_) {}
+            } catch (e) {
+                console.error('[transcripts] raw resolver ctx error', {
+                    filename,
+                    error: e && e.message
+                });
+            }
 
             const namePlaceholders = channelNames.map(() => '?').join(',');
             const idPlaceholders = channelIds.map(() => '?').join(',');
@@ -1534,6 +1551,12 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             }
 
             if (whereClauses.length > 0) {
+                console.log('[transcripts] raw DB query', {
+                    filename,
+                    channelNames,
+                    channelIds,
+                    where: whereClauses.join(' OR ')
+                });
                 const [resRows] = await db.query(
                     `SELECT message_id, channel_id, channel_name, guild_id,
                             author_id, author_tag, author_username, author_is_bot,
@@ -1544,6 +1567,10 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                     params
                 );
                 rows = resRows || [];
+                console.log('[transcripts] raw DB result', {
+                    filename,
+                    rowCount: Array.isArray(rows) ? rows.length : 0
+                });
             }
         }
 
