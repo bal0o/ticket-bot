@@ -739,8 +739,39 @@ try {
     let pingTags = Array.from(pingSet).map(id => `<@&${id}>`).join(' ');
     
     const safeUsername = recepientMember.username;
+    // Optionally augment content for staff applications with prior history info
+    let historySuffix = "";
+    try {
+        const isStaffApplication = questionFile && questionFile.staff_application === true;
+        if (isStaffApplication && typeof applications?.listApplications === 'function') {
+            const allForUser = await applications.listApplications({ userId: recepientMember.id });
+            let priorDeniedCount = 0;
+            let otherOpenCount = 0;
+            if (Array.isArray(allForUser)) {
+                for (const a of allForUser) {
+                    if (!a) continue;
+                    // This ticket just created the new application; older ones are those with different id
+                    if (a.stage === 'Denied') priorDeniedCount++;
+                    else if (!['Approved', 'Archived'].includes(a.stage)) otherOpenCount++;
+                }
+            }
+            const lines = [];
+            if (priorDeniedCount > 0) {
+                lines.push(`• This user has **${priorDeniedCount}** previous staff application${priorDeniedCount === 1 ? '' : 's'} that were **Denied**.`);
+            }
+            if (otherOpenCount > 0) {
+                lines.push(`• This user has **${otherOpenCount}** other application${otherOpenCount === 1 ? '' : 's'} still in progress.`);
+            }
+            if (lines.length) {
+                historySuffix = `\n\n**Application history:**\n${lines.join('\n')}`;
+            }
+        }
+    } catch (_) {}
+
+    const baseContent = (lang.ticket_creation["initial-message-content"] != "" ? lang.ticket_creation["initial-message-content"].replace(`{{USERNAME}}`, safeUsername).replace(`{{TICKETTYPE}}`, ticketType).replace(`{{ADMIN}}`, administratorMember).replace(/{{PREFIX}}/g, client.config.bot_settings.prefix) : `${safeUsername}'s ${ticketType} ticket`);
+
     const initialMessage = await ticketChannel.send({
-        content: (pingTags ? pingTags + "\n" : "") + (lang.ticket_creation["initial-message-content"] != "" ? lang.ticket_creation["initial-message-content"].replace(`{{USERNAME}}`, safeUsername).replace(`{{TICKETTYPE}}`, ticketType).replace(`{{ADMIN}}`, administratorMember).replace(/{{PREFIX}}/g, client.config.bot_settings.prefix) : `${safeUsername}'s ${ticketType} ticket`),
+        content: (pingTags ? pingTags + "\n" : "") + baseContent + historySuffix,
         embeds: [embed],
         components: [actionRow]
     });
