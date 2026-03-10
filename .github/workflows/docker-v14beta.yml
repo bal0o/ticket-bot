@@ -1,9 +1,9 @@
-name: Build and Push Beta Docker Image (Docker Hub)
+name: Build and Push v14 Beta Docker Image (Docker Hub)
 
 on:
   push:
     branches:
-      - beta
+      - v14beta
   workflow_dispatch:
 
 env:
@@ -11,7 +11,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  build-and-push-v14beta:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,11 +33,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=beta,priority=1000
-            type=raw,value=v14beta,priority=1100
-            type=sha,format=long,prefix=,suffix=-beta
+            type=raw,value=v14beta,priority=1000
+            type=sha,format=long,prefix=,suffix=-v14beta
 
-      - name: Build and push
+      - name: Build and push v14beta image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -46,5 +45,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
 
