@@ -1406,7 +1406,11 @@ app.get('/api/users', ensureAuth, async (req, res) => {
 
 // Inline transcript view page (bot links will land here too)
 app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
-    const filename = sanitizeFilename(req.params.filename);
+    // Normalize filename and collapse any duplicated suffixes like
+    // "ticket.html.full.html" -> "ticket.full.html"
+    let filename = sanitizeFilename(req.params.filename);
+    filename = filename.replace(/\.html\.(full|staff)\.html$/i, '.$1.html')
+                       .replace(/\.html\.html$/i, '.html');
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     // Non-staff users should be routed to user-friendly transcript if available
     const { isStaff } = res.locals.roleFlags || { isStaff: false };
@@ -1447,7 +1451,11 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
 
 // Raw stream of transcript (iframe src) - DB-backed with legacy HTML fallback
 app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
-    const filename = sanitizeFilename(req.params.filename);
+    // Normalize filename and collapse any duplicated suffixes like
+    // "ticket.html.full.html" -> "ticket.full.html"
+    let filename = sanitizeFilename(req.params.filename);
+    filename = filename.replace(/\.html\.(full|staff)\.html$/i, '.$1.html')
+                       .replace(/\.html\.html$/i, '.html');
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
 
@@ -1474,15 +1482,14 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             base = filename.replace(/\.html$/i, '');
         }
 
-        // For staff transcripts, *prefer* the staff thread channel name, but also
-        // include the main ticket channel as a fallback so staff/full views still
-        // render even if a separate staff thread was never created.
+        // For staff transcripts, use only the staff thread channel name.
+        // This ensures "Staff" view shows staff-only discussion, not the main ticket.
         let channelNames = [base];
         if (mode === 'staff') {
             const idMatch = base.match(/-(\d{1,8})$/);
             if (idMatch) {
                 const ticketNum = idMatch[1];
-                channelNames = [`staff-chat-${ticketNum}`, base];
+                channelNames = [`staff-chat-${ticketNum}`];
             }
         }
 
