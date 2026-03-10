@@ -1474,13 +1474,15 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             base = filename.replace(/\.html$/i, '');
         }
 
-        // For staff transcripts, use the staff thread channel name
+        // For staff transcripts, *prefer* the staff thread channel name, but also
+        // include the main ticket channel as a fallback so staff/full views still
+        // render even if a separate staff thread was never created.
         let channelNames = [base];
         if (mode === 'staff') {
             const idMatch = base.match(/-(\d{1,8})$/);
             if (idMatch) {
                 const ticketNum = idMatch[1];
-                channelNames = [`staff-chat-${ticketNum}`];
+                channelNames = [`staff-chat-${ticketNum}`, base];
             }
         }
 

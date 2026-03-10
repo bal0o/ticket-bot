@@ -6,6 +6,12 @@ function sanitizeHtml(text) {
     return text.replace(/<(\/?)script>/gi, '&lt;$1script&gt;');
 }
 
+function linkify(text) {
+    if (typeof text !== 'string' || !text) return text;
+    // Very simple URL matcher; safe because input is already sanitized
+    return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+}
+
 function normalizeRows(rows, options) {
     const pinnedIds = new Set(rows.filter(r => r.pinned).map(r => r.message_id));
     let list;
@@ -98,7 +104,7 @@ function renderTranscriptFromRows(rows, options) {
         if (content) {
             const node = document.createElement('div');
             node.className = 'maincontent';
-            node.innerHTML = sanitizeHtml(content);
+            node.innerHTML = linkify(sanitizeHtml(content));
             messageContainer.appendChild(node);
         }
 
