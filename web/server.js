@@ -725,6 +725,19 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     } catch (e) {
         console.error('[web] /applications/:id steam lookup failed:', e?.message || e);
     }
+    // Check for other applications by the same user that are denied or still in progress
+    let priorDeniedCount = 0;
+    let otherOpenCount = 0;
+    try {
+        if (appRec.userId) {
+            const allForUser = await applications.listApplications({ userId: appRec.userId });
+            for (const a of allForUser) {
+                if (!a || a.id === appId) continue;
+                if (a.stage === 'Denied') priorDeniedCount++;
+                else if (!['Approved', 'Archived'].includes(a.stage)) otherOpenCount++;
+            }
+        }
+    } catch (_) {}
     // Parse Q/A pairs from the raw responses for nicer rendering
     let qaPairs = [];
     try {
@@ -812,7 +825,9 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
         nextId,
         steamId,
         battlemetricsUrl,
-        qaPairs
+        qaPairs,
+        priorDeniedCount,
+        otherOpenCount
     });
 });
 
@@ -973,6 +988,44 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         }
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
+        // Resolve SteamID (and optional BM link) from the origin ticket for this application
+        let steamId = null;
+        let battlemetricsUrl = null;
+        try {
+            const origin = (appRec.tickets || []).find(t => t && t.type === 'origin' && t.ticketId);
+            if (origin && typeof db.query === 'function') {
+                const [rows] = await db.query(
+                    'SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                    [String(appRec.userId || ''), String(origin.ticketId)]
+                );
+                if (rows && rows.length > 0 && rows[0].steam_id) {
+                    const candidate = String(rows[0].steam_id);
+                    if (candidate && candidate.startsWith('7656119')) {
+                        steamId = candidate;
+                        // Prefer the RCON-style BattleMetrics player link used elsewhere in the bot.
+                        const bmToken = config.tokens && config.tokens.battlemetricsToken;
+                        if (bmToken) {
+                            try {
+                                const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
+                                const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}&page[size]=1`;
+                                const bmRes = await axios.get(playerUrl, { headers, timeout: 8000 });
+                                const playerId = bmRes?.data?.data && bmRes.data.data[0] && bmRes.data.data[0].id;
+                                if (playerId) {
+                                    battlemetricsUrl = `https://www.battlemetrics.com/rcon/players/${playerId}`;
+                                }
+                            } catch (_) {
+                                // swallow and fall back to search link
+                            }
+                        }
+                        if (!battlemetricsUrl) {
+                            battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[web] open_ticket steam/BM lookup failed:', e?.message || e);
+        }
         // Comms channel: same roles as application access (admin + application_admin only, no general staff)
         const viewerRoles = new Set();
         if (config.role_ids?.application_admin_role_id) viewerRoles.add(config.role_ids.application_admin_role_id);
@@ -1008,6 +1061,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
         
         // Create a private staff thread inside the communication channel with the full application responses
+        let staffThreadId = null;
         try {
             const threadName = `app-comms-${String(appRec.id || '').slice(0, 8) || 'thread'}`;
             const threadRes = await axios.post(
@@ -1021,12 +1075,29 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
             );
             const thread = threadRes.data;
             if (thread && thread.id) {
+                staffThreadId = thread.id;
                 const fullResponses = typeof appRec.responses === 'string' ? appRec.responses : '';
                 const truncated = fullResponses.length > 4000 ? `${fullResponses.slice(0, 3997)}...` : fullResponses || 'No responses recorded';
+                const fields = [];
+                if (steamId) {
+                    fields.push({
+                        name: 'Steam',
+                        value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})`,
+                        inline: true
+                    });
+                }
+                if (battlemetricsUrl) {
+                    fields.push({
+                        name: 'BattleMetrics',
+                        value: `[View profile](${battlemetricsUrl})`,
+                        inline: true
+                    });
+                }
                 const embed = {
                     title: `${appRec.type || 'Application'} for ${appRec.username || appRec.userId}`,
                     description: truncated,
                     color: 0x208cdd,
+                    fields: fields.length ? fields : undefined,
                     footer: {
                         text: `Application ID: ${appRec.id || 'unknown'} • Stage: ${appRec.stage || 'Unknown'}`
                     },
@@ -1047,8 +1118,9 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         
         // Post intro + close button
         try {
+            const staffThreadLine = staffThreadId ? `\n**Staff-only thread:** <#${staffThreadId}>` : '';
             await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
-                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}`,
+                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}${staffThreadLine}`,
                 components: [
                     { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
                 ]

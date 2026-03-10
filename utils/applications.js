@@ -88,7 +88,7 @@ async function loadApplication(appId) {
     }
 }
 
-// Helper: Save application record with related data
+// Helper: Save application record (core fields + tickets/comments)
 async function saveApplication(rec) {
     const conn = await getPool().getConnection();
     try {
@@ -135,37 +135,6 @@ async function saveApplication(rec) {
                 );
             }
         }
-        
-        // Save history (append new entries only to avoid duplicates)
-        if (rec.history && Array.isArray(rec.history)) {
-            // Check what we already have
-            const [existingHistory] = await conn.query(
-                'SELECT changed_at, stage FROM application_history WHERE application_id = ? ORDER BY changed_at DESC LIMIT 1',
-                [rec.id]
-            );
-            
-            // Only insert new history entries
-            for (const hist of rec.history) {
-                const exists = existingHistory.length > 0 && 
-                               existingHistory[0].changed_at === hist.at && 
-                               existingHistory[0].stage === hist.stage;
-                
-                if (!exists) {
-                    await conn.query(
-                        'INSERT INTO application_history (application_id, stage, changed_at, changed_by, note) ' +
-                        'VALUES (?, ?, ?, ?, ?)',
-                        [
-                            rec.id,
-                            hist.stage,
-                            hist.at,
-                            hist.by || null,
-                            hist.note || ''
-                        ]
-                    );
-                }
-            }
-        }
-        
         // Save comments (append new entries only)
         if (rec.comments && Array.isArray(rec.comments)) {
             // Check what we already have
@@ -204,6 +173,25 @@ async function saveApplication(rec) {
     }
 }
 
+// Helper: Insert a single history entry for an application
+async function insertHistory(appId, { stage, at, by, note }) {
+    const conn = await getPool().getConnection();
+    try {
+        await conn.query(
+            'INSERT INTO application_history (application_id, stage, changed_at, changed_by, note) VALUES (?, ?, ?, ?, ?)',
+            [
+                appId,
+                stage,
+                at,
+                by || null,
+                note || ''
+            ]
+        );
+    } finally {
+        conn.release();
+    }
+}
+
 module.exports = {
     async createApplication({ userId, username, type, server, ticketId, channelId, stage = 'Submitted', responses }) {
         const appId = await generateApplicationId(userId);
@@ -219,21 +207,31 @@ module.exports = {
             updatedAt: now,
             // Seed with the original application ticket channel (type: 'origin') if present
             tickets: ticketId ? [{ ticketId, channelId, createdAt: now, type: 'origin' }] : [],
-            history: [{ stage, at: now, by: null, note: 'Application created' }],
             responses: responses || ''
         };
         await saveApplication(record);
+        // Log initial history entry for creation
+        await insertHistory(appId, { stage, at: now, by: null, note: 'Application created' });
+        record.history = [{ stage, at: now, by: null, note: 'Application created' }];
         return record;
     },
 
     async advanceStage(appId, nextStage, byStaffId, note) {
         const rec = await loadApplication(appId);
         if (!rec) return null;
+        const now = Date.now();
         rec.stage = nextStage;
-        rec.updatedAt = Date.now();
-        rec.history = rec.history || [];
-        rec.history.push({ stage: nextStage, at: rec.updatedAt, by: byStaffId || null, note: note || '' });
+        rec.updatedAt = now;
         await saveApplication(rec);
+        // Append a single concrete history row for this transition
+        await insertHistory(appId, {
+            stage: nextStage,
+            at: now,
+            by: byStaffId || null,
+            note: note || ''
+        });
+        rec.history = rec.history || [];
+        rec.history.push({ stage: nextStage, at: now, by: byStaffId || null, note: note || '' });
         return rec;
     },
 
@@ -300,15 +298,23 @@ module.exports = {
         const rec = await loadApplication(appId);
         if (!rec) return null;
         rec.type = newType;
-        rec.updatedAt = Date.now();
-        rec.history = rec.history || [];
-        rec.history.push({
+        const now = Date.now();
+        rec.updatedAt = now;
+        await saveApplication(rec);
+        // Log a single history row describing the category/type change
+        await insertHistory(appId, {
             stage: rec.stage,
-            at: rec.updatedAt,
+            at: now,
             by: byStaffId || null,
             note: note || ''
         });
-        await saveApplication(rec);
+        rec.history = rec.history || [];
+        rec.history.push({
+            stage: rec.stage,
+            at: now,
+            by: byStaffId || null,
+            note: note || ''
+        });
         return rec;
     },
 
