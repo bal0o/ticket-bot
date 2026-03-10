@@ -739,8 +739,8 @@ try {
     let pingTags = Array.from(pingSet).map(id => `<@&${id}>`).join(' ');
     
     const safeUsername = recepientMember.username;
-    // Optionally augment content for staff applications with prior history info
-    let historySuffix = "";
+    // Optionally build a dedicated history embed for staff applications with prior history info
+    let historyEmbed = null;
     try {
         const isStaffApplication = questionFile && questionFile.staff_application === true;
         if (isStaffApplication && typeof applications?.listApplications === 'function') {
@@ -757,22 +757,27 @@ try {
             }
             const lines = [];
             if (priorDeniedCount > 0) {
-                lines.push(`• This user has **${priorDeniedCount}** previous staff application${priorDeniedCount === 1 ? '' : 's'} that were **Denied**.`);
+                lines.push(`This user has **${priorDeniedCount}** previous staff application${priorDeniedCount === 1 ? '' : 's'} that were **Denied**.`);
             }
             if (otherOpenCount > 0) {
-                lines.push(`• This user has **${otherOpenCount}** other application${otherOpenCount === 1 ? '' : 's'} still in progress.`);
+                lines.push(`This user has **${otherOpenCount}** other application${otherOpenCount === 1 ? '' : 's'} still in progress.`);
             }
             if (lines.length) {
-                historySuffix = `\n\n**Application history:**\n${lines.join('\n')}`;
+                historyEmbed = new EmbedBuilder()
+                    .setColor(0xf97316) // bright orange to stand out
+                    .setTitle('Application History')
+                    .setDescription(lines.join('\n'));
             }
         }
     } catch (_) {}
 
     const baseContent = (lang.ticket_creation["initial-message-content"] != "" ? lang.ticket_creation["initial-message-content"].replace(`{{USERNAME}}`, safeUsername).replace(`{{TICKETTYPE}}`, ticketType).replace(`{{ADMIN}}`, administratorMember).replace(/{{PREFIX}}/g, client.config.bot_settings.prefix) : `${safeUsername}'s ${ticketType} ticket`);
 
+    const embedsToSend = historyEmbed ? [embed, historyEmbed] : [embed];
+
     const initialMessage = await ticketChannel.send({
-        content: (pingTags ? pingTags + "\n" : "") + baseContent + historySuffix,
-        embeds: [embed],
+        content: (pingTags ? pingTags + "\n" : "") + baseContent,
+        embeds: embedsToSend,
         components: [actionRow]
     });
     
