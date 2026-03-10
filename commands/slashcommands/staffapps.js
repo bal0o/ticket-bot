@@ -23,12 +23,21 @@ function setMessageId(messageId, internalMessageId) {
     fs.writeFileSync(msgPath, JSON.stringify(payload, null, 0));
 }
 
-async function rebuildMainEmbed(client, staffAppsEnabled) {
+async function rebuildMainEmbed(client) {
     const handlerRaw = require('../../content/handler/handler.json');
     const handlerData = require('../../content/handler/options.json');
     const keys = Object.keys(handlerData.options || {});
     const rows = [];
     let usedCustoms = '';
+
+    // Resolve staff applications feature flag in the same way as ready.js
+    let staffAppsEnabled = handlerRaw.staff_applications_enabled;
+    try {
+        const flag = await db.get('FeatureFlags.StaffApplications.Enabled');
+        if (flag !== null && flag !== undefined) {
+            staffAppsEnabled = !!flag;
+        }
+    } catch (_) {}
 
     for (const key of keys) {
         const opt = handlerData.options[key];
@@ -135,7 +144,7 @@ module.exports = {
             } catch (_) {}
         }
 
-        const payload = await rebuildMainEmbed(client, enable);
+        const payload = await rebuildMainEmbed(client);
         if (!payload) {
             return interaction.editReply({
                 content: `Staff application button has been **${enable ? 'ENABLED' : 'DISABLED'}**, but the main embed could not be rebuilt (no valid buttons).`

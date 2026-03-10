@@ -62,7 +62,7 @@
       </span>
     </h1>
      <p class="muted">
-       <span style="display:inline-flex; gap:6px; align-items:center;">
+       <span style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
          <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
            <%= app.type %>
          </span>
@@ -70,6 +70,19 @@
            <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
              Server: <%= app.server %>
            </span>
+         <% } %>
+         <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
+           <% const isDevApp = String(app.type || '').toLowerCase().includes('dev'); %>
+           <form method="post" action="/applications/<%= app.id %>/category" style="display:inline-flex; gap:6px; align-items:center; margin:0;">
+             <label style="font-size:11px;">
+               Category:
+               <select name="category" style="margin-left:4px; font-size:11px; padding:2px 4px;">
+                 <option value="staff" <%= !isDevApp ? 'selected' : '' %>>Staff</option>
+                 <option value="dev" <%= isDevApp ? 'selected' : '' %>>Developer</option>
+               </select>
+             </label>
+             <button class="btn btn-compact" type="submit">Update</button>
+           </form>
          <% } %>
        </span>
      </p>
@@ -86,18 +99,7 @@
     <section class="stages-section">
       <h3>Application Progress</h3>
       <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
-      <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
-        <form method="post" action="/applications/<%= app.id %>/category" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <% const isDevApp = String(app.type || '').toLowerCase().includes('dev'); %>
-          <label>Category:
-            <select name="category">
-              <option value="staff" <%= !isDevApp ? 'selected' : '' %>>Staff</option>
-              <option value="dev" <%= isDevApp ? 'selected' : '' %>>Developer</option>
-            </select>
-          </label>
-          <button class="btn" type="submit">Update</button>
-        </form>
-      <% } %>
+      <% /* Category selector moved up next to Steam/BM section */ %>
     </section>
 
     <div class="grid two">

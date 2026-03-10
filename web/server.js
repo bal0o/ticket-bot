@@ -700,7 +700,25 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
                 const candidate = String(rows[0].steam_id);
                 if (candidate && candidate.startsWith('7656119')) {
                     steamId = candidate;
-                    battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                    // Prefer the RCON-style BattleMetrics player link used elsewhere in the bot.
+                    // If the BM API/token is unavailable, fall back to the generic search URL.
+                    const bmToken = config.tokens && config.tokens.battlemetricsToken;
+                    if (bmToken) {
+                        try {
+                            const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
+                            const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}&page[size]=1`;
+                            const bmRes = await axios.get(playerUrl, { headers, timeout: 8000 });
+                            const playerId = bmRes?.data?.data && bmRes.data.data[0] && bmRes.data.data[0].id;
+                            if (playerId) {
+                                battlemetricsUrl = `https://www.battlemetrics.com/rcon/players/${playerId}`;
+                            }
+                        } catch (_) {
+                            // swallow and fall back to search link
+                        }
+                    }
+                    if (!battlemetricsUrl) {
+                        battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                    }
                 }
             }
         }

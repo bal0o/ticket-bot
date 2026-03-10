@@ -7,6 +7,7 @@
   --text: #f0f0f0;
   --accent: #e46400;   /* primary orange */
   --accent-2: #f2c66c; /* soft gold highlight */
+  --accent-soft: rgba(242, 198, 108, 0.9); /* table header gold */
   --border: rgba(255, 255, 255, 0.18);
   --nav-h: 64px;
 }
