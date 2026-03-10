@@ -1497,20 +1497,54 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             }
         } catch (_) {}
 
-        // Fetch messages from ticket_messages for any of the candidate channel names
+        // Fetch messages from ticket_messages.
+        // Primary strategy is channel_name, but we also fall back to channel_id
+        // resolved via the tickets table so that transcripts continue to work
+        // even if channel names were changed or stored inconsistently.
         let rows = [];
         if (typeof db.query === 'function') {
-            const placeholders = channelNames.map(() => '?').join(',');
-            const [resRows] = await db.query(
-                `SELECT message_id, channel_id, channel_name, guild_id,
-                        author_id, author_tag, author_username, author_is_bot,
-                        created_at, content, pinned, type, webhook_id, embeds, attachments
-                 FROM ticket_messages
-                 WHERE channel_name IN (${placeholders})
-                 ORDER BY created_at ASC, message_id ASC`,
-                channelNames
-            );
-            rows = resRows || [];
+            // Try to resolve channel_ids from tickets table using transcript index context
+            let channelIds = [];
+            try {
+                const ctx = await findTicketContextByFilename(filename);
+                if (ctx && ctx.ownerId && ctx.ticketId) {
+                    const [ticketRows] = await db.query(
+                        'SELECT channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 5',
+                        [String(ctx.ownerId), String(ctx.ticketId)]
+                    );
+                    channelIds = (ticketRows || [])
+                        .map(r => r.channel_id)
+                        .filter(Boolean)
+                        .map(id => String(id));
+                }
+            } catch (_) {}
+
+            const namePlaceholders = channelNames.map(() => '?').join(',');
+            const idPlaceholders = channelIds.map(() => '?').join(',');
+            const whereClauses = [];
+            const params = [];
+
+            if (channelNames.length > 0) {
+                whereClauses.push(`channel_name IN (${namePlaceholders})`);
+                params.push(...channelNames);
+            }
+            if (channelIds.length > 0) {
+                whereClauses.push(`channel_id IN (${idPlaceholders})`);
+                params.push(...channelIds);
+            }
+
+            if (whereClauses.length > 0) {
+                const [resRows] = await db.query(
+                    `SELECT message_id, channel_id, channel_name, guild_id,
+                            author_id, author_tag, author_username, author_is_bot,
+                            created_at, content, pinned, type, webhook_id, embeds, attachments
+                     FROM ticket_messages
+                     WHERE ${whereClauses.join(' OR ')}
+                     ORDER BY created_at ASC, message_id ASC`,
+                    params
+                );
+                rows = resRows || [];
+            }
         }
 
         if (rows && rows.length > 0) {
