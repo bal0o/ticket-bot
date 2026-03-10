@@ -52,12 +52,12 @@
         <div style="font-size:22px; font-weight:600;"><%= app.username %></div>
         <div class="muted" style="font-size:12px; margin-top:2px;">Discord: <%= app.userId %></div>
       </span>
-      <span style="display:flex; gap:8px;">
+      <span style="display:flex; gap:6px;">
         <% if (prevId) { %>
-          <a class="btn" href="/applications/<%= prevId %>">◀ Previous</a>
+          <a class="btn btn-compact" href="/applications/<%= prevId %>">◀ Prev</a>
         <% } %>
         <% if (nextId) { %>
-          <a class="btn" href="/applications/<%= nextId %>">Next ▶</a>
+          <a class="btn btn-compact" href="/applications/<%= nextId %>">Next ▶</a>
         <% } %>
       </span>
     </h1>
@@ -103,7 +103,18 @@
     <div class="grid two">
       <section>
         <h3>Responses</h3>
-        <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
+        <% if (qaPairs && qaPairs.length) { %>
+          <div class="qa-list">
+            <% qaPairs.forEach(function(pair, idx) { %>
+              <div class="qa-item">
+                <div class="qa-question"><span class="qa-badge">Q<%= idx + 1 %></span> <%= pair.question %></div>
+                <div class="qa-answer"><%= pair.answer %></div>
+              </div>
+            <% }); %>
+          </div>
+        <% } else { %>
+          <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
+        <% } %>
         <h3>Tickets</h3>
         <ul>
           <% (app.tickets || []).forEach(t => { %>

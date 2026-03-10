@@ -18,9 +18,10 @@ html, body { margin: 0; padding: 0; font-family: var(--font); color: var(--text)
 .nav-left a, .nav-left { color: var(--accent-soft); text-decoration: none; font-weight: 800; font-size: 20px; letter-spacing: 0.04em; text-transform: uppercase; }
 .nav-right { display:flex; gap: 10px; align-items:center; }
 .nav-center { text-align: center; font-weight: 700; }
-.btn { color: var(--text); border: 1px solid var(--border); background: transparent; padding: 8px 12px; border-radius: 8px; text-decoration: none; display:inline-flex; align-items:center; gap: 8px; }
-.btn:hover { border-color: var(--accent); }
-.btn.primary { background: linear-gradient(135deg, var(--accent-2), var(--accent)); border: none; }
+.btn { color: var(--accent-2); border: 1px solid var(--accent-2); background: var(--panel); padding: 8px 12px; border-radius: 8px; text-decoration: none; display:inline-flex; align-items:center; gap: 8px; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: #000000; color: var(--accent-2); border: 1px solid var(--accent-2); }
+.btn.btn-compact { padding: 4px 8px; font-size: 12px; border-radius: 999px; gap: 4px; }
 .discord-login { display:inline-flex; align-items:center; gap:10px; padding: 10px 14px; border-radius: 8px; color:#fff; text-decoration:none; background: #5865F2; border: 1px solid #4752C4; box-shadow: 0 6px 20px rgba(88,101,242,.35); }
 .discord-login.large { font-size: 18px; padding: 12px 18px; }
 .userpill { display:inline-flex; gap:8px; align-items:center; color: var(--text); }
@@ -227,6 +228,48 @@ code {
   text-decoration: none;
 }
 
+/* Application Q/A styling */
+.qa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.qa-item {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 12px;
+}
+.qa-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.qa-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #000;
+  color: var(--accent-2);
+  font-size: 11px;
+}
+.qa-answer {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Notification Styles */
 .notification {
   padding: 16px;
@@ -257,7 +300,7 @@ code {
 form label { margin-right: 12px; display:inline-flex; gap: 6px; align-items:center; color: var(--muted); }
 input, select { background: #0e131a; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; }
 button.btn, .btn { cursor: pointer; }
-button.btn.primary, .btn.primary { box-shadow: 0 8px 24px rgba(58,113,255,.25); }
+button.btn.primary, .btn.primary { box-shadow: none; }
 
 .iframe-wrap { height: calc(100vh - var(--nav-h)); }
 .iframe-wrap iframe { width: 100%; height: 100%; border: 0; background: #0b0e13; }

@@ -707,6 +707,22 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     } catch (e) {
         console.error('[web] /applications/:id steam lookup failed:', e?.message || e);
     }
+    // Parse Q/A pairs from the raw responses for nicer rendering
+    let qaPairs = [];
+    try {
+        const raw = String(appRec.responses || '');
+        const pattern = /\*\*(.+?)\*\*\s*\n([\s\S]*?)(?=\n\n\*\*|$)/g;
+        let m;
+        while ((m = pattern.exec(raw)) !== null) {
+            const question = (m[1] || '').trim();
+            const answer = (m[2] || '').trim();
+            if (question || answer) {
+                qaPairs.push({ question, answer });
+            }
+        }
+    } catch (_) {
+        qaPairs = [];
+    }
     // Resolve display names for history/comments using Discord usernames
     const ids = new Set();
     (appRec.history || []).forEach(h => { if (h.by) ids.add(String(h.by)); });
@@ -777,7 +793,8 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
         prevId,
         nextId,
         steamId,
-        battlemetricsUrl
+        battlemetricsUrl,
+        qaPairs
     });
 });
 
