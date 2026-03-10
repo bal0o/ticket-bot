@@ -1572,7 +1572,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                     rowCount: Array.isArray(rows) ? rows.length : 0
                 });
             }
-        }
+        } 
 
         if (rows && rows.length > 0) {
             // Derive close metadata from tickets table when available
