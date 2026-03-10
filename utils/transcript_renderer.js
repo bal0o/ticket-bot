@@ -18,12 +18,23 @@ function normalizeRows(rows, options) {
     if (options.mode === 'user') {
         list = rows.filter(msg => {
             if (pinnedIds.has(msg.message_id)) return true;
-            const firstEmbedTitle = (Array.isArray(msg.embeds) && msg.embeds[0] && msg.embeds[0].title) || '';
+            // msg.embeds may be a JSON string from MySQL; parse if needed
+            let embeds = [];
+            try {
+                embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
+            } catch (_) {
+                embeds = [];
+            }
+            const firstEmbedTitle = (embeds[0] && embeds[0].title) || '';
             const helpEmbed = firstEmbedTitle === 'How to Reply';
             const cheetosEmbed = firstEmbedTitle === 'Cheetos Check';
             const isThreadNotice = typeof msg.type === 'string' && /thread/i.test(msg.type);
             const mentionsStaffChat = typeof msg.content === 'string' && /staff-chat/i.test(msg.content);
-            return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat);
+            const content = typeof msg.content === 'string' ? msg.content : '';
+            const isInternalError =
+                !!msg.author_is_bot &&
+                /There was an error sending your message\. Please try again\./i.test(content);
+            return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat || isInternalError);
         });
     } else {
         list = rows;
@@ -101,12 +112,6 @@ function renderTranscriptFromRows(rows, options) {
         if (options.mode === 'user' && /^!(me|r)\b/i.test(content)) {
             content = content.replace(/^!(?:me|r)\b\s*/i, '');
         }
-        if (content) {
-            const node = document.createElement('div');
-            node.className = 'maincontent';
-            node.innerHTML = linkify(sanitizeHtml(content));
-            messageContainer.appendChild(node);
-        }
 
         // Embeds
         let embeds = [];
@@ -115,6 +120,34 @@ function renderTranscriptFromRows(rows, options) {
         } catch (_) {
             embeds = [];
         }
+
+        // Attachments
+        let attachments = [];
+        try {
+            attachments = Array.isArray(msg.attachments)
+                ? msg.attachments
+                : JSON.parse(msg.attachments || '[]');
+        } catch (_) {
+            attachments = [];
+        }
+
+        // If there is literally nothing to show (no content, no embeds, no attachments),
+        // skip rendering this message row to avoid blank lines in the transcript.
+        const hasVisibleContent =
+            (content && content.trim().length > 0) ||
+            (embeds && embeds.length > 0) ||
+            (attachments && attachments.length > 0);
+        if (!hasVisibleContent) {
+            continue;
+        }
+
+        if (content) {
+            const node = document.createElement('div');
+            node.className = 'maincontent';
+            node.innerHTML = linkify(sanitizeHtml(content));
+            messageContainer.appendChild(node);
+        }
+
         for (const emb of embeds) {
             const body = document.createElement('div');
             body.className = 'EmbedBody';
@@ -148,15 +181,6 @@ function renderTranscriptFromRows(rows, options) {
             messageContainer.appendChild(body);
         }
 
-        // Attachments
-        let attachments = [];
-        try {
-            attachments = Array.isArray(msg.attachments)
-                ? msg.attachments
-                : JSON.parse(msg.attachments || '[]');
-        } catch (_) {
-            attachments = [];
-        }
         for (const att of attachments) {
             const url = att.url || '';
             if (/\.(gif|png|jpe?g)$/i.test(url)) {
