@@ -707,11 +707,16 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     } catch (e) {
         console.error('[web] /applications/:id steam lookup failed:', e?.message || e);
     }
-    // Resolve display names for history/comments
+    // Resolve display names for history/comments using Discord usernames
     const ids = new Set();
     (appRec.history || []).forEach(h => { if (h.by) ids.add(String(h.by)); });
     (appRec.comments || []).forEach(c => { if (c.by) ids.add(String(c.by)); });
-    const userNames = await getUsernamesMap(Array.from(ids));
+    let userNames = {};
+    try {
+        userNames = await getDiscordUsernamesMap(Array.from(ids));
+    } catch (_) {
+        userNames = {};
+    }
     // Compute nextStage from config
     const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
