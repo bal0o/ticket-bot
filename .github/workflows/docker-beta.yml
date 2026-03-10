@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - beta
+      - v14beta
   workflow_dispatch:
 
 env:
@@ -34,6 +35,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=beta,priority=1000
+            type=raw,value=v14beta,priority=1100
             type=sha,format=long,prefix=,suffix=-beta
 
       - name: Build and push
