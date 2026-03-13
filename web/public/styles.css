@@ -14,7 +14,7 @@
 html, body { margin: 0; padding: 0; font-family: var(--font); color: var(--text); background: var(--bg); }
 .container a { color: var(--accent-2); }
 .container a:hover { color: var(--accent); }
-.container { max-width: 1100px; margin: 0 auto; padding: 24px; padding-top: calc(24px + var(--nav-h)); }
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; padding-top: calc(24px + var(--nav-h)); }
 .navbar { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top:0; z-index: 999; height: var(--nav-h); box-sizing: border-box; }
 .nav-left a, .nav-left { color: var(--accent-soft); text-decoration: none; font-weight: 800; font-size: 20px; letter-spacing: 0.04em; text-transform: uppercase; }
 .nav-right { display:flex; gap: 10px; align-items:center; }
@@ -46,6 +46,23 @@ th, td { word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 table.staff-tickets-table { table-layout: auto; }
 .staff-tickets-table .transcript-cell { white-space: nowrap; }
 .staff-tickets-table .transcript-cell .btn.btn-compact { margin-right: 4px; }
+/* Staff tickets table column sizing to better fit content */
+.staff-tickets-table th:nth-child(1),
+.staff-tickets-table td:nth-child(1) { min-width: 140px; } /* User */
+.staff-tickets-table th:nth-child(2),
+.staff-tickets-table td:nth-child(2) { width: 90px; } /* Ticket # */
+.staff-tickets-table th:nth-child(3),
+.staff-tickets-table td:nth-child(3) { width: 110px; } /* Type */
+.staff-tickets-table th:nth-child(4),
+.staff-tickets-table td:nth-child(4) { width: 120px; } /* Server */
+.staff-tickets-table th:nth-child(5),
+.staff-tickets-table td:nth-child(5) { min-width: 140px; } /* Closed By */
+.staff-tickets-table th:nth-child(6),
+.staff-tickets-table td:nth-child(6) { min-width: 260px; } /* Close Reason */
+.staff-tickets-table th:nth-child(7),
+.staff-tickets-table td:nth-child(7) { width: 165px; } /* Created */
+.staff-tickets-table th:nth-child(8),
+.staff-tickets-table td:nth-child(8) { width: 180px; } /* Transcript */
 
 /* Pagination controls */
 .pagination { display:flex; gap: 12px; align-items:center; justify-content:center; margin-top: 12px; }
