@@ -18,11 +18,35 @@ const usersSelectingTicket = new Set();
 
 // Cache for webhooks to avoid repeated creation attempts
 const webhookCache = new Map();
+let cachedTicketCategoryIds = null;
 
 // Helper function to clean up invalid webhooks from cache
 function clearWebhookCache(channelId) {
     webhookCache.delete(channelId);
     console.log(`Cleared webhook cache for channel ${channelId}`);
+}
+
+function getConfiguredTicketCategoryIds() {
+    if (cachedTicketCategoryIds) return cachedTicketCategoryIds;
+
+    const categoryIds = new Set();
+    try {
+        const handlerRaw = require("../content/handler/options.json");
+        const options = handlerRaw && handlerRaw.options ? handlerRaw.options : {};
+        for (const key of Object.keys(options)) {
+            const questionFile = options[key] && options[key].question_file;
+            if (!questionFile) continue;
+            try {
+                const typeFile = require(`../content/questions/${questionFile}`);
+                if (typeFile && typeFile["ticket-category"]) {
+                    categoryIds.add(String(typeFile["ticket-category"]));
+                }
+            } catch (_) {}
+        }
+    } catch (_) {}
+
+    cachedTicketCategoryIds = categoryIds;
+    return categoryIds;
 }
 
 // Helper function to validate webhook before use
@@ -347,6 +371,14 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
             // Only relay messages sent in the main ticket channel.
             // Staff thread (e.g. staff-chat-1234) is private and must NEVER DM the user.
             if (typeof message.channel.isThread === 'function' && message.channel.isThread()) {
+                return;
+            }
+
+            // Ignore non-ticket channels early (e.g. staff-announcements/general-chat).
+            const ticketCategoryIds = getConfiguredTicketCategoryIds();
+            const inTicketCategory = !!(message.channel.parentId && ticketCategoryIds.has(String(message.channel.parentId)));
+            const topicLooksLikeUserId = /^\d{17,19}$/.test(String(message.channel.topic || ''));
+            if (!inTicketCategory && !topicLooksLikeUserId) {
                 return;
             }
 

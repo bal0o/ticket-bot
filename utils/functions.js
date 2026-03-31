@@ -204,7 +204,7 @@ module.exports.fetchPinnedSafe = async function(channel) {
         while (attempt < maxAttempts) {
             try {
                 lastFetchTimes.set(channelId, Date.now());
-                const messages = await channel.messages.fetchPinned();
+                const messages = await channel.messages.fetchPins();
                 // Cache the result
                 pinnedCache.set(channelId, { messages, timestamp: Date.now() });
                 return messages;
@@ -941,8 +941,15 @@ try {
                         }
                         if (regionSource) {
                             const lower = regionSource.toLowerCase();
-                            if (lower.includes('eu')) regionCode = 'eu';
-                            else if (lower.includes('us') || lower.includes('na') || lower.includes('america')) regionCode = 'us';
+                            if (lower.includes('eu')) {
+                                regionCode = 'eu';
+                            } else if (lower.includes('us')) {
+                                regionCode = 'us';
+                            } else if (
+                                lower.includes('au') 
+                            ) {
+                                regionCode = 'au';
+                            }
                         }
                     }
                 } catch (_) {}
