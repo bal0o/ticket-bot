@@ -132,58 +132,11 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'closeTicketModal') {
             try {
-                try { await interaction.deferReply({ flags: 64 }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
+                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
                 
                 const channel = interaction.channel;
                 if (!channel) {
                     try { await interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true }); } catch(_) {}
-                    return;
-                }
-
-                // Permission and claim checks are done here (after defer) to avoid button interaction timeout.
-                try {
-                    const handlerRaw = require("../content/handler/options.json");
-                    let typeFile = null;
-                    const handlerOptions = handlerRaw?.options || {};
-
-                    // Prefer resolving type by category (more reliable than pinned title parsing).
-                    if (channel.parentId) {
-                        for (const key of Object.keys(handlerOptions)) {
-                            const qf = handlerOptions[key]?.question_file;
-                            if (!qf) continue;
-                            try {
-                                const candidate = require(`../content/questions/${qf}`);
-                                if (String(candidate?.["ticket-category"] || '') === String(channel.parentId)) {
-                                    typeFile = candidate;
-                                    break;
-                                }
-                            } catch (_) {}
-                        }
-                    }
-
-                    // Fallback to pinned embed title for legacy/misplaced channels.
-                    if (!typeFile) {
-                        const myPins = await func.fetchPinnedSafe(channel);
-                        const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
-                        const pinTitle = LastPin?.embeds?.[0]?.title;
-                        if (typeof pinTitle === 'string' && pinTitle.length > 0) {
-                            const ticketTypeClose = pinTitle.split(" #")[0];
-                            const foundClose = Object.keys(handlerOptions).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase());
-                            if (foundClose && handlerOptions[foundClose]?.question_file) {
-                                typeFile = require(`../content/questions/${handlerOptions[foundClose].question_file}`);
-                            }
-                        }
-                    }
-
-                    if (!typeFile) {
-                        await interaction.editReply({ content: 'Could not determine ticket type for this channel. Please ask an admin to check ticket category/pins.', ephemeral: true }).catch(() => {});
-                        return;
-                    }
-
-                    // No claimer restrictions on close: if a user can see the ticket, they can close it.
-                } catch (guardErr) {
-                    func.handle_errors(guardErr, client, 'interactionCreate.js', 'Error validating close ticket modal permissions');
-                    await interaction.editReply({ content: 'Could not validate permissions for closing this ticket. Please try again.', ephemeral: true }).catch(() => {});
                     return;
                 }
                 
@@ -191,15 +144,15 @@ module.exports = async function (client, interaction) {
                 let closed = false;
                 try {
                     const result = await Promise.race([
-                        func.closeTicket(client, channel, interaction.member, reason),
+                        (async () => { await func.closeTicket(client, channel, interaction.member, reason); return 'done'; })(),
                         new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))
                     ]);
-                    closed = result === true;
+                    closed = result === 'done';
                 } catch (e) {
                     func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
                 }
                 try {
-                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Failed to fully close this ticket. Please try again or check bot permissions.', flags: 64 };
+                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', ephemeral: true };
                     if (interaction.deferred || interaction.replied) {
                         await interaction.editReply(payload);
                     } else {
@@ -1000,14 +953,42 @@ module.exports = async function (client, interaction) {
         if (interaction.customId === 'ticketclose') {
             try {
                 if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
-                if (interaction.message.channel?.type === ChannelType.PublicThread || interaction.message.channel?.type === ChannelType.DM || interaction.message.channel?.type === ChannelType.PrivateThread) {
-                    await interaction.reply({ content: 'You cannot close tickets from this channel type.', ephemeral: true }).catch(() => {});
+                if (interaction.message.channel?.type === ChannelType.PublicThread || interaction.message.channel?.type === ChannelType.DM || interaction.message.channel?.type === ChannelType.PrivateThread) return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
+                if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
+
+                const handlerRaw = require("../content/handler/options.json");
+                const myPins = await func.fetchPinnedSafe(interaction.channel);
+                const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
+                if (!LastPin || !LastPin.embeds[0]) return func.handle_errors(null, client, `interactionCreate.js`, `Can not find the pinned embed. Please make sure the initial embed is pinned for me to grab data. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
+
+                let ticketTypeClose = LastPin.embeds[0].title.split(" #")[0]
+                const foundClose = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase());
+                let typeFile = require(`../content/questions/${handlerRaw.options[foundClose].question_file}`);
+                let accessRoleIDs = typeFile["access-role-id"] || [];
+                let accepted = 0;
+                for (let role of accessRoleIDs) {
+                    if (interaction.member.roles.cache.find(x => x.id == role)) accepted++
+                }
+                if (interaction.member.roles.cache.find(x => x.id == client.config.role_ids.default_admin_role_id)) accepted++
+                if (accepted === 0) {
+                    let role = interaction.message.guild.roles.cache.find(role => role.id === client.config.role_ids.default_admin_role_id)
+                    await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                     return;
                 }
-                if (!interaction.message.channel.topic) {
-                    await interaction.reply({ content: 'This channel is missing ticket user metadata (topic). Please ask an admin to fix it.', ephemeral: true }).catch(() => {});
-                    return;
-                }
+                // Claim enforcement: only claimer (or bypass) can close when restricted
+                try {
+                    if (client.config?.claims?.enabled && client.config?.claims?.restrict_to_claimer) {
+                        const claim = (client.claims && client.claims.get(interaction.channel.id)) || await db.get(`Claims.${interaction.channel.id}`);
+                        if (claim && claim.userId && claim.userId !== interaction.user.id) {
+                            const bypassRoles = new Set((client.config?.claims?.role_bypass_ids || []).concat([client.config.role_ids.default_admin_role_id].filter(Boolean)));
+                            const hasBypass = interaction.member.roles.cache.some(r => bypassRoles.has(r.id));
+                            if (!hasBypass) {
+                                await interaction.reply({ content: `This ticket is claimed by <@${claim.userId}>.`, ephemeral: true }).catch(() => {});
+                                return;
+                            }
+                        }
+                    }
+                } catch (_) {}
 
                 // Show close ticket modal
                 const closeTicketModal = new ModalBuilder()
