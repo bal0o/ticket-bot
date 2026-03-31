@@ -1,27 +1,37 @@
 // Environment variables are now loaded from config.json
 const config = require("../config/config.json");
-const transcript = require("../utils/fetchTranscript.js");
 const { readdirSync } = require("fs");
-const Discord = require("discord.js");
+const {
+    Collection,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    StringSelectMenuBuilder,
+    AttachmentBuilder,
+    ChannelType
+} = require("discord.js");
 const unirest = require("unirest");
 const func = require("../utils/functions.js");
 const lang = require("../content/handler/lang.json");
 const { createDB } = require('../utils/mysql')
 const db = createDB();
-const metrics = require('../utils/metrics');
 const logger = require('../utils/logger');
 const applications = require('../utils/applications');
 const perms = require('../utils/permissions');
 
 // Initialize commands collection if it doesn't exist
-if (!Discord.Collection.prototype.commands) {
-    Discord.Collection.prototype.commands = new Discord.Collection();
+if (!Collection.prototype.commands) {
+    Collection.prototype.commands = new Collection();
 }
 
 module.exports = async function (client, interaction) {
     // Minimal interaction visibility without metrics noise
     try {
-        const kind = interaction.isCommand() ? 'command' : (interaction.isButton() ? 'button' : (interaction.isModalSubmit ? 'modal' : (interaction.isSelectMenu ? 'select' : 'other')));
+        const kind = interaction.isCommand() ? 'command' : (interaction.isButton() ? 'button' : (interaction.isModalSubmit ? 'modal' : (interaction.isAnySelectMenu ? 'select' : 'other')));
         const id = interaction.isCommand() ? interaction.commandName : (interaction.customId || 'n/a');
         logger.event('Interaction', { kind, id, userId: interaction.user?.id, channelId: interaction.channelId });
     } catch (_) {}
@@ -30,7 +40,7 @@ module.exports = async function (client, interaction) {
     }
     // Initialize commands collection if it doesn't exist
     if (!client.commands) {
-        client.commands = new Discord.Collection();
+        client.commands = new Collection();
     }
 
     try {
@@ -91,7 +101,7 @@ module.exports = async function (client, interaction) {
         const questionFilesystem = require(`../content/questions/${validOption.question_file}`);
         if (!questionFilesystem) return func.handle_errors(null, client, `interactionCreate.js`, `There is a missing question file for ${ticketType}, have you changed the name or file directory recently?`)
 
-            let feedbackModalResponse = new Discord.MessageEmbed()
+            let feedbackModalResponse = new EmbedBuilder()
             .setTitle(`Ticket Feedback`)
             .setDescription(`Feedback from: *${interaction.user.username} (${interaction.user.id})*`)
             .setColor(client.config.bot_settings.main_color)
@@ -104,12 +114,12 @@ module.exports = async function (client, interaction) {
 
             await interaction.editReply(questionFilesystem.successful_feedback_message == "" ? "Thanks for your feedback!" : questionFilesystem.successful_feedback_message)
            
-            const feedbackRowDone = new Discord.MessageActionRow()
+            const feedbackRowDone = new ActionRowBuilder()
             feedbackRowDone.addComponents(
-                new Discord.MessageButton()
+                new ButtonBuilder()
                     .setCustomId(`feedbackbutton`)
                     .setLabel(`Feedback Sent!`)
-                    .setStyle("SECONDARY")
+                    .setStyle(ButtonStyle.Secondary)
                     .setEmoji("📋")
                     .setDisabled(true),
             );
@@ -263,7 +273,7 @@ module.exports = async function (client, interaction) {
                             }
                         } catch (_) {}
                         
-                        const replyEmbed = new Discord.MessageEmbed()
+                        const replyEmbed = new EmbedBuilder()
                             .setAuthor({ 
                                 name: `${displayName} (${roleName})`, 
                                 iconURL: staffAvatar
@@ -351,7 +361,7 @@ module.exports = async function (client, interaction) {
                 // Update ticket count after custom close
                 await func.updateTicketStatus(client);
 
-                let response = new Discord.MessageEmbed()
+                let response = new EmbedBuilder()
                 .setTitle(lang.custom_reply_close_ticket["player-close-embed-title"] != "" ? 
                     lang.custom_reply_close_ticket["player-close-embed-title"]
                         .replace(`{{TICKETTYPE}}`, ticketTypeCustomFinal)
@@ -363,12 +373,12 @@ module.exports = async function (client, interaction) {
 
                 if (typeFile.allow_feedback == true) {
 
-                    const feedbackRow = new Discord.MessageActionRow()
+                    const feedbackRow = new ActionRowBuilder()
                     feedbackRow.addComponents(
-                        new Discord.MessageButton()
+                        new ButtonBuilder()
                             .setCustomId(`feedbackbutton`)
                             .setLabel(lang.feedback_messages["ticket-feedback-button-title"] != "" ? lang.feedback_messages["ticket-feedback-button-title"] : "Send Ticket Feedback")
-                            .setStyle("SECONDARY")
+                            .setStyle(ButtonStyle.Secondary)
                             .setEmoji("📋"),
                     );
 
@@ -433,7 +443,7 @@ module.exports = async function (client, interaction) {
                             const accessRoleIDs = typeFile["access-role-id"] || [];
                             for (const roleId of accessRoleIDs) {
                                 if (!roleId) continue;
-                                await interaction.channel.permissionOverwrites.edit(roleId, { SEND_MESSAGES: true }).catch(() => {});
+                            await interaction.channel.permissionOverwrites.edit(roleId, { SendMessages: true }).catch(() => {});
                             }
                         } catch (_) {}
                     }
@@ -446,10 +456,12 @@ module.exports = async function (client, interaction) {
                     // Update button label to Claim Ticket (always attempt)
                     try {
                         const rows = interaction.message.components.map(row => {
-                            const newRow = new Discord.MessageActionRow();
+                            const newRow = new ActionRowBuilder();
                             newRow.addComponents(row.components.map(comp => {
-                                if (comp.customId === 'claimticket') return comp.setLabel('Claim Ticket');
-                                return comp;
+                                const label = comp.customId === 'claimticket' ? 'Claim Ticket' : (comp.label || comp.data?.label);
+                                const btn = new ButtonBuilder().setCustomId(comp.customId || comp.data?.custom_id).setLabel(label).setStyle(comp.style ?? comp.data?.style ?? ButtonStyle.Secondary).setDisabled(comp.disabled ?? comp.data?.disabled ?? false);
+                                if (comp.emoji || comp.data?.emoji) btn.setEmoji(comp.emoji || comp.data.emoji);
+                                return btn;
                             }));
                             return newRow;
                         });
@@ -464,8 +476,7 @@ module.exports = async function (client, interaction) {
                 try { await db.set(`Claims.${interaction.channel.id}`, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber }); } catch (_) {}
                 try { 
 					const scopeClaim = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[displayType || ticketType].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
-					metrics.ticketClaimed(ticketType, scopeClaim);
-					metrics.staffAction('claim', ticketType, interaction.user.id, interaction.user.username); 
+					// Claim/staff action metrics are now derived from the tickets table; Prometheus metrics removed.
 				} catch (_) {}
 
                 if (client.config?.claims?.restrict_to_claimer) {
@@ -479,9 +490,9 @@ module.exports = async function (client, interaction) {
                         for (const roleId of accessRoleIDs) {
                             if (!roleId) continue;
                             if (bypass.has(roleId)) continue;
-                            await interaction.channel.permissionOverwrites.edit(roleId, { SEND_MESSAGES: false }).catch(() => {});
+                            await interaction.channel.permissionOverwrites.edit(roleId, { SendMessages: false }).catch(() => {});
                         }
-                        await interaction.channel.permissionOverwrites.edit(interaction.user.id, { SEND_MESSAGES: true, VIEW_CHANNEL: true }).catch(() => {});
+                        await interaction.channel.permissionOverwrites.edit(interaction.user.id, { SendMessages: true, ViewChannel: true }).catch(() => {});
                     } catch (_) {}
                 }
 
@@ -494,10 +505,12 @@ module.exports = async function (client, interaction) {
                 // Update button label to Unclaim (always attempt)
                 try {
                     const rows = interaction.message.components.map(row => {
-                        const newRow = new Discord.MessageActionRow();
+                        const newRow = new ActionRowBuilder();
                         newRow.addComponents(row.components.map(comp => {
-                            if (comp.customId === 'claimticket') return comp.setLabel('Unclaim');
-                            return comp;
+                            const label = comp.customId === 'claimticket' ? 'Unclaim' : (comp.label || comp.data?.label);
+                            const btn = new ButtonBuilder().setCustomId(comp.customId || comp.data?.custom_id).setLabel(label).setStyle(comp.style ?? comp.data?.style ?? ButtonStyle.Secondary).setDisabled(comp.disabled ?? comp.data?.disabled ?? false);
+                            if (comp.emoji || comp.data?.emoji) btn.setEmoji(comp.emoji || comp.data.emoji);
+                            return btn;
                         }));
                         return newRow;
                     });
@@ -593,64 +606,43 @@ module.exports = async function (client, interaction) {
                 const appRec = await applications.getApplication(appId);
                 if (!appRec) { await interaction.editReply({ content: 'Application not found.' }); return; }
                 
-                // Generate transcript for communication channel
-                const transcript = require("../utils/fetchTranscript.js");
-                const transcriptResult = await transcript.fetch(channel, {
-                    channel: channel,
-                    numberOfMessages: 99,
-                    dateFormat: "MMM Do YYYY, h:mm:ss a",
-                    dateLocale: "en",
-                    DiscordID: appRec.userId,
-                    closeReason: 'Communication session closed',
-                    closedBy: member.user.username,
-                    responseTime: 'N/A'
-                });
-                
-                let savedTranscriptURL = null;
-                if (transcriptResult) {
-                    const fs = require('fs');
-                    const { enabled, save_path, base_url } = client.config.transcript_settings;
-                    if (enabled) {
-                        if (!fs.existsSync(save_path)) {
-                            fs.mkdirSync(save_path, { recursive: true });
-                        }
-                        try {
-                            const filePathFull = `${save_path}/${channel.name}.full.html`;
-                            fs.writeFileSync(filePathFull, transcriptResult);
-                            savedTranscriptURL = `${base_url}${channel.name}.full.html`;
-                            
-                            // Also generate a user-facing transcript
-                            const userData = await transcript.fetch(channel, {
-                                channel: channel,
-                                numberOfMessages: 99,
-                                dateFormat: "MMM Do YYYY, h:mm:ss a",
-                                dateLocale: "en",
-                                DiscordID: appRec.userId,
-                                filterMode: 'user',
-                                closeReason: 'Communication session closed',
-                                closedBy: member.user.username,
-                                responseTime: 'N/A'
-                            });
-                            if (userData) {
-                                const filePathUser = `${save_path}/${channel.name}.html`;
-                                fs.writeFileSync(filePathUser, userData);
-                            }
-            } catch (e) {
-                            console.error('Error saving transcript:', e);
-                        }
+                // Transcript is DB-backed: messages already in ticket_messages; no HTML files written
+                const { base_url } = client.config.transcript_settings || {};
+                const savedTranscriptURL = base_url ? `${base_url}${channel.name}.full.html` : null;
+
+                // Register transcript in index so web server can resolve owner/staff access
+                try {
+                    if (typeof db.query === 'function' && savedTranscriptURL) {
+                        const baseFilename = `${channel.name}.html`;
+                        const fullFilename = `${channel.name}.full.html`;
+                        const ticketId = `app-${appId}`;
+                        const userId = String(appRec.userId || '');
+                        const ticketType = 'application';
+                        await db.query(
+                            `INSERT INTO transcript_index (filename, user_id, ticket_id, ticket_type)
+                             VALUES (?, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), ticket_type = VALUES(ticket_type)`,
+                            [baseFilename, userId, ticketId, ticketType]
+                        );
+                        await db.query(
+                            `INSERT INTO transcript_index (filename, user_id, ticket_id, ticket_type)
+                             VALUES (?, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), ticket_type = VALUES(ticket_type)`,
+                            [fullFilename, userId, ticketId, ticketType]
+                        );
                     }
+                } catch (e) {
+                    console.error('Error writing app comm transcript index:', e);
                 }
-                
-                // Send transcript to logs channel if configured
+
+                // Notify logs channel with link (transcript served dynamically from DB)
                 const questionFile = require("../content/questions/application.json");
                 const transcriptChannel = questionFile["transcript-channel"];
                 const logs_channel = await channel.guild.channels.cache.find(x => x.id === transcriptChannel);
-                if (logs_channel && transcriptResult) {
-                    const file = new Discord.MessageAttachment(transcriptResult, `${channel.name}.full.html`);
-                    await logs_channel.send({ 
-                        content: `Communication channel transcript: ${savedTranscriptURL ? `<${savedTranscriptURL}>` : 'No URL available'}`,
-                        files: [file] 
-                    }).catch(e => console.error('Error sending transcript to logs:', e));
+                if (logs_channel) {
+                    await logs_channel.send({
+                        content: `Communication channel transcript: ${savedTranscriptURL ? `<${savedTranscriptURL}>` : 'No base_url configured.'}`
+                    }).catch(e => console.error('Error sending transcript link to logs:', e));
                 }
                 
                 // Add comment to application with transcript URL
@@ -736,9 +728,9 @@ module.exports = async function (client, interaction) {
             }
 
             // Create a select menu with all available ticket types
-            const row = new Discord.MessageActionRow()
+            const row = new ActionRowBuilder()
                 .addComponents(
-                    new Discord.MessageSelectMenu()
+                    new StringSelectMenuBuilder()
                         .setCustomId('selectTicketType')
                         .setPlaceholder('Select a ticket type')
                         .addOptions(
@@ -827,7 +819,7 @@ module.exports = async function (client, interaction) {
                             continue;
                         }
                     }
-                    if (!cat || cat.type !== 'GUILD_CATEGORY') continue;
+                    if (!cat || cat.type !== ChannelType.GuildCategory) continue;
                     typeOptions.push({ typeKey, categoryName: cat.name, categoryId });
                 } catch (err) {
                     // Log errors but continue processing other ticket types
@@ -841,9 +833,9 @@ module.exports = async function (client, interaction) {
             }
 
             // Create a select menu for ticket types (not raw categories)
-            const row = new Discord.MessageActionRow()
+            const row = new ActionRowBuilder()
                 .addComponents(
-                    new Discord.MessageSelectMenu()
+                    new StringSelectMenuBuilder()
                         .setCustomId('selectMoveType')
                         .setPlaceholder('Select a ticket type')
                         .addOptions(
@@ -881,7 +873,7 @@ module.exports = async function (client, interaction) {
                     return;
                 }
             }
-            if (!category || category.type !== 'GUILD_CATEGORY') {
+            if (!category || category.type !== ChannelType.GuildCategory) {
                 await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
                 return;
             }
@@ -961,7 +953,7 @@ module.exports = async function (client, interaction) {
         if (interaction.customId === 'ticketclose') {
             try {
                 if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
-                if (interaction.message.channel?.type === "GUILD_PUBLIC_THREAD" || interaction.message.channel?.type === "DM" || interaction.message.channel?.type === "GUILD_PRIVATE_THREAD") return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
+                if (interaction.message.channel?.type === ChannelType.PublicThread || interaction.message.channel?.type === ChannelType.DM || interaction.message.channel?.type === ChannelType.PrivateThread) return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
                 if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
 
                 const handlerRaw = require("../content/handler/options.json");
@@ -999,15 +991,15 @@ module.exports = async function (client, interaction) {
                 } catch (_) {}
 
                 // Show close ticket modal
-                const closeTicketModal = new Discord.Modal()
+                const closeTicketModal = new ModalBuilder()
                     .setCustomId('closeTicketModal')
                     .setTitle(lang.close_ticket["close-modal-title"] != "" ? lang.close_ticket["close-modal-title"] : 'Close Ticket');
-                const closeReason = new Discord.TextInputComponent()
+                const closeReason = new TextInputBuilder()
                     .setCustomId('closeReason')
                     .setLabel(lang.close_ticket["close-modal-reason-title"] != "" ? lang.close_ticket["close-modal-reason-title"] : 'Reason for closing')
-                    .setStyle('PARAGRAPH')
+                    .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
-                const firstActionRow = new Discord.MessageActionRow().addComponents(closeReason);
+                const firstActionRow = new ActionRowBuilder().addComponents(closeReason);
                 closeTicketModal.addComponents(firstActionRow);
                 await interaction.showModal(closeTicketModal);
             } catch (e) {
@@ -1237,7 +1229,7 @@ module.exports = async function (client, interaction) {
 				
 				// Filter to only text channels with topic matching user ID
 				let candidateChannels = allChannels.filter(x => 
-					x.type === 'GUILD_TEXT' && 
+					x.type === ChannelType.GuildText && 
 					x.topic === interaction.member.user.id
 				);
 				
@@ -1374,8 +1366,7 @@ module.exports = async function (client, interaction) {
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Accept Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
 							const scopeAccept = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
-							metrics.ticketClosed(ticketType, user.id, user.username, scopeAccept); 
-							metrics.staffAction('accept', ticketType, user.id, user.username, scopeAccept); 
+							// Accept/deny metrics are now derived from the tickets table; Prometheus metrics removed.
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
@@ -1393,7 +1384,7 @@ module.exports = async function (client, interaction) {
                         await func.staffStats(ticketType, `accepted`, user.id);
                         
 
-					let endresponse = new Discord.MessageEmbed()
+					let endresponse = new EmbedBuilder()
                     .setTitle(lang.accepted_ticket["player-accepted-embed-title"] != "" ? 
                         lang.accepted_ticket["player-accepted-embed-title"]
                             .replace(`{{TICKETTYPE}}`, ticketType)
@@ -1431,8 +1422,7 @@ module.exports = async function (client, interaction) {
                         await func.closeDataAddDB(recepientMember.id, globalTicketNumber, `Deny Ticket`, user.username, user.id, Date.now() / 1000, `N/A`);
                         try { 
 							const scopeDeny = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[found].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
-							metrics.ticketClosed(ticketType, user.id, user.username, scopeDeny); 
-							metrics.staffAction('deny', ticketType, user.id, user.username, scopeDeny); 
+							// Accept/deny metrics are now derived from the tickets table; Prometheus metrics removed.
 						} catch (_) {}
                         await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)});
 					
@@ -1450,7 +1440,7 @@ module.exports = async function (client, interaction) {
                         await func.staffStats(ticketType, `denied`, user.id);
                         
 
-					let endresponse = new Discord.MessageEmbed()
+					let endresponse = new EmbedBuilder()
                     .setTitle(lang.denied_ticket["player-denied-embed-title"] != "" ? 
                         lang.denied_ticket["player-denied-embed-title"]
                             .replace(`{{TICKETTYPE}}`, ticketType)
@@ -1481,14 +1471,14 @@ module.exports = async function (client, interaction) {
         
                     if (accepted > 0) {
 
-                        const customResponseModal = new Discord.Modal()
+                        const customResponseModal = new ModalBuilder()
                             .setCustomId('CustomResponseModal')
                             .setTitle(lang.custom_reply_close_ticket["close-modal-title"] != "" ? lang.custom_reply_close_ticket["close-modal-title"] : 'Custom Reply');
-                        const customResponseReason = new Discord.TextInputComponent()
+                        const customResponseReason = new TextInputBuilder()
                             .setCustomId('customresponse')
                             .setLabel(lang.custom_reply_close_ticket["close-modal-reason-title"] != "" ? lang.custom_reply_close_ticket["close-modal-reason-title"] : "What would you like to say to the user?")
-                            .setStyle('PARAGRAPH');
-                        const firstActionRow = new Discord.MessageActionRow().addComponents(customResponseReason);
+                            .setStyle(TextInputStyle.Paragraph);
+                        const firstActionRow = new ActionRowBuilder().addComponents(customResponseReason);
                         customResponseModal.addComponents(firstActionRow);
                         return await interaction.showModal(customResponseModal);
                         

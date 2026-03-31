@@ -8,6 +8,11 @@ function sanitizeHtml(text) {
 	return text.replace(/<(\/?)script>/gi, '&lt;$1script&gt;');
 }
 
+function linkify(text) {
+	if (typeof text !== 'string' || !text) return text;
+	return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+}
+
 function renderTranscript(messages, options) {
 	const dom = new JSDOM();
 	const document = dom.window.document;
@@ -75,7 +80,7 @@ function renderTranscript(messages, options) {
 		if (content) {
 			const node = document.createElement('div');
 			node.className = 'maincontent';
-			node.innerHTML = sanitizeHtml(content);
+			node.innerHTML = linkify(sanitizeHtml(content));
 			messageContainer.appendChild(node);
 		}
 

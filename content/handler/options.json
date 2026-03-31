@@ -76,7 +76,16 @@
 			"question_file": "bugreport.json",
 			"unique_button_identifier": "bug_report",
 			"button_type": "PRIMARY",
-			"button_emoji": "🐞"
+			"button_emoji": "🐞",
+			"allow_transfers": false
+		},
+		"HR": {
+			"abbreviation": "HR",
+			"question_file": "HR.json",
+			"unique_button_identifier": "hr",
+			"button_type": "PRIMARY",
+			"button_emoji": "👔",
+			"allow_transfers": false
 		}
 	}
 }

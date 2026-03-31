@@ -7,7 +7,7 @@
  * user (from channel topic) to the permission overwrites so they can participate directly.
  */
 
-const { Client, Intents } = require("discord.js");
+const { Client, GatewayIntentBits, ChannelType } = require("discord.js");
 const dryRun = process.argv.includes("--dry-run");
 const path = require("path");
 const config = require(path.join(__dirname, "../config/config.json"));
@@ -52,7 +52,7 @@ async function main() {
     console.log(`[fix_internal] Internal ticket categories: ${[...internalCategoryIds].join(", ") || "(none)"}`);
 
     const client = new Client({
-        intents: [Intents.FLAGS.GUILDS],
+        intents: [GatewayIntentBits.Guilds],
     });
 
     await client.login(config.tokens?.bot_token);
@@ -70,7 +70,7 @@ async function main() {
 
     await guild.channels.fetch();
     const textChannels = guild.channels.cache.filter(
-        (ch) => ch.type === "GUILD_TEXT" && /^\d{17,19}$/.test(String(ch.topic || "").trim())
+        (ch) => ch.type === ChannelType.GuildText && /^\d{17,19}$/.test(String(ch.topic || "").trim())
     );
 
     let fixed = 0;
@@ -101,9 +101,9 @@ async function main() {
                     continue;
                 }
                 await channel.permissionOverwrites.create(user, {
-                    VIEW_CHANNEL: true,
-                    SEND_MESSAGES: true,
-                    READ_MESSAGE_HISTORY: true,
+                    ViewChannel: true,
+                    SendMessages: true,
+                    ReadMessageHistory: true,
                 });
                 console.log(`[fix_internal] Added user ${userId} to #${channel.name} (${channel.id})`);
                 fixed++;

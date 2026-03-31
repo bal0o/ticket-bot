@@ -1,4 +1,3 @@
-const Discord = require("discord.js");
 const moment = require("moment");
 const { SlashCommandBuilder } = require("@discordjs/builders")
 const config = require("../../config/config.json");
@@ -24,7 +23,7 @@ module.exports = {
 
 		if (access == 0) {
 			return interaction.editReply({content:`Sorry! You can not use this command.`, ephemeral: true}).catch(err => {
-				if (err.code === Discord.Constants.APIErrors.UNKNOWN_MESSAGE) return;  
+				if (err.code === 10008) return;  
 				func.handle_errors(err, client, `blacklist.js`, null)
 				})
 		}

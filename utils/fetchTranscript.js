@@ -1,4 +1,4 @@
-const Discord = require('discord.js');
+const { Collection } = require('discord.js');
 const jsdom = require('jsdom');
 const fs = require('fs');
 const { JSDOM } = jsdom;
@@ -34,7 +34,7 @@ module.exports.fetch = async (channel, options) => {
     moment.locale(opts.dateLocale);
 
     // Collect messages (newest -> oldest). If numberOfMessages is null, fetch all available.
-    let messageCollection = new Discord.Collection();
+    let messageCollection = new Collection();
     let lastId = undefined;
     for (;;) {
         if (opts.numberOfMessages && messageCollection.size >= opts.numberOfMessages) break;

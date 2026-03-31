@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="navbar">
-    <div class="nav-left"><a href="/my">Tickets</a></div>
+    <div class="nav-left"><a href="/my">BritRust Ticket System</a></div>
     <div class="nav-right">
       <a class="btn" href="/my">My Tickets</a>
       <% if (canSeeApplications) { %>
@@ -48,28 +48,85 @@
      <% } %>
      
     <h1 style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-      <span>Application: <%= app.username %> (<%= app.userId %>)</span>
-      <span style="display:flex; gap:8px;">
+      <span>
+        <div style="font-size:22px; font-weight:600;"><%= app.username %></div>
+        <div class="muted" style="font-size:12px; margin-top:2px;">Discord: <%= app.userId %></div>
+      </span>
+      <span style="display:flex; gap:6px;">
         <% if (prevId) { %>
-          <a class="btn" href="/applications/<%= prevId %>">◀ Previous</a>
+          <a class="btn btn-compact" href="/applications/<%= prevId %>">◀ Prev</a>
         <% } %>
         <% if (nextId) { %>
-          <a class="btn" href="/applications/<%= nextId %>">Next ▶</a>
+          <a class="btn btn-compact" href="/applications/<%= nextId %>">Next ▶</a>
         <% } %>
       </span>
     </h1>
-     <p class="muted">Type: <%= app.type %> • Server: <%= app.server || '' %></p>
+     <p class="muted">
+       <span style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+         <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
+           <%= app.type %>
+         </span>
+         <% if (app.server) { %>
+           <span style="padding:2px 8px; border-radius:999px; border:1px solid var(--border); font-size:11px;">
+             Server: <%= app.server %>
+           </span>
+         <% } %>
+         <% if (canAdmin && app.stage !== 'Denied' && app.stage !== 'Approved' && app.stage !== 'Archived') { %>
+           <% const isDevApp = String(app.type || '').toLowerCase().includes('dev'); %>
+           <form method="post" action="/applications/<%= app.id %>/category" style="display:inline-flex; gap:6px; align-items:center; margin:0;">
+             <label style="font-size:11px;">
+               Category:
+               <select name="category" style="margin-left:4px; font-size:11px; padding:2px 4px;">
+                 <option value="staff" <%= !isDevApp ? 'selected' : '' %>>Staff</option>
+                 <option value="dev" <%= isDevApp ? 'selected' : '' %>>Developer</option>
+               </select>
+             </label>
+             <button class="btn btn-compact" type="submit">Update</button>
+           </form>
+         <% } %>
+       </span>
+     </p>
+     <% if (steamId) { %>
+       <p class="muted" style="margin-top:4px;">
+         Steam: <a href="https://steamcommunity.com/profiles/<%= steamId %>" target="_blank" rel="noreferrer noopener"><%= steamId %></a>
+         <% if (battlemetricsUrl) { %>
+           • BattleMetrics: <a href="<%= battlemetricsUrl %>" target="_blank" rel="noreferrer noopener">View BM profile</a>
+         <% } %>
+       </p>
+     <% } %>
     
     <!-- Stages Progress - simplified -->
     <section class="stages-section">
       <h3>Application Progress</h3>
       <p class="stage-status">Current Stage: <strong><%= app.stage %></strong></p>
+      <% if ((priorDeniedCount || 0) > 0 || (otherOpenCount || 0) > 0) { %>
+        <div class="notification warning persistent" style="margin-top:12px; text-align:left;">
+          <% if ((priorDeniedCount || 0) > 0) { %>
+            <p><strong>Previous applications:</strong> This user has <%= priorDeniedCount %> earlier staff application<%= priorDeniedCount === 1 ? '' : 's' %> that were <strong>Denied</strong>.</p>
+          <% } %>
+          <% if ((otherOpenCount || 0) > 0) { %>
+            <p><strong>Other active applications:</strong> This user currently has <%= otherOpenCount %> other application<%= otherOpenCount === 1 ? '' : 's' %> that are still in progress.</p>
+          <% } %>
+        </div>
+      <% } %>
+      <% /* Category selector moved up next to Steam/BM section */ %>
     </section>
 
     <div class="grid two">
       <section>
         <h3>Responses</h3>
-        <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
+        <% if (qaPairs && qaPairs.length) { %>
+          <div class="qa-list">
+            <% qaPairs.forEach(function(pair, idx) { %>
+              <div class="qa-item">
+                <div class="qa-question"><span class="qa-badge">Q<%= idx + 1 %></span> <%= pair.question %></div>
+                <div class="qa-answer"><%= pair.answer %></div>
+              </div>
+            <% }); %>
+          </div>
+        <% } else { %>
+          <pre class="pre" style="max-height:420px; overflow:auto;"><%= app.responses || 'No responses recorded' %></pre>
+        <% } %>
         <h3>Tickets</h3>
         <ul>
           <% (app.tickets || []).forEach(t => { %>
@@ -172,10 +229,11 @@
    </div>
    
    <script>
-    // Auto-hide notifications after 5 seconds
+    // Auto-hide non-persistent notifications after 5 seconds
     document.addEventListener('DOMContentLoaded', function() {
       const notifications = document.querySelectorAll('.notification');
       notifications.forEach(notification => {
+        if (notification.classList.contains('persistent')) return;
         setTimeout(() => {
           notification.style.opacity = '0';
           setTimeout(() => notification.remove(), 300);

@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="navbar">
-    <div class="nav-left"><a href="/">Tickets</a></div>
+    <div class="nav-left"><a href="/">BritRust Ticket System</a></div>
     <div class="nav-right">
       <a class="btn" href="/my">My Tickets</a>
       <% if (canSeeApplications) { %>
@@ -60,7 +60,7 @@
     <% } %>
   </form>
   <div class="table-scroll">
-  <table class="with-filter">
+  <table class="with-filter staff-tickets-table">
     <thead>
       <tr>
         <th>User</th>
@@ -83,14 +83,12 @@
           <td><%= t.closeUser || '' %></td>
           <td class="wrap pre"><%= t.closeReason || '' %></td>
           <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
-          <td>
+          <td class="transcript-cell">
             <% if (t.transcriptFilename) { %>
               <% const base = String(t.transcriptFilename).split('/').pop().replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, ''); %>
-              <a href="/transcripts/<%= base %>.full.html">Full</a>
-              <span class="muted">/</span>
-              <a href="/transcripts/<%= base %>.html">User</a>
-              <span class="muted">/</span>
-              <a href="/transcripts/<%= base %>.staff.html">Staff</a>
+              <a class="btn btn-compact primary" href="/transcripts/<%= base %>.full.html">Full</a>
+              <a class="btn btn-compact" href="/transcripts/<%= base %>.html">User</a>
+              <a class="btn btn-compact" href="/transcripts/<%= base %>.staff.html">Staff</a>
             <% } else { %>
               <em>Not available</em>
             <% } %>

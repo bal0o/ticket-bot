@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="navbar">
-    <div class="nav-left"><a href="/my">Tickets</a></div>
+    <div class="nav-left"><a href="/my">BritRust Ticket System</a></div>
     <div class="nav-right">
       <a class="btn" href="/my">My Tickets</a>
       <% if (canSeeApplications) { %>
@@ -22,6 +22,12 @@
   </header>
   <main class="container">
     <h1>Applications</h1>
+    <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <span class="muted">View:</span>
+      <a class="btn <%= !kind || kind === 'all' ? 'active' : '' %>" href="/applications?<% if (request && request.query && request.query.all) { %>all=1&<% } %>">All (<%= (devCount || 0) + (staffCount || 0) %>)</a>
+      <a class="btn <%= kind === 'staff' ? 'active' : '' %>" href="/applications?kind=staff<% if (request && request.query && request.query.all) { %>&all=1<% } %>">Staff (<%= staffCount || 0 %>)</a>
+      <a class="btn <%= kind === 'dev' ? 'active' : '' %>" href="/applications?kind=dev<% if (request && request.query && request.query.all) { %>&all=1<% } %>">Dev (<%= devCount || 0 %>)</a>
+    </div>
     <form method="get" action="/applications" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
       <label>Stage:
         <input type="text" name="stage" value="<%= stage || '' %>">
@@ -44,32 +50,54 @@
         <a class="btn" href="/applications">Show Active Only</a>
       <% } %>
     </form>
-    <div class="table-scroll">
-    <table class="with-filter">
-      <thead>
-        <tr>
-          <th>Applicant</th>
-          <th>Type</th>
-          <th>Server</th>
-          <th>Stage</th>
-          <th>Updated</th>
-          <th>Open</th>
-        </tr>
-      </thead>
-      <tbody>
-        <% (items || []).forEach(a => { %>
+    <form method="post" action="/applications/batch">
+      <div class="table-scroll">
+      <table class="with-filter">
+        <thead>
           <tr>
-            <td><%= a.username %> (<%= a.userId %>)</td>
-            <td><%= a.type %></td>
-            <td><%= a.server || '' %></td>
-            <td><%= a.stage %></td>
-            <td><%= a.updatedAt ? new Date(a.updatedAt).toLocaleString() : '' %></td>
-            <td><a class="btn" href="/applications/<%= a.id %>">View</a></td>
+            <th><input type="checkbox" id="select-all"></th>
+            <th>Applicant</th>
+            <th>Type</th>
+            <th>Server</th>
+            <th>Stage</th>
+            <th>Updated</th>
+            <th>Open</th>
           </tr>
-        <% }) %>
-      </tbody>
-    </table>
-    </div>
+        </thead>
+        <tbody>
+          <% (items || []).forEach(a => { %>
+            <% const displayName = (applicantNames && applicantNames[String(a.userId)]) || a.username || a.userId; %>
+            <tr>
+              <td><input type="checkbox" name="ids" value="<%= a.id %>"></td>
+              <td>
+                <div style="display:flex; flex-direction:column;">
+                  <span><%= displayName %></span>
+                  <span class="muted" style="font-size:11px;">Discord: <%= a.userId %></span>
+                </div>
+              </td>
+              <td><%= a.type %></td>
+              <td><%= a.server || '' %></td>
+              <td><%= a.stage %></td>
+              <td><%= a.updatedAt ? new Date(a.updatedAt).toLocaleString() : '' %></td>
+              <td><a class="btn" href="/applications/<%= a.id %>">View</a></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <label>Batch action:
+          <select name="action" required>
+            <option value="">Select…</option>
+            <option value="advance">Advance to next stage</option>
+            <option value="deny">Deny</option>
+            <option value="archive">Archive</option>
+          </select>
+        </label>
+        <input type="text" name="note" placeholder="Optional note / reason" style="flex:1; min-width:220px;">
+        <button type="submit" class="btn primary">Apply to selected</button>
+      </div>
+    </form>
     <% if (pagination && pagination.totalPages > 1) { %>
       <nav class="pagination">
         <% const prev = Math.max(1, (pagination.page || 1) - 1); %>
@@ -95,6 +123,16 @@
       </nav>
     <% } %>
   </main>
+  <script>
+    (function () {
+      const selectAll = document.getElementById('select-all');
+      if (!selectAll) return;
+      selectAll.addEventListener('change', function () {
+        const boxes = document.querySelectorAll('input[type="checkbox"][name="ids"]');
+        boxes.forEach(cb => { cb.checked = selectAll.checked; });
+      });
+    })();
+  </script>
 </body>
 </html>
 

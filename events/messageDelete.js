@@ -7,7 +7,7 @@ module.exports = async function (client, message) {
         if (!message || !message.id) return;
 
         // If a user deletes a DM message, remove corresponding staff-side forwarded messages
-        if (message.channel && message.channel.type === "DM" && !message.author?.bot) {
+        if (message.channel && message.channel.type === require('discord.js').ChannelType.DM && !message.author?.bot) {
             const map = await db.get(`ForwardMap.${message.id}`);
             if (map && map.channelId) {
                 const staffChannel = await client.channels.fetch(map.channelId).catch(() => null);

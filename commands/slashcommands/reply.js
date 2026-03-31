@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const Discord = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
 const responses = require('../../content/response.json');
 
@@ -79,18 +79,18 @@ module.exports = {
         });
         
         // Create and show modal for editing
-        const replyModal = new Discord.Modal()
+        const replyModal = new ModalBuilder()
             .setCustomId('replyStandardResponse')
             .setTitle('Edit Standard Response');
         
-        const replyInput = new Discord.TextInputComponent()
+        const replyInput = new TextInputBuilder()
             .setCustomId('replyText')
             .setLabel('Response (editable)')
-            .setStyle('PARAGRAPH')
+            .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
             .setValue(preFilledResponse.substring(0, 4000)); // Discord modal limit is 4000 chars
         
-        const firstActionRow = new Discord.MessageActionRow().addComponents(replyInput);
+        const firstActionRow = new ActionRowBuilder().addComponents(replyInput);
         replyModal.addComponents(firstActionRow);
         
         await interaction.showModal(replyModal);

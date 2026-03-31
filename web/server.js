@@ -636,6 +636,7 @@ app.get('/health', (req, res) => res.send('ok'));
 // Applications - list
 app.get('/applications', ensureAuth, ensureApplicationsAccess, async (req, res) => {
     const stage = (req.query.stage || '').trim();
+    const kind = (req.query.kind || '').trim().toLowerCase();
     let items = await applications.listApplications({ stage: stage || undefined });
     // By default, show only active applications (exclude Approved, Denied, Archived)
     if (!stage && !req.query.all) {
@@ -644,12 +645,40 @@ app.get('/applications', ensureAuth, ensureApplicationsAccess, async (req, res) 
     items.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
-    const total = items.length;
+    const isDev = (app) => {
+        const t = String(app.type || '').toLowerCase();
+        return t.includes('dev') || t.includes('developer');
+    };
+    let devApps = items.filter(isDev);
+    let staffApps = items.filter(a => !isDev(a));
+    let filtered = items;
+    if (kind === 'dev') filtered = devApps;
+    else if (kind === 'staff') filtered = staffApps;
+
+    const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
-    const paged = items.slice(start, start + limit);
+    const paged = filtered.slice(start, start + limit);
+
+    // Resolve display names for applicants
+    let applicantNames = {};
+    try {
+        const userIds = Array.from(new Set(paged.map(a => String(a.userId || '')).filter(Boolean)));
+        applicantNames = await getDiscordUsernamesMap(userIds);
+    } catch (_) {}
+
     // Pass request query and pagination to template
-    res.render('applications_index', { items: paged, stage, request: { query: req.query }, query: req.query, pagination: { page, limit, total, totalPages } });
+    res.render('applications_index', { 
+        items: paged, 
+        stage, 
+        request: { query: req.query }, 
+        query: req.query, 
+        pagination: { page, limit, total, totalPages },
+        kind,
+        devCount: devApps.length,
+        staffCount: staffApps.length,
+        applicantNames
+    });
 });
 
 // Applications - detail
@@ -657,11 +686,84 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
     const appId = req.params.id;
     const appRec = await applications.getApplication(appId);
     if (!appRec) return res.status(404).send('Not found');
-    // Resolve display names for history/comments
+    // Resolve SteamID (and optional BM link) from the origin ticket for this application
+    let steamId = null;
+    let battlemetricsUrl = null;
+    try {
+        const origin = (appRec.tickets || []).find(t => t && t.type === 'origin' && t.ticketId);
+        if (origin && typeof db.query === 'function') {
+            const [rows] = await db.query(
+                'SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [String(appRec.userId || ''), String(origin.ticketId)]
+            );
+            if (rows && rows.length > 0 && rows[0].steam_id) {
+                const candidate = String(rows[0].steam_id);
+                if (candidate && candidate.startsWith('7656119')) {
+                    steamId = candidate;
+                    // Prefer the RCON-style BattleMetrics player link used elsewhere in the bot.
+                    // If the BM API/token is unavailable, fall back to the generic search URL.
+                    const bmToken = config.tokens && config.tokens.battlemetricsToken;
+                    if (bmToken) {
+                        try {
+                            const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
+                            const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}&page[size]=1`;
+                            const bmRes = await axios.get(playerUrl, { headers, timeout: 8000 });
+                            const playerId = bmRes?.data?.data && bmRes.data.data[0] && bmRes.data.data[0].id;
+                            if (playerId) {
+                                battlemetricsUrl = `https://www.battlemetrics.com/rcon/players/${playerId}`;
+                            }
+                        } catch (_) {
+                            // swallow and fall back to search link
+                        }
+                    }
+                    if (!battlemetricsUrl) {
+                        battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[web] /applications/:id steam lookup failed:', e?.message || e);
+    }
+    // Check for other applications by the same user that are denied or still in progress
+    let priorDeniedCount = 0;
+    let otherOpenCount = 0;
+    try {
+        if (appRec.userId) {
+            const allForUser = await applications.listApplications({ userId: appRec.userId });
+            for (const a of allForUser) {
+                if (!a || a.id === appId) continue;
+                if (a.stage === 'Denied') priorDeniedCount++;
+                else if (!['Approved', 'Archived'].includes(a.stage)) otherOpenCount++;
+            }
+        }
+    } catch (_) {}
+    // Parse Q/A pairs from the raw responses for nicer rendering
+    let qaPairs = [];
+    try {
+        const raw = String(appRec.responses || '');
+        const pattern = /\*\*(.+?)\*\*\s*\n([\s\S]*?)(?=\n\n\*\*|$)/g;
+        let m;
+        while ((m = pattern.exec(raw)) !== null) {
+            const question = (m[1] || '').trim();
+            const answer = (m[2] || '').trim();
+            if (question || answer) {
+                qaPairs.push({ question, answer });
+            }
+        }
+    } catch (_) {
+        qaPairs = [];
+    }
+    // Resolve display names for history/comments using Discord usernames
     const ids = new Set();
     (appRec.history || []).forEach(h => { if (h.by) ids.add(String(h.by)); });
     (appRec.comments || []).forEach(c => { if (c.by) ids.add(String(c.by)); });
-    const userNames = await getUsernamesMap(Array.from(ids));
+    let userNames = {};
+    try {
+        userNames = await getDiscordUsernamesMap(Array.from(ids));
+    } catch (_) {
+        userNames = {};
+    }
     // Compute nextStage from config
     const stages = (config.applications && Array.isArray(config.applications.stages)) ? config.applications.stages : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
     const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
@@ -720,8 +822,32 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
         channelExists,
         lastTicket,
         prevId,
-        nextId
+        nextId,
+        steamId,
+        battlemetricsUrl,
+        qaPairs,
+        priorDeniedCount,
+        otherOpenCount
     });
+});
+
+// Applications - update category (staff vs dev) by changing type string
+app.post('/applications/:id/category', ensureAuth, ensureApplicationsAccess, async (req, res) => {
+    const appId = req.params.id;
+    const category = (req.body.category || '').toLowerCase();
+    try {
+        const appRec = await applications.getApplication(appId);
+        if (!appRec) return res.status(404).send('Not found');
+        if (['Approved','Denied','Archived'].includes(appRec.stage)) {
+            return res.redirect(`/applications/${appId}?notification=Cannot change category for a closed application.&type=error`);
+        }
+        const newType = category === 'dev' ? 'Developer Application' : 'Staff Application';
+        await applications.updateType(appId, newType, req.user.id, `Category set to ${category === 'dev' ? 'Developer' : 'Staff'}`);
+        return res.redirect(`/applications/${appId}?notification=Application category updated.&type=success`);
+    } catch (e) {
+        console.error('[web] /applications/:id/category error:', e);
+        return res.redirect(`/applications/${appId}?notification=Failed to update application category.&type=error`);
+    }
 });
 
 // Applications - stage advance
@@ -745,6 +871,49 @@ app.post('/applications/:id/deny', ensureAuth, ensureApplicationsAccess, async (
     if (appRec.stage === 'Denied' || appRec.stage === 'Archived') return res.redirect(`/applications/${appId}`);
     await applications.deny(appId, req.user.id, req.body.note || '');
     return res.redirect(`/applications/${appId}`);
+});
+
+// Applications - batch actions
+app.post('/applications/batch', ensureAuth, ensureApplicationsAccess, async (req, res) => {
+    try {
+        let ids = req.body.ids || [];
+        const action = (req.body.action || '').trim().toLowerCase();
+        const note = (req.body.note || '').trim();
+        if (!Array.isArray(ids)) ids = ids ? [ids] : [];
+        ids = ids.map(x => String(x)).filter(Boolean);
+        if (!ids.length || !['advance', 'deny', 'archive'].includes(action)) {
+            return res.redirect('/applications?notification=Select at least one application and a valid action.&type=error');
+        }
+        const stages = (config.applications && Array.isArray(config.applications.stages))
+            ? config.applications.stages
+            : ['Submitted','Initial Review','Background Check','Interview','Final Decision','Archived'];
+        let success = 0;
+        let skipped = 0;
+        for (const id of ids) {
+            try {
+                const appRec = await applications.getApplication(id);
+                if (!appRec) { skipped++; continue; }
+                if (['Approved','Denied','Archived'].includes(appRec.stage)) { skipped++; continue; }
+                if (action === 'advance') {
+                    const idx = Math.max(0, stages.indexOf(appRec.stage || 'Submitted')) + 1;
+                    const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
+                    await applications.advanceStage(id, nextStage, req.user.id, note || `Bulk advanced by ${req.user.id}`);
+                } else if (action === 'deny') {
+                    await applications.deny(id, req.user.id, note || `Bulk denied by ${req.user.id}`);
+                } else if (action === 'archive') {
+                    await applications.advanceStage(id, 'Archived', req.user.id, note || `Bulk archived by ${req.user.id}`);
+                }
+                success++;
+            } catch (_) {
+                skipped++;
+            }
+        }
+        const msg = `Batch ${action} complete: ${success} updated, ${skipped} skipped.`;
+        return res.redirect(`/applications?notification=${encodeURIComponent(msg)}&type=success`);
+    } catch (err) {
+        console.error('[web] /applications/batch error:', err);
+        return res.redirect('/applications?notification=Batch operation failed.&type=error');
+    }
 });
 
 // Applications - archive
@@ -819,6 +988,44 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         }
         const questionFile = require('../content/questions/application.json');
         const parentCategory = questionFile["ticket-category"] || '';
+        // Resolve SteamID (and optional BM link) from the origin ticket for this application
+        let steamId = null;
+        let battlemetricsUrl = null;
+        try {
+            const origin = (appRec.tickets || []).find(t => t && t.type === 'origin' && t.ticketId);
+            if (origin && typeof db.query === 'function') {
+                const [rows] = await db.query(
+                    'SELECT steam_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                    [String(appRec.userId || ''), String(origin.ticketId)]
+                );
+                if (rows && rows.length > 0 && rows[0].steam_id) {
+                    const candidate = String(rows[0].steam_id);
+                    if (candidate && candidate.startsWith('7656119')) {
+                        steamId = candidate;
+                        // Prefer the RCON-style BattleMetrics player link used elsewhere in the bot.
+                        const bmToken = config.tokens && config.tokens.battlemetricsToken;
+                        if (bmToken) {
+                            try {
+                                const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
+                                const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}&page[size]=1`;
+                                const bmRes = await axios.get(playerUrl, { headers, timeout: 8000 });
+                                const playerId = bmRes?.data?.data && bmRes.data.data[0] && bmRes.data.data[0].id;
+                                if (playerId) {
+                                    battlemetricsUrl = `https://www.battlemetrics.com/rcon/players/${playerId}`;
+                                }
+                            } catch (_) {
+                                // swallow and fall back to search link
+                            }
+                        }
+                        if (!battlemetricsUrl) {
+                            battlemetricsUrl = `https://www.battlemetrics.com/players?filter[search]=${encodeURIComponent(candidate)}`;
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[web] open_ticket steam/BM lookup failed:', e?.message || e);
+        }
         // Comms channel: same roles as application access (admin + application_admin only, no general staff)
         const viewerRoles = new Set();
         if (config.role_ids?.application_admin_role_id) viewerRoles.add(config.role_ids.application_admin_role_id);
@@ -831,7 +1038,12 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
             { id: STAFF_GUILD_ID, type: 0, deny: (1<<10).toString() }, // VIEW_CHANNEL deny to @everyone
             ...Array.from(viewerRoles).map(rid => ({ id: rid, type: 0, allow: (1<<10).toString() }))
         ];
-        const channelName = `app-${appRec.username}-comms`;
+        const safeAppName = String(appRec.username || appRec.userId || 'user')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .substring(0, 16) || 'user';
+        const channelName = `app-${safeAppName}-comms`;
         const chan = await createGuildChannel({ name: channelName, type: 0, topic: appRec.userId, parentId: parentCategory, permissionOverwrites: overwrites });
         await applications.linkTicket(appId, chan.id, chan.id, 'comms');
         // Map channel -> application for interaction handlers
@@ -848,10 +1060,91 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
         // Log to application history
         try { await applications.addComment(appId, req.user.id, `Opened communication ticket #${channelName} (${chan.id})`); } catch (_) {}
         
+        // Create a private staff thread inside the communication channel with the full application responses
+        let staffThreadId = null;
+        try {
+            const threadName = `app-comms-${String(appRec.id || '').slice(0, 8) || 'thread'}`;
+            const threadRes = await axios.post(
+                `https://discord.com/api/v10/channels/${chan.id}/threads`,
+                {
+                    name: threadName,
+                    type: 12, // private thread
+                    auto_archive_duration: 10080
+                },
+                { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+            );
+            const thread = threadRes.data;
+            if (thread && thread.id) {
+                staffThreadId = thread.id;
+                const fullResponses = typeof appRec.responses === 'string' ? appRec.responses : '';
+                const truncated = fullResponses.length > 4000 ? `${fullResponses.slice(0, 3997)}...` : fullResponses || 'No responses recorded';
+                const fields = [];
+                if (steamId) {
+                    fields.push({
+                        name: 'Steam',
+                        value: `[${steamId}](https://steamcommunity.com/profiles/${steamId})`,
+                        inline: true
+                    });
+                }
+                if (battlemetricsUrl) {
+                    fields.push({
+                        name: 'BattleMetrics',
+                        value: `[View profile](${battlemetricsUrl})`,
+                        inline: true
+                    });
+                }
+                const embed = {
+                    title: `${appRec.type || 'Application'} for ${appRec.username || appRec.userId}`,
+                    description: truncated,
+                    color: 0x208cdd,
+                    fields: fields.length ? fields : undefined,
+                    footer: {
+                        text: `Application ID: ${appRec.id || 'unknown'} • Stage: ${appRec.stage || 'Unknown'}`
+                    },
+                    timestamp: new Date().toISOString()
+                };
+                await axios.post(
+                    `https://discord.com/api/v10/channels/${thread.id}/messages`,
+                    {
+                        content: '',
+                        embeds: [embed]
+                    },
+                    { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+                );
+            }
+        } catch (threadError) {
+            console.error('Failed to create application comms staff thread:', threadError?.response?.data || threadError);
+        }
+        
+        // Before posting the intro message, compute prior/other applications for this user
+        let priorDeniedCount = 0;
+        let otherOpenCount = 0;
+        try {
+            if (appRec.userId) {
+                const allForUser = await applications.listApplications({ userId: appRec.userId });
+                for (const a of allForUser) {
+                    if (!a || a.id === appId) continue;
+                    if (a.stage === 'Denied') priorDeniedCount++;
+                    else if (!['Approved', 'Archived'].includes(a.stage)) otherOpenCount++;
+                }
+            }
+        } catch (_) {}
+        
         // Post intro + close button
         try {
+            const staffThreadLine = staffThreadId ? `\n**Staff-only thread:** <#${staffThreadId}>` : '';
+            const historyLines = [];
+            if (priorDeniedCount > 0) {
+                historyLines.push(`• This user has **${priorDeniedCount}** previous application${priorDeniedCount === 1 ? '' : 's'} that were **Denied**.`);
+            }
+            if (otherOpenCount > 0) {
+                historyLines.push(`• This user has **${otherOpenCount}** other application${otherOpenCount === 1 ? '' : 's'} still in progress.`);
+            }
+            const historyBlock = historyLines.length
+                ? `\n\n**Application history:**\n${historyLines.join('\n')}`
+                : '';
             await axios.post(`https://discord.com/api/v10/channels/${chan.id}/messages`, {
-                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}`,
+                content: `📱 **Application Communication Channel Opened**\n\nThis channel is for communicating with **${appRec.username}** about their application.\n\n**How it works:**\n• Messages you post here will be sent to the applicant via DM\n• The applicant can respond to your DMs and their responses will appear here\n• Use the close button below when communication is complete\n\n**Applicant:** <@${appRec.userId}>\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}${staffThreadLine}${historyBlock}`,
                 components: [
                     { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
                 ]
@@ -1406,7 +1699,11 @@ app.get('/api/users', ensureAuth, async (req, res) => {
 
 // Inline transcript view page (bot links will land here too)
 app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
-    const filename = sanitizeFilename(req.params.filename);
+    // Normalize filename and collapse any duplicated suffixes like
+    // "ticket.html.full.html" -> "ticket.full.html"
+    let filename = sanitizeFilename(req.params.filename);
+    filename = filename.replace(/\.html\.(full|staff)\.html$/i, '.$1.html')
+                       .replace(/\.html\.html$/i, '.html');
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     // Non-staff users should be routed to user-friendly transcript if available
     const { isStaff } = res.locals.roleFlags || { isStaff: false };
@@ -1445,21 +1742,205 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
     res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
 });
 
-// Raw stream of transcript (iframe src)
+// Raw stream of transcript (iframe src) - DB-backed with legacy HTML fallback
 app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
-    const filename = sanitizeFilename(req.params.filename);
+    // Normalize filename and collapse any duplicated suffixes like
+    // "ticket.html.full.html" -> "ticket.full.html"
+    let filename = sanitizeFilename(req.params.filename);
+    filename = filename.replace(/\.html\.(full|staff)\.html$/i, '.$1.html')
+                       .replace(/\.html\.html$/i, '.html');
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
     console.log('[web] /transcripts/raw view', { userId: req.user.id, filename });
+
     const allowed = await canViewTranscript(req.user.id, filename, res.locals.roleFlags);
     if (!allowed) {
         console.log('[web] /transcripts/raw deny', { userId: req.user.id, filename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     }
-    const abs = path.join(TRANSCRIPT_DIR, filename);
-    if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
-    if (!fs.existsSync(abs)) return res.status(404).send('Not found');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    fs.createReadStream(abs).pipe(res);
+
+    try {
+        const { renderTranscriptFromRows } = require('../utils/transcript_renderer');
+
+        // Determine mode and base channel name from filename
+        let mode = 'user';
+        let base = filename;
+        if (filename.endsWith('.staff.html')) {
+            mode = 'staff';
+            base = filename.replace(/\.staff\.html$/i, '');
+        } else if (filename.endsWith('.full.html')) {
+            mode = 'full';
+            base = filename.replace(/\.full\.html$/i, '');
+        } else if (filename.endsWith('.html')) {
+            mode = 'user';
+            base = filename.replace(/\.html$/i, '');
+        }
+
+        // For staff transcripts, use only the staff thread channel name.
+        // This ensures "Staff" view shows staff-only discussion, not the main ticket.
+        let channelNames = [base];
+        if (mode === 'staff') {
+            const idMatch = base.match(/-(\d{1,8})$/);
+            if (idMatch) {
+                const ticketNum = idMatch[1];
+                channelNames = [`staff-chat-${ticketNum}`];
+            }
+        }
+
+        // Load ticket / owner context (may be null for non-ticket transcripts)
+        let ownerId = null;
+        let ticketId = null;
+        let ticketType = null;
+        try {
+            const ctx = await findTicketContextByFilename(filename);
+            if (ctx) {
+                ownerId = ctx.ownerId || null;
+                ticketId = ctx.ticketId || null;
+                ticketType = ctx.ticketType || null;
+            }
+        } catch (_) {}
+
+        // Fetch messages from ticket_messages.
+        // Primary strategy is channel_name, but we also fall back to channel_id
+        // resolved via the tickets table so that transcripts continue to work
+        // even if channel names were changed or stored inconsistently.
+        let rows = [];
+        if (typeof db.query === 'function') {
+            // Try to resolve channel_ids from tickets table using transcript index context
+            let channelIds = [];
+            try {
+                const ctx = await findTicketContextByFilename(filename);
+                console.log('[transcripts] raw resolver ctx', {
+                    filename,
+                    ownerId: ctx && ctx.ownerId,
+                    ticketId: ctx && ctx.ticketId,
+                    ticketType: ctx && ctx.ticketType
+                });
+                if (ctx && ctx.ownerId && ctx.ticketId) {
+                    const [ticketRows] = await db.query(
+                        'SELECT channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 5',
+                        [String(ctx.ownerId), String(ctx.ticketId)]
+                    );
+                    channelIds = (ticketRows || [])
+                        .map(r => r.channel_id)
+                        .filter(Boolean)
+                        .map(id => String(id));
+                    console.log('[transcripts] raw resolver channelIds from tickets', {
+                        filename,
+                        ownerId: ctx.ownerId,
+                        ticketId: ctx.ticketId,
+                        channelIds
+                    });
+                }
+            } catch (e) {
+                console.error('[transcripts] raw resolver ctx error', {
+                    filename,
+                    error: e && e.message
+                });
+            }
+
+            const namePlaceholders = channelNames.map(() => '?').join(',');
+            const idPlaceholders = channelIds.map(() => '?').join(',');
+            const whereClauses = [];
+            const params = [];
+
+            if (channelNames.length > 0) {
+                whereClauses.push(`channel_name IN (${namePlaceholders})`);
+                params.push(...channelNames);
+            }
+            if (channelIds.length > 0) {
+                whereClauses.push(`channel_id IN (${idPlaceholders})`);
+                params.push(...channelIds);
+            }
+
+            if (whereClauses.length > 0) {
+                console.log('[transcripts] raw DB query', {
+                    filename,
+                    channelNames,
+                    channelIds,
+                    where: whereClauses.join(' OR ')
+                });
+                const [resRows] = await db.query(
+                    `SELECT message_id, channel_id, channel_name, guild_id,
+                            author_id, author_tag, author_username, author_is_bot,
+                            created_at, content, pinned, type, webhook_id, embeds, attachments
+                     FROM ticket_messages
+                     WHERE ${whereClauses.join(' OR ')}
+                     ORDER BY created_at ASC, message_id ASC`,
+                    params
+                );
+                rows = resRows || [];
+                console.log('[transcripts] raw DB result', {
+                    filename,
+                    rowCount: Array.isArray(rows) ? rows.length : 0
+                });
+            }
+        } 
+
+        if (rows && rows.length > 0) {
+            // Derive close metadata from tickets table when available
+            let closeReason = null;
+            let closedBy = null;
+            let responseTime = null;
+            let isAnonTicket = false;
+            try {
+                if (ownerId && ticketId && typeof db.query === 'function') {
+                    const [ticketRows] = await db.query(
+                        'SELECT ticket_type, close_reason, close_user, created_at, close_time FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                        [String(ownerId), String(ticketId)]
+                    );
+                    if (ticketRows && ticketRows[0]) {
+                        closeReason = ticketRows[0].close_reason || null;
+                        closedBy = ticketRows[0].close_user || null;
+                        const openedAt = ticketRows[0].created_at ? Number(ticketRows[0].created_at) * 1000 : null;
+                        const closedAt = ticketRows[0].close_time ? Number(ticketRows[0].close_time) * 1000 : null;
+                        if (openedAt && closedAt && closedAt >= openedAt) {
+                            const durMs = closedAt - openedAt;
+                            try {
+                                const func = require('../utils/functions.js');
+                                responseTime = await func.convertMsToTime(durMs);
+                            } catch (_) {}
+                        }
+                        ticketType = ticketRows[0].ticket_type || ticketType;
+                    }
+                }
+                // Determine anon flag from question file when we know the ticket type
+                try {
+                    if (ticketType) {
+                        const handlerRaw = require('../content/handler/options.json');
+                        const found = Object.keys(handlerRaw.options).find(
+                            x => x.toLowerCase() === String(ticketType).toLowerCase()
+                        );
+                        if (found) {
+                            const qf = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+                            isAnonTicket = !!qf['anonymous-only-replies'];
+                        }
+                    }
+                } catch (_) {}
+            } catch (_) {}
+
+            const htmlBuf = renderTranscriptFromRows(rows, {
+                mode,
+                DiscordID: ownerId,
+                isAnonTicket,
+                closeReason,
+                closedBy,
+                responseTime
+            });
+
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(htmlBuf);
+        }
+
+        // Fallback for legacy HTML transcripts when DB has no rows
+        const abs = path.join(TRANSCRIPT_DIR, filename);
+        if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
+        if (!fs.existsSync(abs)) return res.status(404).send('Not found');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return fs.createReadStream(abs).pipe(res);
+    } catch (e) {
+        console.error('[web] /transcripts/raw error:', e);
+        return res.status(500).send('Failed to render transcript');
+    }
 });
 
 // Admin overrides routes removed

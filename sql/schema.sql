@@ -167,3 +167,27 @@ CREATE TABLE IF NOT EXISTS transcript_index (
     INDEX idx_ticket_id (ticket_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Per-message log for tickets (used to build transcripts dynamically)
+CREATE TABLE IF NOT EXISTS ticket_messages (
+    message_id VARCHAR(32) NOT NULL PRIMARY KEY,
+    channel_id VARCHAR(32) NOT NULL,
+    channel_name VARCHAR(255),
+    guild_id VARCHAR(32),
+    author_id VARCHAR(32) NOT NULL,
+    author_tag VARCHAR(64),
+    author_username VARCHAR(64),
+    author_is_bot TINYINT(1) DEFAULT 0,
+    created_at BIGINT NOT NULL,
+    content LONGTEXT,
+    pinned TINYINT(1) DEFAULT 0,
+    type SMALLINT,
+    webhook_id VARCHAR(32),
+    embeds JSON,
+    attachments JSON,
+    INDEX idx_channel_created (channel_id, created_at),
+    INDEX idx_channel_name_created (channel_name, created_at),
+    INDEX idx_author (author_id),
+    INDEX idx_guild_channel (guild_id, channel_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+

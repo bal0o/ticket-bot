@@ -1,41 +1,21 @@
 <style>
-  @font-face {
-    font-family: Whitney;
-    src: url("https://discordapp.com/assets/6c6374bad0b0b6d204d8d6dc4a18d820.woff");
-    font-weight: 300;
-  }
-
-  @font-face {
-    font-family: Whitney;
-    src: url("https://discordapp.com/assets/e8acd7d9bf6207f99350ca9f9e23b168.woff");
-    font-weight: 400;
-  }
-
-  @font-face {
-    font-family: Whitney;
-    src: url("https://discordapp.com/assets/3bdef1251a424500c1b3a78dea9b7e57.woff");
-    font-weight: 500;
-  }
-
-  @font-face {
-    font-family: Whitney;
-    src: url("https://discordapp.com/assets/be0060dafb7a0e31d2a1ca17c0708636.woff");
-    font-weight: 600;
-  }
-
-  @font-face {
-    font-family: Whitney;
-    src: url("https://discordapp.com/assets/8e12fb4f14d9c4592eb8ec9f22337b04.woff");
-    font-weight: 700;
+  :root {
+    --bg: #0b0b0b;
+    --panel: #151515;
+    --text: #f0f0f0;
+    --muted: #9f9f9f;
+    --accent: #e46400;
+    --accent-soft: #f2c66c;
+    --border: rgba(255, 255, 255, 0.18);
   }
 
   body {
-    background-color: #36393e;
-    color: #dcddde;
-    font-family: "Whitney", "Helvetica Neue", Helvetica, Arial, sans-serif;
-    font-size: 16px;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px;
     margin: 0;
-    padding: 20px;
+    padding: 24px;
   }
 
   .message-container {
@@ -43,7 +23,7 @@
     align-items: flex-start;
     flex-direction: column;
     padding-left: 15px;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-weight: bold;
     white-space: break-spaces;
     line-height: 1.375rem;
@@ -55,13 +35,15 @@
   }
 
   .parent-container {
-    padding: 20px;
-    border-top: 1px solid #4a494a;
+    padding: 18px 20px;
+    border-top: 1px solid var(--border);
+    background-color: rgba(21, 21, 21, 0.85);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
   .parent-container:hover {
-    padding: 20px;
-    background-color: #26282c;
+    background-color: #181818;
+    border-color: rgba(255, 255, 255, 0.25);
   }
 
   .avatar {
@@ -79,8 +61,7 @@
   }
 
   .EmbedBody {
-
-    background: #2f3136;
+    background: var(--panel);
     padding-top: 12px;
     padding-left: 11px;
     padding-right: 11px;
@@ -88,7 +69,7 @@
     margin-top: 6px;
     max-width: 520px;
     min-width: 100px;
-    border-left: 4px solid;
+    border-left: 4px solid var(--accent);
     border-radius: 5px;
     display: inline-block;
     word-break: break-word;
@@ -154,7 +135,7 @@
   }
 
   .AttachmentFile {
-    color: #0095ff;
+    color: var(--accent-soft);
     font-size: 16px;
   }
 
@@ -198,7 +179,7 @@
   .IDtimeElement {
     margin-left: 5px;
     font-size: 12px;
-    color: #64626B;
+    color: var(--muted);
     vertical-align: 8%;
     font-weight: bold;
   }
@@ -206,17 +187,17 @@
   .textCode {
     margin-top: 5px;
     padding: 5px;
-    background-color: #2F3136;
-    border: 2px solid #292B2F;
+    background-color: #151515;
+    border: 2px solid #262626;
     border-radius: 3px;
     font-size: 14px;
-    color: #B9BBBE;
+    color: var(--text);
     white-space: pre;
   }
 
   pre {
-    background-color: #2F3136;
-    border: 2px solid #292B2F;
+    background-color: #151515;
+    border: 2px solid #262626;
     border-radius: 3px;
     padding: 5px;
     margin: 0px;
@@ -227,14 +208,14 @@
     padding: 5px;
     border-radius: 3px;
     font-size: 14px;
-    color: #B9BBBE;
+    color: var(--text);
     white-space: pre;
 
   }
 
   .inline {
-    background-color: #2F3136;
-    color: #B9BBBE;
+    background-color: #151515;
+    color: var(--text);
     padding: 2px;
     line-height: 1.575rem;
   }
@@ -273,7 +254,7 @@
     border-bottom: 0px;
     border-top-left-radius: 5px;
     z-index: 1;
-    border-color: #949397;
+    border-color: var(--muted);
 
   }
 
@@ -281,11 +262,11 @@
     margin-left: 4px;
     font-size: 12px;
     font-weight: lighter;
-    color: #949397;
+    color: var(--muted);
   }
 
   .replyToIconBody {
-    background: #2F3136;
+    background: #151515;
     border-radius: 22px;
     margin-left: 33px;
     margin-top: -2px;
@@ -382,7 +363,7 @@
 
   .HeaderTitle {
     font-size: 20px;
-    color: #ffffff;
+    color: var(--text);
     font-weight: bold;
   }
 
@@ -402,18 +383,18 @@
 
   /* Track */
   ::-webkit-scrollbar-track {
-    background: #b4b4b4b4;
+    background: #1f1f1f;
     border-radius: 4px;
   }
 
   /* Handle */
   ::-webkit-scrollbar-thumb {
-    background: rgb(94, 94, 94);
+    background: #3f3f3f;
     border-radius: 4px;
   }
 
   /* Handle on hover */
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(54, 54, 54);
+    background: #525252;
   }
 </style>

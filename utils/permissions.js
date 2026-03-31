@@ -54,12 +54,12 @@ function buildPermissionOverwritesForTicketType({ client, guild, ticketType }) {
 	const botId = client.user.id;
 	const accessRoles = getAccessRolesForTicketType(ticketType, config);
 	const overwrites = [
-		{ id: everyoneId, deny: ['VIEW_CHANNEL', 'ADD_REACTIONS'] },
-		{ id: botId, allow: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'ADD_REACTIONS', 'MANAGE_THREADS'] }
+		{ id: everyoneId, deny: ['ViewChannel', 'AddReactions'] },
+		{ id: botId, allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'] }
 	];
 	// Add each access role with basic view/send
 	for (const roleId of accessRoles) {
-		overwrites.push({ id: roleId, allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'] });
+		overwrites.push({ id: roleId, allow: ['ViewChannel', 'SendMessages'] });
 	}
 	return overwrites;
 }

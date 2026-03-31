@@ -1,9 +1,16 @@
 const config = require("../config/config.json");
-const Discord = require("discord.js");
+const {
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ChannelType,
+    PermissionsBitField
+} = require("discord.js");
 const func = require("../utils/functions.js");
+const logger = require("../utils/logger");
 const { createDB } = require('../utils/mysql');
 const db = createDB();
-const metrics = require('../utils/metrics');
 const lang = require("../content/handler/lang.json");
 
 // Track users who are in the ticket selection process
@@ -58,18 +65,123 @@ function isExtensionAllowed(attachment, allowedExtensions) {
     return allowedExtensions.some(allowedExt => allowedExt.toLowerCase() === ext);
 }
 
+// Log every message (DMs and guild) into MySQL for transcript building
+async function logMessageToDB(message) {
+    try {
+        if (!message || !db || typeof db.query !== 'function') return;
+        // Basic identity / location fields
+        const messageId = String(message.id || '');
+        if (!messageId) return;
+        const channelId = String(message.channelId || (message.channel && message.channel.id) || '');
+        if (!channelId) return;
+        const channelName = message.channel && typeof message.channel.name === 'string'
+            ? message.channel.name
+            : null;
+        const guildId = message.guildId || (message.guild && message.guild.id) || null;
+        const author = message.author || {};
+        const authorId = author.id ? String(author.id) : null;
+        if (!authorId) return;
+        const authorTag = typeof author.tag === 'string'
+            ? author.tag
+            : (author.username ? `${author.username}#${author.discriminator || '0000'}` : null);
+        const authorUsername = author.username || null;
+        const authorIsBot = !!author.bot;
+        const createdAt = Number.isFinite(message.createdTimestamp)
+            ? Math.floor(message.createdTimestamp / 1000)
+            : Math.floor(Date.now() / 1000);
+        const content = typeof message.content === 'string' ? message.content : '';
+        const pinned = !!message.pinned;
+        const type = typeof message.type === 'number' ? message.type : null;
+        const webhookId = message.webhookId || null;
+
+        // Trimmed embed/attachment payloads used by transcript rendering
+        let embeds = [];
+        try {
+            if (Array.isArray(message.embeds)) {
+                embeds = message.embeds.map(e => ({
+                    title: e.title || '',
+                    description: e.description || '',
+                    fields: Array.isArray(e.fields)
+                        ? e.fields.map(f => ({
+                              name: f.name || '',
+                              value: f.value || ''
+                          }))
+                        : []
+                }));
+            }
+        } catch (_) {}
+
+        let attachments = [];
+        try {
+            if (message.attachments && message.attachments.size) {
+                attachments = Array.from(message.attachments.values()).map(a => ({
+                    url: a.url || null,
+                    name: a.name || null,
+                    contentType: a.contentType || null,
+                    size: typeof a.size === 'number' ? a.size : null
+                }));
+            }
+        } catch (_) {}
+
+        await db.query(
+            `INSERT INTO ticket_messages (
+                message_id, channel_id, channel_name, guild_id,
+                author_id, author_tag, author_username, author_is_bot,
+                created_at, content, pinned, type, webhook_id, embeds, attachments
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                channel_name   = VALUES(channel_name),
+                guild_id       = VALUES(guild_id),
+                author_tag     = VALUES(author_tag),
+                author_username= VALUES(author_username),
+                author_is_bot  = VALUES(author_is_bot),
+                content        = VALUES(content),
+                pinned         = VALUES(pinned),
+                type           = VALUES(type),
+                webhook_id     = VALUES(webhook_id),
+                embeds         = VALUES(embeds),
+                attachments    = VALUES(attachments)`,
+            [
+                messageId,
+                channelId,
+                channelName,
+                guildId,
+                authorId,
+                authorTag,
+                authorUsername,
+                authorIsBot ? 1 : 0,
+                createdAt,
+                content,
+                pinned ? 1 : 0,
+                type,
+                webhookId,
+                JSON.stringify(embeds),
+                JSON.stringify(attachments)
+            ]
+        );
+    } catch (err) {
+        // Logging failures must never break ticket flow; surface via handle_errors when possible
+        try {
+            func.handle_errors(err, message.client || null, 'messageCreate.js', 'Failed to log message to ticket_messages');
+        } catch (_) {}
+    }
+}
+
 module.exports = async function (client, message) {
     try {
+        // Always attempt to log the message first (including bot messages)
+        await logMessageToDB(message);
+
         // Ignore messages from users who are in the selection process
         if (usersSelectingTicket.has(message.author.id)) return;
 
         if (message.author.bot || client.blocked_users.has(message.author.id)) return;
-        if (message.channel.type === "DM") {
+        if (message.channel.type === ChannelType.DM) {
             const guild = client.guilds.cache.get(config.channel_ids.staff_guild_id);
             if (!guild) return;
 
             // Fast-path: find user's ticket channels by topic
-            const topicChannels = guild.channels.cache.filter(ch => ch.type === 'GUILD_TEXT' && ch.topic === message.author.id);
+            const topicChannels = guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText && ch.topic === message.author.id);
             const activeTickets = [];
 
             // Cross-reference with database so only open tickets are counted
@@ -108,6 +220,56 @@ module.exports = async function (client, message) {
                     }
                 }
 
+// Synthetic logger for staff -> user DMs so they appear in transcripts
+async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
+    try {
+        if (!ticketChannel || !staffUser || !db || typeof db.query !== 'function') return;
+        const messageId = String(Date.now()) + String(Math.floor(Math.random() * 1000));
+        const channelId = String(ticketChannel.id || '');
+        if (!channelId) return;
+        const channelName = typeof ticketChannel.name === 'string' ? ticketChannel.name : null;
+        const guildId = ticketChannel.guildId || (ticketChannel.guild && ticketChannel.guild.id) || null;
+        const authorId = String(staffUser.id || '');
+        const authorTag = staffUser.tag || (staffUser.username ? `${staffUser.username}#${staffUser.discriminator || '0000'}` : null);
+        const authorUsername = staffUser.username || null;
+        const authorIsBot = !!staffUser.bot;
+        const createdAt = Math.floor(Date.now() / 1000);
+        const content = typeof rawContent === 'string' ? rawContent : (rawContent != null ? String(rawContent) : '');
+        const pinned = 0;
+        const type = null;
+        const webhookId = null;
+
+        await db.query(
+            `INSERT INTO ticket_messages (
+                message_id, channel_id, channel_name, guild_id,
+                author_id, author_tag, author_username, author_is_bot,
+                created_at, content, pinned, type, webhook_id, embeds, attachments
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                messageId,
+                channelId,
+                channelName,
+                guildId,
+                authorId,
+                authorTag,
+                authorUsername,
+                authorIsBot ? 1 : 0,
+                createdAt,
+                content,
+                pinned,
+                type,
+                webhookId,
+                JSON.stringify([]),
+                JSON.stringify([])
+            ]
+        );
+    } catch (err) {
+        try {
+            func.handle_errors(err, ticketChannel?.client || null, 'messageCreate.js', 'Failed to log staff DM to ticket_messages');
+        } catch (_) {}
+    }
+}
+
                 if (!includeChannel) {
                     continue;
                 }
@@ -129,7 +291,7 @@ module.exports = async function (client, message) {
             }
 
             if (activeTickets.length === 0) {
-                const ticketCountEmbed = new Discord.MessageEmbed()
+            const ticketCountEmbed = new EmbedBuilder()
                     .setTitle(lang.active_tickets["player-active-title"] != "" ? lang.active_tickets["player-active-title"].replace(`{{COUNT}}`, "0") : `You currently have 0 ticket(s) being looked at by the team.`)
                     .setDescription(lang.active_tickets["player-active-description"] != "" ? lang.active_tickets["player-active-description"].replace(`{{TICKETCHANNEL}}`, `<#${client.config.channel_ids.post_embed_channel_id}>`) : `If you would like to open a ticket, please head to <#${client.config.channel_ids.post_embed_channel_id}>.\n`)
                     .setColor(client.config.bot_settings.main_color)
@@ -145,7 +307,7 @@ module.exports = async function (client, message) {
             }
 
             // Multiple tickets: selection
-            const selectionEmbed = new Discord.MessageEmbed()
+            const selectionEmbed = new EmbedBuilder()
                 .setTitle("Multiple Active Tickets")
                 .setDescription("Please select which ticket you want to send your message to by replying with the corresponding number:")
                 .setColor(client.config.bot_settings.main_color);
@@ -182,17 +344,50 @@ module.exports = async function (client, message) {
             const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
             if (!staffGuild || message.guild.id !== staffGuild.id) return;
 
-            const userId = message.channel.topic;
+            // Only relay messages sent in the main ticket channel.
+            // Staff thread (e.g. staff-chat-1234) is private and must NEVER DM the user.
+            if (typeof message.channel.isThread === 'function' && message.channel.isThread()) {
+                return;
+            }
+
+            // Try to resolve the ticket user ID from channel topic first, then fall back to DB.
+            let userId = message.channel.topic;
+            try {
+                logger.event('StaffTicketMessage.raw', {
+                    guildId: message.guild.id,
+                    channelId: message.channel.id,
+                    channelName: message.channel.name,
+                    topic: message.channel.topic,
+                    content: message.content
+                });
+            } catch (_) {}
+
             if (!userId || !/^\d{17,19}$/.test(userId)) {
-                return;
+                try {
+                    if (typeof db.query === 'function') {
+                        const [rows] = await db.query(
+                            'SELECT user_id FROM tickets WHERE channel_id = ? ORDER BY id DESC LIMIT 1',
+                            [String(message.channel.id)]
+                        );
+                        if (rows && rows[0] && rows[0].user_id) {
+                            userId = String(rows[0].user_id);
+                        }
+                    }
+                } catch (e) {
+                    func.handle_errors(e, client, 'messageCreate.js', 'Failed to resolve ticket user from DB');
+                }
             }
 
-            if (message.channel.isThread()) {
+            if (!userId || !/^\d{17,19}$/.test(userId)) {
+                try {
+                    logger.event('StaffTicketMessage.skipNoUser', {
+                        guildId: message.guild.id,
+                        channelId: message.channel.id,
+                        channelName: message.channel.name
+                    });
+                } catch (_) {}
                 return;
             }
-
-            // If the ticket user is posting in the channel (internal tickets), no forwarding needed
-            if (message.author.id === userId) return;
 
             const user = await client.users.fetch(userId).catch(() => null);
             if (!user) {
@@ -212,14 +407,22 @@ module.exports = async function (client, message) {
                 }
             }
 
-            // Internal = in internal category. Only skip DM relay when the ticket user is actually in the guild (so they see messages in channel).
-            // If the user is not in the Discord, we must still forward staff messages to them via DM.
-            let userInGuild = false;
+            // For now, always DM the user for non-internal tickets; internal tickets never auto-DM.
+            const shouldForwardToUser = !ticketType?.internal;
+
             try {
-                const member = staffGuild.members.cache.get(userId) || await staffGuild.members.fetch(userId).catch(() => null);
-                userInGuild = !!member;
+                    logger.event('StaffTicketMessage', {
+                        guildId: message.guild.id,
+                        channelId: message.channel.id,
+                        channelName: message.channel.name,
+                        userId,
+                        staffId: message.author.id,
+                        ticketInternal: !!(ticketType && ticketType.internal),
+                        shouldForwardToUser,
+                        hasAttachments: !!(message.attachments && message.attachments.size > 0),
+                        content: message.content
+                    });
             } catch (_) {}
-            const shouldForwardToUser = !ticketType?.internal || !userInGuild;
 
             // Access roles are now added when the staff thread is created, not when staff type in the main channel
             
@@ -249,7 +452,7 @@ module.exports = async function (client, message) {
                         if (client.config.file_extensions.allowed_file_extensions_enabled === true) {
                             const attachmentObj = attachment[1];
                             if (!isExtensionAllowed(attachmentObj, client.config.file_extensions.allowed_file_extensions)) {
-                                const errorEmbed = new Discord.MessageEmbed()
+                                const errorEmbed = new EmbedBuilder()
                                     .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachmentObj.name}`) : `**Attachment \`(${attachmentObj.name})\` contains a blacklisted extension and was not sent!**`)
                                     .setColor(client.config.active_ticket_settings.ticket_staff_embed_color);
                                 await message.channel.send({ embeds: [errorEmbed] }).catch(e => { func.handle_errors(e, client, `messageCreate.js`, null) });
@@ -348,17 +551,30 @@ module.exports = async function (client, message) {
                     return message.reply("Please provide a message to send.");
                 }
 				try {
+                    logger.event('StaffReply.me', {
+                        channelId: message.channel.id,
+                        staffId: message.author.id,
+                        targetId: user.id,
+                        content: replyContent
+                    });
 					const isUrlOnly = /^https?:\/\/\S+$/i.test(replyContent);
                     if (isUrlOnly) {
                         const dmText = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 500 });
+                        if (!dmText.delivered) {
+                            logger.event('StaffReply.me.dmFailed', {
+                                channelId: message.channel.id,
+                                staffId: message.author.id,
+                                targetId: user.id,
+                                error: dmText.error ? (dmText.error.message || String(dmText.error)) : 'unknown'
+                            });
+                            await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                            return;
+                        }
                         const sent = dmText && dmText.message ? dmText.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
                             staffForward.dmChannelId = sent.channel?.id || staffForward.dmChannelId;
                         }
-                        // continue to mapping write below
-                        // do not return to allow other branches to be skipped naturally
-                        // and mapping to be saved
                         return await db.set(`StaffForwardMap.${message.id}`, staffForward).catch(e => func.handle_errors(e, client, `messageCreate.js`, null));
                     }
                     const roles = message.member.roles.cache
@@ -369,7 +585,7 @@ module.exports = async function (client, message) {
                     const roleName = highestRole ? highestRole.name : 'Staff';
                     
                     const staffAvatar = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
-                    const replyEmbed = new Discord.MessageEmbed()
+                    const replyEmbed = new EmbedBuilder()
                         .setAuthor({ 
                             name: `${message.member.displayName} (${roleName})`, 
                             iconURL: staffAvatar
@@ -378,6 +594,16 @@ module.exports = async function (client, message) {
                         .setColor(client.config.bot_settings.main_color)
                     
                     const dmEmb = await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                    if (!dmEmb.delivered) {
+                        logger.event('StaffReply.me.embedFailed', {
+                            channelId: message.channel.id,
+                            staffId: message.author.id,
+                            targetId: user.id,
+                            error: dmEmb.error ? (dmEmb.error.message || String(dmEmb.error)) : 'unknown'
+                        });
+                        await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                        return;
+                    }
                     const sent = dmEmb && dmEmb.message ? dmEmb.message : null;
                     if (sent && sent.id) {
                         staffForward.textMessageIds.push(sent.id);
@@ -401,7 +627,23 @@ module.exports = async function (client, message) {
                     return message.reply("Please provide a message to send.");
                 }
                 try {
+                    logger.event('StaffReply.r', {
+                        channelId: message.channel.id,
+                        staffId: message.author.id,
+                        targetId: user.id,
+                        content: replyContent
+                    });
                     const dmAnon = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 600 });
+                    if (!dmAnon.delivered) {
+                        logger.event('StaffReply.r.dmFailed', {
+                            channelId: message.channel.id,
+                            staffId: message.author.id,
+                            targetId: user.id,
+                            error: dmAnon.error ? (dmAnon.error.message || String(dmAnon.error)) : 'unknown'
+                        });
+                        await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                        return;
+                    }
                     const sent = dmAnon && dmAnon.message ? dmAnon.message : null;
                     if (sent && sent.id) {
                         staffForward.textMessageIds.push(sent.id);
@@ -432,7 +674,23 @@ module.exports = async function (client, message) {
 
                 if (ticketType && ticketType["anonymous-only-replies"] === true) {
                     try {
+                        logger.event('StaffReply.plainAnon', {
+                            channelId: message.channel.id,
+                            staffId: message.author.id,
+                            targetId: user.id,
+                            content: replyContent
+                        });
                         const dmAnon2 = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 600 });
+                        if (!dmAnon2.delivered) {
+                            logger.event('StaffReply.plainAnon.dmFailed', {
+                                channelId: message.channel.id,
+                                staffId: message.author.id,
+                                targetId: user.id,
+                                error: dmAnon2.error ? (dmAnon2.error.message || String(dmAnon2.error)) : 'unknown'
+                            });
+                            await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                            return;
+                        }
                         const sent = dmAnon2 && dmAnon2.message ? dmAnon2.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
@@ -447,7 +705,23 @@ module.exports = async function (client, message) {
 					try {
 						const isUrlOnly = /^https?:\/\/\S+$/i.test(replyContent);
 						if (isUrlOnly) {
+                            logger.event('StaffReply.plainUrl', {
+                                channelId: message.channel.id,
+                                staffId: message.author.id,
+                                targetId: user.id,
+                                content: replyContent
+                            });
                             const dmUrl = await func.sendDMWithRetry(user, replyContent, { maxAttempts: 2, baseDelayMs: 500 });
+                            if (!dmUrl.delivered) {
+                                logger.event('StaffReply.plainUrl.dmFailed', {
+                                    channelId: message.channel.id,
+                                    staffId: message.author.id,
+                                    targetId: user.id,
+                                    error: dmUrl.error ? (dmUrl.error.message || String(dmUrl.error)) : 'unknown'
+                                });
+                                await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                                return;
+                            }
                             const sent = dmUrl && dmUrl.message ? dmUrl.message : null;
                             if (sent && sent.id) {
                                 staffForward.textMessageIds.push(sent.id);
@@ -463,7 +737,7 @@ module.exports = async function (client, message) {
                         const roleName = highestRole ? highestRole.name : 'Staff';
                         
                         const staffAvatar2 = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
-                        const replyEmbed = new Discord.MessageEmbed()
+                        const replyEmbed = new EmbedBuilder()
                             .setAuthor({ 
                                 name: `${message.member.displayName} (${roleName})`, 
                                 iconURL: staffAvatar2
@@ -471,7 +745,23 @@ module.exports = async function (client, message) {
                             .setDescription(replyContent)
                             .setColor(client.config.bot_settings.main_color)
                         
+                        logger.event('StaffReply.plainEmbed', {
+                            channelId: message.channel.id,
+                            staffId: message.author.id,
+                            targetId: user.id,
+                            content: replyContent
+                        });
                         const dmEmb2 = await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
+                        if (!dmEmb2.delivered) {
+                            logger.event('StaffReply.plainEmbed.dmFailed', {
+                                channelId: message.channel.id,
+                                staffId: message.author.id,
+                                targetId: user.id,
+                                error: dmEmb2.error ? (dmEmb2.error.message || String(dmEmb2.error)) : 'unknown'
+                            });
+                            await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
+                            return;
+                        }
                         const sent = dmEmb2 && dmEmb2.message ? dmEmb2.message : null;
                         if (sent && sent.id) {
                             staffForward.textMessageIds.push(sent.id);
@@ -504,7 +794,7 @@ async function processTicketMessage(message, channel, client) {
         if (client.config.file_extensions.allowed_file_extensions_enabled === true) {
             const attachmentObj = attachment[1];
             if (!isExtensionAllowed(attachmentObj, client.config.file_extensions.allowed_file_extensions)) {
-                const TicketreplyEmbed = new Discord.MessageEmbed()
+                const TicketreplyEmbed = new EmbedBuilder()
                     .setDescription(lang.attachments["user-blacklisted-extension"] != "" ? lang.attachments["user-blacklisted-extension"].replace(`{{ATTACHMENT}}`, `${attachmentObj.name}`) : `**Attachment \`(${attachmentObj.name})\` contains a blacklisted extension and was not sent!**`)
                     .setColor(config.active_ticket_settings.ticket_user_embed_color);
                 await message.channel.send({embeds: [TicketreplyEmbed]}).catch((err) => { func.handle_errors(err, client, `messageCreate.js`, null) })
@@ -548,7 +838,8 @@ async function processTicketMessage(message, channel, client) {
             webhook = webhooks.find(wh => wh.name === "Ticket Webhook");
             
             if (!webhook) {
-                webhook = await webhookChannel.createWebhook("Ticket Webhook", {
+                webhook = await webhookChannel.createWebhook({
+                    name: "Ticket Webhook",
                     avatar: message.author.displayAvatarURL()
                 });
             }
@@ -564,7 +855,8 @@ async function processTicketMessage(message, channel, client) {
                 const webhooksRetry = await webhookChannel.fetchWebhooks();
                 webhook = webhooksRetry.find(wh => wh.name === "Ticket Webhook");
                 if (!webhook) {
-                    webhook = await webhookChannel.createWebhook("Ticket Webhook", {
+                    webhook = await webhookChannel.createWebhook({
+                        name: "Ticket Webhook",
                         avatar: message.author.displayAvatarURL()
                     });
                 }
