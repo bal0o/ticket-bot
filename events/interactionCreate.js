@@ -132,7 +132,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'closeTicketModal') {
             try {
-                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
+                try { await interaction.deferReply({ flags: 64 }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
                 
                 const channel = interaction.channel;
                 if (!channel) {
@@ -191,15 +191,15 @@ module.exports = async function (client, interaction) {
                 let closed = false;
                 try {
                     const result = await Promise.race([
-                        (async () => { await func.closeTicket(client, channel, interaction.member, reason); return 'done'; })(),
+                        func.closeTicket(client, channel, interaction.member, reason),
                         new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))
                     ]);
-                    closed = result === 'done';
+                    closed = result === true;
                 } catch (e) {
                     func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
                 }
                 try {
-                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', ephemeral: true };
+                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Failed to fully close this ticket. Please try again or check bot permissions.', flags: 64 };
                     if (interaction.deferred || interaction.replied) {
                         await interaction.editReply(payload);
                     } else {

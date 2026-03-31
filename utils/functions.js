@@ -1246,7 +1246,7 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
         if (!channel || !channel.guild || !client.channels.cache.has(channel.id)) {
             // removed debug
             // Optionally log or notify that the channel is gone
-            return;
+            return false;
         }
         // Fetch pinned message for ticket info
         let myPins;
@@ -1254,12 +1254,12 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
             myPins = await module.exports.fetchPinnedSafe(channel);
         } catch (err) {
             // removed debug
-            return;
+            return false;
         }
         const LastPin = myPins.last();
         if (!LastPin || !LastPin.embeds[0] || !LastPin.embeds[0].footer || !LastPin.embeds[0].footer.text) {
             // removed debug
-            return;
+            return false;
         }
         // Parse ticket info
         const rawEmbed = LastPin.embeds[0];
@@ -1283,12 +1283,12 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
         const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketType.toLowerCase());
         if (!found) {
             // removed debug
-            return;
+            return false;
         }
         let typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
         if (!typeFile) {
             // removed debug
-            return;
+            return false;
         }
         const transcriptChannel = typeFile[`transcript-channel`];
         const logs_channel = await channel.guild.channels.cache.find(x => x.id === transcriptChannel);
@@ -1451,22 +1451,22 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         try {
             const parentId = channel.parentId;
             const guild = channel.guild;
-            setTimeout(async () => {
-                try {
-                    // Re-check existence to avoid throwing if already deleted
-                    const liveChannel = guild.channels.cache.get(channel.id);
-                    if (!liveChannel) return;
-                    await liveChannel.delete('Ticket closed');
-                    // Clean up overflow category if now empty
-                    await module.exports.deleteEmptyOverflowCategory(client, guild, parentId);
-                } catch (e) {
-                    module.exports.handle_errors(e, client, "functions.js", `Failed to delete ticket channel ${channel.id} after close`);
-                }
-            }, 1000);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Re-check existence to avoid throwing if already deleted
+            const liveChannel = guild.channels.cache.get(channel.id);
+            if (!liveChannel) {
+                return true;
+            }
+            await liveChannel.delete('Ticket closed');
+            // Clean up overflow category if now empty
+            await module.exports.deleteEmptyOverflowCategory(client, guild, parentId);
         } catch (e) {
             module.exports.handle_errors(e, client, "functions.js", `Error scheduling delete for ticket channel ${channel.id}`);
+            return false;
         }
+        return true;
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
+        return false;
     }
 };
