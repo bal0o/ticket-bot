@@ -18,35 +18,11 @@ const usersSelectingTicket = new Set();
 
 // Cache for webhooks to avoid repeated creation attempts
 const webhookCache = new Map();
-let cachedTicketCategoryIds = null;
 
 // Helper function to clean up invalid webhooks from cache
 function clearWebhookCache(channelId) {
     webhookCache.delete(channelId);
     console.log(`Cleared webhook cache for channel ${channelId}`);
-}
-
-function getConfiguredTicketCategoryIds() {
-    if (cachedTicketCategoryIds) return cachedTicketCategoryIds;
-
-    const categoryIds = new Set();
-    try {
-        const handlerRaw = require("../content/handler/options.json");
-        const options = handlerRaw && handlerRaw.options ? handlerRaw.options : {};
-        for (const key of Object.keys(options)) {
-            const questionFile = options[key] && options[key].question_file;
-            if (!questionFile) continue;
-            try {
-                const typeFile = require(`../content/questions/${questionFile}`);
-                if (typeFile && typeFile["ticket-category"]) {
-                    categoryIds.add(String(typeFile["ticket-category"]));
-                }
-            } catch (_) {}
-        }
-    } catch (_) {}
-
-    cachedTicketCategoryIds = categoryIds;
-    return categoryIds;
 }
 
 // Helper function to validate webhook before use
@@ -374,16 +350,32 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 return;
             }
 
-            // Ignore non-ticket channels early (e.g. staff-announcements/general-chat).
-            const ticketCategoryIds = getConfiguredTicketCategoryIds();
-            const inTicketCategory = !!(message.channel.parentId && ticketCategoryIds.has(String(message.channel.parentId)));
-            const topicLooksLikeUserId = /^\d{17,19}$/.test(String(message.channel.topic || ''));
-            if (!inTicketCategory && !topicLooksLikeUserId) {
+            // Ignore non-ticket staff channels early.
+            let userId = message.channel.topic;
+            const hasTopicUser = !!(userId && /^\d{17,19}$/.test(userId));
+            let isTicketChannel = hasTopicUser;
+
+            if (!isTicketChannel) {
+                try {
+                    if (typeof db.query === 'function') {
+                        const [rows] = await db.query(
+                            'SELECT user_id FROM tickets WHERE channel_id = ? ORDER BY id DESC LIMIT 1',
+                            [String(message.channel.id)]
+                        );
+                        if (rows && rows[0] && rows[0].user_id) {
+                            userId = String(rows[0].user_id);
+                            isTicketChannel = true;
+                        }
+                    }
+                } catch (e) {
+                    func.handle_errors(e, client, 'messageCreate.js', 'Failed to resolve ticket user from DB');
+                }
+            }
+
+            if (!isTicketChannel) {
                 return;
             }
 
-            // Try to resolve the ticket user ID from channel topic first, then fall back to DB.
-            let userId = message.channel.topic;
             try {
                 logger.event('StaffTicketMessage.raw', {
                     guildId: message.guild.id,
@@ -393,22 +385,6 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                     content: message.content
                 });
             } catch (_) {}
-
-            if (!userId || !/^\d{17,19}$/.test(userId)) {
-                try {
-                    if (typeof db.query === 'function') {
-                        const [rows] = await db.query(
-                            'SELECT user_id FROM tickets WHERE channel_id = ? ORDER BY id DESC LIMIT 1',
-                            [String(message.channel.id)]
-                        );
-                        if (rows && rows[0] && rows[0].user_id) {
-                            userId = String(rows[0].user_id);
-                        }
-                    }
-                } catch (e) {
-                    func.handle_errors(e, client, 'messageCreate.js', 'Failed to resolve ticket user from DB');
-                }
-            }
 
             if (!userId || !/^\d{17,19}$/.test(userId)) {
                 try {
