@@ -1808,17 +1808,16 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             // Try to resolve channel_ids from tickets table using transcript index context
             let channelIds = [];
             try {
-                const ctx = await findTicketContextByFilename(filename);
                 console.log('[transcripts] raw resolver ctx', {
                     filename,
-                    ownerId: ctx && ctx.ownerId,
-                    ticketId: ctx && ctx.ticketId,
-                    ticketType: ctx && ctx.ticketType
+                    ownerId,
+                    ticketId,
+                    ticketType
                 });
-                if (ctx && ctx.ownerId && ctx.ticketId) {
+                if (ownerId && ticketId) {
                     const [ticketRows] = await db.query(
                         'SELECT channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 5',
-                        [String(ctx.ownerId), String(ctx.ticketId)]
+                        [String(ownerId), String(ticketId)]
                     );
                     channelIds = (ticketRows || [])
                         .map(r => r.channel_id)
@@ -1826,8 +1825,8 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                         .map(id => String(id));
                     console.log('[transcripts] raw resolver channelIds from tickets', {
                         filename,
-                        ownerId: ctx.ownerId,
-                        ticketId: ctx.ticketId,
+                        ownerId,
+                        ticketId,
                         channelIds
                     });
                 }
@@ -1851,12 +1850,21 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                 whereClauses.push(`channel_id IN (${idPlaceholders})`);
                 params.push(...channelIds);
             }
+            // Rows keep the channel_name from log time; renames do not rewrite history. Also,
+            // after a real channel move, old messages keep the previous channel_id. Match any
+            // staff-guild channel whose name ends with -<ticket_id> (ticket number is stable).
+            const tidStr = ticketId != null ? String(ticketId).trim() : '';
+            if (tidStr && /^\d+$/.test(tidStr) && STAFF_GUILD_ID) {
+                whereClauses.push('(guild_id = ? AND channel_name LIKE ?)');
+                params.push(String(STAFF_GUILD_ID), `%-${tidStr}`);
+            }
 
             if (whereClauses.length > 0) {
                 console.log('[transcripts] raw DB query', {
                     filename,
                     channelNames,
                     channelIds,
+                    ticketNameSuffix: tidStr && /^\d+$/.test(tidStr) ? `%-${tidStr}` : null,
                     where: whereClauses.join(' OR ')
                 });
                 const [resRows] = await db.query(
