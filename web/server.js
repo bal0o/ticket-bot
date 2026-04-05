@@ -1853,10 +1853,14 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             // Rows keep the channel_name from log time; renames do not rewrite history. Also,
             // after a real channel move, old messages keep the previous channel_id. Match any
             // staff-guild channel whose name ends with -<ticket_id> (ticket number is stable).
+            // Do not use this broad match for .staff.html (staff view must stay thread-only), and
+            // never include staff-only threads (staff-chat-*) in full/user transcripts.
             const tidStr = ticketId != null ? String(ticketId).trim() : '';
-            if (tidStr && /^\d+$/.test(tidStr) && STAFF_GUILD_ID) {
-                whereClauses.push('(guild_id = ? AND channel_name LIKE ?)');
-                params.push(String(STAFF_GUILD_ID), `%-${tidStr}`);
+            if (tidStr && /^\d+$/.test(tidStr) && STAFF_GUILD_ID && mode !== 'staff') {
+                whereClauses.push(
+                    '(guild_id = ? AND channel_name LIKE ? AND (channel_name IS NULL OR channel_name NOT LIKE ?))'
+                );
+                params.push(String(STAFF_GUILD_ID), `%-${tidStr}`, 'staff-chat-%');
             }
 
             if (whereClauses.length > 0) {
@@ -1864,7 +1868,8 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                     filename,
                     channelNames,
                     channelIds,
-                    ticketNameSuffix: tidStr && /^\d+$/.test(tidStr) ? `%-${tidStr}` : null,
+                    ticketNameSuffix:
+                        tidStr && /^\d+$/.test(tidStr) && mode !== 'staff' ? `%-${tidStr} (not staff-chat-%)` : null,
                     where: whereClauses.join(' OR ')
                 });
                 const [resRows] = await db.query(
