@@ -7,6 +7,68 @@ const lang = require("../content/handler/lang.json");
 const { createDB } = require('./mysql');
 const db = createDB();
 
+function parseApproximateTimeToUnix(input) {
+	if (!input || typeof input !== 'string') return null;
+	const text = input.trim();
+	if (!text) return null;
+
+	const now = Date.now();
+	const lower = text.toLowerCase();
+
+	// Relative format: "4 hours ago", "15 min ago", "2d ago"
+	const rel = lower.match(/^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)\s*ago$/i);
+	if (rel) {
+		const value = Number(rel[1]);
+		const unit = rel[2].toLowerCase();
+		let ms = 0;
+		if (['s', 'sec', 'secs', 'second', 'seconds'].includes(unit)) ms = value * 1000;
+		else if (['m', 'min', 'mins', 'minute', 'minutes'].includes(unit)) ms = value * 60 * 1000;
+		else if (['h', 'hr', 'hrs', 'hour', 'hours'].includes(unit)) ms = value * 60 * 60 * 1000;
+		else if (['d', 'day', 'days'].includes(unit)) ms = value * 24 * 60 * 60 * 1000;
+		else if (['w', 'week', 'weeks'].includes(unit)) ms = value * 7 * 24 * 60 * 60 * 1000;
+		if (ms > 0) return Math.floor((now - ms) / 1000);
+	}
+
+	// Quick support for "yesterday" and "today" prefixes
+	if (lower.startsWith('yesterday')) {
+		const rest = text.slice(9).trim();
+		const base = new Date(now - 24 * 60 * 60 * 1000);
+		if (!rest) return Math.floor(base.getTime() / 1000);
+		const parsed = new Date(`${base.toDateString()} ${rest}`);
+		if (!Number.isNaN(parsed.getTime())) return Math.floor(parsed.getTime() / 1000);
+	}
+	if (lower.startsWith('today')) {
+		const rest = text.slice(5).trim();
+		if (rest) {
+			const parsed = new Date(`${new Date(now).toDateString()} ${rest}`);
+			if (!Number.isNaN(parsed.getTime())) return Math.floor(parsed.getTime() / 1000);
+		}
+	}
+
+	// Time-only input (12h/24h), assume today in local timezone
+	const timeOnly = lower.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+	if (timeOnly) {
+		let hour = Number(timeOnly[1]);
+		const minute = Number(timeOnly[2] || '0');
+		const meridiem = (timeOnly[3] || '').toLowerCase();
+		if (meridiem === 'pm' && hour < 12) hour += 12;
+		if (meridiem === 'am' && hour === 12) hour = 0;
+		if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+			const d = new Date(now);
+			d.setHours(hour, minute, 0, 0);
+			return Math.floor(d.getTime() / 1000);
+		}
+	}
+
+	// Fallback to native parser for full date/time strings
+	const parsed = new Date(text);
+	if (!Number.isNaN(parsed.getTime())) {
+		return Math.floor(parsed.getTime() / 1000);
+	}
+
+	return null;
+}
+
 
 module.exports = async function (client, interaction, user, ticketType, validOption, questionFilesystem) {
 	try {
@@ -213,7 +275,16 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				}
 
 				const extraData = reply?.first()?.attachments?.first()?.url ? reply.first().attachments?.first()?.url : "";
-				responses = responses.concat(`\n\n**${question}**\n${extraData} ${reply.first().content}`);
+				const userReplyText = reply.first().content || "";
+
+				if (question === "When did this approximately happen?") {
+					const unixTs = parseApproximateTimeToUnix(userReplyText);
+					const normalizedUserText = `${extraData} ${userReplyText}`.trim();
+					const parsedLine = unixTs ? `<t:${unixTs}:F> (${unixTs})` : "Could not parse timestamp";
+					responses = responses.concat(`\n\n**${question}**\n${parsedLine} - User said: ${normalizedUserText}`);
+				} else {
+					responses = responses.concat(`\n\n**${question}**\n${extraData} ${userReplyText}`);
+				}
 			};
 
 		if (stop) return user.send("Your session was cancelled or timed out.").catch(async (err) => {
