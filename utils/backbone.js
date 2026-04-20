@@ -79,7 +79,7 @@ function getDefaultTimezoneFromServer(serverName) {
 	const normalized = String(serverName || '').trim().toUpperCase();
 	if (normalized === 'US') return 'America/New_York';
 	if (normalized === 'AU') return 'Australia/Sydney';
-	return 'Etc/GMT';
+	return 'Europe/London';
 }
 
 function getZonedParts(ts, timeZone) {
@@ -197,24 +197,17 @@ function getAllTimezones(defaultTimezone) {
 	if (defaultTimezone && !zones.includes(defaultTimezone)) {
 		zones.push(defaultTimezone);
 	}
-	return zones.sort((a, b) => a.localeCompare(b));
+	return zones.sort((a, b) => {
+		const aOffset = getTimezoneOffsetMinutes(a);
+		const bOffset = getTimezoneOffsetMinutes(b);
+		if (aOffset !== bOffset) return aOffset - bOffset;
+		return a.localeCompare(b);
+	});
 }
 
 function getTimezoneOffsetLabel(timeZone, ts = Date.now()) {
 	try {
-		const z = getZonedParts(ts, timeZone);
-		const zonedAsUtcMs = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, 0, 0);
-		const utc = new Date(ts);
-		const utcAsMs = Date.UTC(
-			utc.getUTCFullYear(),
-			utc.getUTCMonth(),
-			utc.getUTCDate(),
-			utc.getUTCHours(),
-			utc.getUTCMinutes(),
-			0,
-			0
-		);
-		const offsetMin = Math.round((zonedAsUtcMs - utcAsMs) / 60000);
+		const offsetMin = getTimezoneOffsetMinutes(timeZone, ts);
 		const sign = offsetMin >= 0 ? '+' : '-';
 		const abs = Math.abs(offsetMin);
 		const hh = String(Math.floor(abs / 60)).padStart(2, '0');
@@ -223,6 +216,22 @@ function getTimezoneOffsetLabel(timeZone, ts = Date.now()) {
 	} catch (_) {
 		return 'UTC+00:00';
 	}
+}
+
+function getTimezoneOffsetMinutes(timeZone, ts = Date.now()) {
+	const z = getZonedParts(ts, timeZone);
+	const zonedAsUtcMs = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, 0, 0);
+	const utc = new Date(ts);
+	const utcAsMs = Date.UTC(
+		utc.getUTCFullYear(),
+		utc.getUTCMonth(),
+		utc.getUTCDate(),
+		utc.getUTCHours(),
+		utc.getUTCMinutes(),
+		0,
+		0
+	);
+	return Math.round((zonedAsUtcMs - utcAsMs) / 60000);
 }
 
 function buildTimezonePageOptions(zones, pageIndex, pageSize, defaultTimezone) {
@@ -278,7 +287,7 @@ async function promptForTimezoneIfNeeded(sentMessage, user, defaultTimezone) {
 		};
 
 		const prompt = await user.send({
-			content: `Select your timezone for this time entry. Showing page ${page + 1}/${maxPage + 1}.`,
+			content: `Select your timezone. Showing page ${page + 1}/${maxPage + 1}.`,
 			components: buildComponents(page, false)
 		});
 
