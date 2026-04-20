@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
 const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
 let unirest = require('unirest');
 const func = require("./functions.js")
@@ -69,6 +69,266 @@ function parseApproximateTimeToUnix(input) {
 	return null;
 }
 
+function isRelativeTimeInput(input) {
+	if (!input || typeof input !== 'string') return false;
+	const lower = input.trim().toLowerCase();
+	return /^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)\s*ago$/i.test(lower);
+}
+
+function getDefaultTimezoneFromServer(serverName) {
+	const normalized = String(serverName || '').trim().toUpperCase();
+	if (normalized === 'US') return 'America/New_York';
+	if (normalized === 'AU') return 'Australia/Sydney';
+	return 'Etc/GMT';
+}
+
+function getZonedParts(ts, timeZone) {
+	const dtf = new Intl.DateTimeFormat('en-GB', {
+		timeZone,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false
+	});
+	const parts = dtf.formatToParts(new Date(ts));
+	const map = {};
+	for (const p of parts) {
+		if (p.type !== 'literal') map[p.type] = p.value;
+	}
+	return {
+		year: Number(map.year),
+		month: Number(map.month),
+		day: Number(map.day),
+		hour: Number(map.hour),
+		minute: Number(map.minute)
+	};
+}
+
+function zonedLocalToUnix({ year, month, day, hour, minute }, timeZone) {
+	let guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+	for (let i = 0; i < 3; i++) {
+		const got = getZonedParts(guess, timeZone);
+		const wantedAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+		const gotAsUtc = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute, 0, 0);
+		const deltaMs = wantedAsUtc - gotAsUtc;
+		if (deltaMs === 0) break;
+		guess += deltaMs;
+	}
+	return Math.floor(guess / 1000);
+}
+
+function parseApproximateTimeToUnixInTimezone(input, timeZone) {
+	if (!input || typeof input !== 'string') return null;
+	const text = input.trim();
+	if (!text) return null;
+	if (!timeZone) return parseApproximateTimeToUnix(text);
+
+	// Relative times are timezone-agnostic.
+	if (isRelativeTimeInput(text)) return parseApproximateTimeToUnix(text);
+
+	const now = Date.now();
+	const nowParts = getZonedParts(now, timeZone);
+	const lower = text.toLowerCase();
+
+	if (lower.startsWith('yesterday') || lower.startsWith('today')) {
+		const isYesterday = lower.startsWith('yesterday');
+		const rest = text.slice(isYesterday ? 9 : 5).trim();
+		const baseTs = now + (isYesterday ? -24 * 60 * 60 * 1000 : 0);
+		const base = getZonedParts(baseTs, timeZone);
+
+		let hour = 0;
+		let minute = 0;
+		if (rest) {
+			const t = rest.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+			if (!t) return null;
+			hour = Number(t[1]);
+			minute = Number(t[2] || '0');
+			const meridiem = (t[3] || '').toLowerCase();
+			if (meridiem === 'pm' && hour < 12) hour += 12;
+			if (meridiem === 'am' && hour === 12) hour = 0;
+		}
+		if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return zonedLocalToUnix({
+			year: base.year,
+			month: base.month,
+			day: base.day,
+			hour,
+			minute
+		}, timeZone);
+	}
+
+	// Time-only input interpreted in selected timezone, today.
+	const timeOnly = lower.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+	if (timeOnly) {
+		let hour = Number(timeOnly[1]);
+		const minute = Number(timeOnly[2] || '0');
+		const meridiem = (timeOnly[3] || '').toLowerCase();
+		if (meridiem === 'pm' && hour < 12) hour += 12;
+		if (meridiem === 'am' && hour === 12) hour = 0;
+		if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return zonedLocalToUnix({
+			year: nowParts.year,
+			month: nowParts.month,
+			day: nowParts.day,
+			hour,
+			minute
+		}, timeZone);
+	}
+
+	// Fallback to native parser for explicit date/time strings.
+	const parsed = new Date(text);
+	if (!Number.isNaN(parsed.getTime())) return Math.floor(parsed.getTime() / 1000);
+	return null;
+}
+
+function getAllTimezones(defaultTimezone) {
+	let zones = [];
+	try {
+		if (typeof Intl.supportedValuesOf === 'function') {
+			zones = Intl.supportedValuesOf('timeZone');
+		}
+	} catch (_) {}
+
+	if (!Array.isArray(zones) || zones.length === 0) {
+		zones = [defaultTimezone].filter(Boolean);
+	}
+	if (defaultTimezone && !zones.includes(defaultTimezone)) {
+		zones.push(defaultTimezone);
+	}
+	return zones.sort((a, b) => a.localeCompare(b));
+}
+
+function getTimezoneOffsetLabel(timeZone, ts = Date.now()) {
+	try {
+		const z = getZonedParts(ts, timeZone);
+		const zonedAsUtcMs = Date.UTC(z.year, z.month - 1, z.day, z.hour, z.minute, 0, 0);
+		const utc = new Date(ts);
+		const utcAsMs = Date.UTC(
+			utc.getUTCFullYear(),
+			utc.getUTCMonth(),
+			utc.getUTCDate(),
+			utc.getUTCHours(),
+			utc.getUTCMinutes(),
+			0,
+			0
+		);
+		const offsetMin = Math.round((zonedAsUtcMs - utcAsMs) / 60000);
+		const sign = offsetMin >= 0 ? '+' : '-';
+		const abs = Math.abs(offsetMin);
+		const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+		const mm = String(abs % 60).padStart(2, '0');
+		return `UTC${sign}${hh}:${mm}`;
+	} catch (_) {
+		return 'UTC+00:00';
+	}
+}
+
+function buildTimezonePageOptions(zones, pageIndex, pageSize, defaultTimezone) {
+	const start = pageIndex * pageSize;
+	const pageZones = zones.slice(start, start + pageSize);
+	return pageZones.map(zone => ({
+		label: `${getTimezoneOffsetLabel(zone)} | ${zone}`.slice(0, 100),
+		value: zone,
+		default: zone === defaultTimezone
+	}));
+}
+
+async function promptForTimezoneIfNeeded(sentMessage, user, defaultTimezone) {
+	try {
+		const zones = getAllTimezones(defaultTimezone);
+		const pageSize = 25;
+		const maxPage = Math.max(0, Math.ceil(zones.length / pageSize) - 1);
+		let page = Math.floor(Math.max(0, zones.indexOf(defaultTimezone)) / pageSize);
+		if (!Number.isFinite(page)) page = 0;
+
+		const nonce = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+		const selectId = `timezone_select_${nonce}`;
+		const prevId = `timezone_prev_${nonce}`;
+		const nextId = `timezone_next_${nonce}`;
+		const useDefaultId = `timezone_default_${nonce}`;
+
+		const buildComponents = (currentPage, disableAll = false) => {
+			const options = buildTimezonePageOptions(zones, currentPage, pageSize, defaultTimezone);
+			const select = new StringSelectMenuBuilder()
+				.setCustomId(selectId)
+				.setPlaceholder('Select your timezone')
+				.addOptions(options)
+				.setDisabled(disableAll);
+
+			const nav = new ActionRowBuilder().addComponents(
+				new ButtonBuilder()
+					.setCustomId(prevId)
+					.setLabel('Prev')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(disableAll || currentPage <= 0),
+				new ButtonBuilder()
+					.setCustomId(nextId)
+					.setLabel('Next')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(disableAll || currentPage >= maxPage),
+				new ButtonBuilder()
+					.setCustomId(useDefaultId)
+					.setLabel(`Use Default (${defaultTimezone})`)
+					.setStyle(ButtonStyle.Primary)
+					.setDisabled(disableAll)
+			);
+			return [new ActionRowBuilder().addComponents(select), nav];
+		};
+
+		const prompt = await user.send({
+			content: `Select your timezone for this time entry. Showing page ${page + 1}/${maxPage + 1}.`,
+			components: buildComponents(page, false)
+		});
+
+		const filter = i =>
+			i.user.id === user.id &&
+			[selectId, prevId, nextId, useDefaultId].includes(i.customId);
+
+		while (true) {
+			const collected = await prompt.awaitMessageComponent({ filter, time: 600000 }).catch(() => null);
+			if (!collected) return defaultTimezone;
+
+			if (collected.customId === prevId) {
+				page = Math.max(0, page - 1);
+				await collected.update({
+					content: `Select your timezone for this time entry. Showing page ${page + 1}/${maxPage + 1}.`,
+					components: buildComponents(page, false)
+				}).catch(() => {});
+				continue;
+			}
+
+			if (collected.customId === nextId) {
+				page = Math.min(maxPage, page + 1);
+				await collected.update({
+					content: `Select your timezone for this time entry. Showing page ${page + 1}/${maxPage + 1}.`,
+					components: buildComponents(page, false)
+				}).catch(() => {});
+				continue;
+			}
+
+			const chosen = collected.customId === useDefaultId
+				? defaultTimezone
+				: (collected.values && collected.values[0] ? collected.values[0] : defaultTimezone);
+
+			await collected.update({
+				content: `Timezone selected: \`${chosen}\``,
+				components: buildComponents(page, true)
+			}).catch(() => {});
+
+			try {
+				Intl.DateTimeFormat(undefined, { timeZone: chosen });
+				return chosen;
+			} catch (_) {
+				return defaultTimezone;
+			}
+		}
+	} catch (_) {
+		return defaultTimezone;
+	}
+}
+
 
 module.exports = async function (client, interaction, user, ticketType, validOption, questionFilesystem) {
 	try {
@@ -131,10 +391,10 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			
 			var stop = false;
 
+		let selectedServer = null;
 		// Server selection (after pre-message)
 		if (questionFilesystem.server_selection?.enabled) {
 			let validServerSelected = false;
-			let selectedServer = "";
 
 			while (!validServerSelected) {
 				// Create balanced rows of buttons
@@ -278,9 +538,16 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				const userReplyText = reply.first().content || "";
 
 				if (question === "When did this approximately happen?") {
-					const unixTs = parseApproximateTimeToUnix(userReplyText);
 					const normalizedUserText = `${extraData} ${userReplyText}`.trim();
-					const parsedLine = unixTs ? `<t:${unixTs}:F> (${unixTs})` : "Could not parse timestamp";
+					let unixTs = null;
+					if (isRelativeTimeInput(userReplyText)) {
+						unixTs = parseApproximateTimeToUnix(userReplyText);
+					} else {
+						const defaultTimezone = getDefaultTimezoneFromServer(selectedServer);
+						const selectedTimezone = await promptForTimezoneIfNeeded(sent, user, defaultTimezone);
+						unixTs = parseApproximateTimeToUnixInTimezone(userReplyText, selectedTimezone);
+					}
+					const parsedLine = unixTs ? `<t:${unixTs}:F>` : "Could not parse timestamp";
 					responses = responses.concat(`\n\n**${question}**\n${parsedLine} - User said: ${normalizedUserText}`);
 				} else {
 					responses = responses.concat(`\n\n**${question}**\n${extraData} ${userReplyText}`);
