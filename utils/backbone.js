@@ -29,13 +29,34 @@ function parseApproximateTimeToUnix(input) {
 		if (ms > 0) return Math.floor((now - ms) / 1000);
 	}
 
-	// Quick support for "yesterday" and "today" prefixes
+	const extractTimeFromText = (value) => {
+		const m = value.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+		if (!m) return null;
+		let hour = Number(m[1]);
+		const minute = Number(m[2] || '0');
+		const meridiem = (m[3] || '').toLowerCase();
+		if (meridiem === 'pm' && hour < 12) hour += 12;
+		if (meridiem === 'am' && hour === 12) hour = 0;
+		if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return { hour, minute };
+	};
+
+	// Quick support for "yesterday"/"today"/"last night" style phrases
 	if (lower.startsWith('yesterday')) {
 		const rest = text.slice(9).trim();
 		const base = new Date(now - 24 * 60 * 60 * 1000);
-		if (!rest) return Math.floor(base.getTime() / 1000);
+		if (!rest) return null;
 		const parsed = new Date(`${base.toDateString()} ${rest}`);
 		if (!Number.isNaN(parsed.getTime())) return Math.floor(parsed.getTime() / 1000);
+	}
+	if (lower.includes('last night') || lower.includes('last evening')) {
+		const base = new Date(now - 24 * 60 * 60 * 1000);
+		const t = extractTimeFromText(lower);
+		if (t) {
+			base.setHours(t.hour, t.minute, 0, 0);
+			return Math.floor(base.getTime() / 1000);
+		}
+		return null;
 	}
 	if (lower.startsWith('today')) {
 		const rest = text.slice(5).trim();
@@ -131,6 +152,17 @@ function parseApproximateTimeToUnixInTimezone(input, timeZone) {
 	const now = Date.now();
 	const nowParts = getZonedParts(now, timeZone);
 	const lower = text.toLowerCase();
+	const extractTimeFromText = (value) => {
+		const m = value.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+		if (!m) return null;
+		let hour = Number(m[1]);
+		const minute = Number(m[2] || '0');
+		const meridiem = (m[3] || '').toLowerCase();
+		if (meridiem === 'pm' && hour < 12) hour += 12;
+		if (meridiem === 'am' && hour === 12) hour = 0;
+		if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return { hour, minute };
+	};
 
 	if (lower.startsWith('yesterday') || lower.startsWith('today')) {
 		const isYesterday = lower.startsWith('yesterday');
@@ -149,7 +181,23 @@ function parseApproximateTimeToUnixInTimezone(input, timeZone) {
 			if (meridiem === 'pm' && hour < 12) hour += 12;
 			if (meridiem === 'am' && hour === 12) hour = 0;
 		}
+		if (!rest) return null;
 		if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return zonedLocalToUnix({
+			year: base.year,
+			month: base.month,
+			day: base.day,
+			hour,
+			minute
+		}, timeZone);
+	}
+	if (lower.includes('last night') || lower.includes('last evening')) {
+		const baseTs = now - 24 * 60 * 60 * 1000;
+		const base = getZonedParts(baseTs, timeZone);
+		const t = extractTimeFromText(lower);
+		if (!t) return null;
+		const hour = t.hour;
+		const minute = t.minute;
 		return zonedLocalToUnix({
 			year: base.year,
 			month: base.month,
@@ -549,12 +597,16 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				if (question === "When did this approximately happen?") {
 					const normalizedUserText = `${extraData} ${userReplyText}`.trim();
 					let unixTs = null;
+					let selectedTimezone = null;
 					if (isRelativeTimeInput(userReplyText)) {
 						unixTs = parseApproximateTimeToUnix(userReplyText);
 					} else {
 						const defaultTimezone = getDefaultTimezoneFromServer(selectedServer);
-						const selectedTimezone = await promptForTimezoneIfNeeded(sent, user, defaultTimezone);
+						selectedTimezone = await promptForTimezoneIfNeeded(sent, user, defaultTimezone);
 						unixTs = parseApproximateTimeToUnixInTimezone(userReplyText, selectedTimezone);
+					}
+					if (selectedTimezone) {
+						responses = responses.concat(`\n\n**Timezone for incident time**\n${selectedTimezone}`);
 					}
 					const parsedLine = unixTs ? `<t:${unixTs}:F>` : "Could not parse timestamp";
 					responses = responses.concat(`\n\n**${question}**\n${parsedLine} - User said: ${normalizedUserText}`);
