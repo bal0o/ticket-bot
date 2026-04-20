@@ -1,23 +1,20 @@
 {
     "server_selection": {
         "enabled": true,
-        "question": "Which server did you lose your items on?",
+        "question": "Which region did you lose your items in?",
         "servers": [
-            "EU1",
-            "EU2",
-            "EU3",
-            "EU4",
-            "EU5",
-            "US1",
-            "US2",
-            "US3",
-            "US4",
-            "US5"
+            "EU",
+            "US",
+            "AU"
         ]
     },
     "questions": [
+        "What world / server were you playing on? (W1, R1, Hub etc)",
+        "When did this approximately happen?",
+        "What container did you lose items from? (Backpack, Vanilla Backpack, Inventory, or another?",
         "Make a list of exactly what was lost.",
-        "What were you doing when the items were lost?"
+        "How were the items lost?",
+        "Do you have any evidence you can share? (Screenshot clip, etc.)"
     ],
 
     "pre-message": "Welcome to the Lost Items Request System!\n\nPlease provide accurate information to help us process your request efficiently.\n\nNote: Laginators will NOT be refunded.",
@@ -27,7 +24,7 @@
     "post-channel": "",
     "transcript-channel": "1375479114311401644",
     "ticket-category": "1379456565924466768",
-    "access-role-id":  ["1368697881740967966", "1368697297453715496", "1368696874177134745", "1368692575674044447", "1368696296365621331"],
+  "access-role-id": [ "1368697881740967966", "1368697297453715496", "1368696874177134745", "1368692575674044447", "1368696296365621331", "1432486054962921472", "1383615980961398876", "1430847036839956572", "1379502309763055657"],
     "ping-role-id":  ["1368697881740967966", "1368697297453715496"],
     "anonymous-only-replies": false,
     "check-cheetos": false,
