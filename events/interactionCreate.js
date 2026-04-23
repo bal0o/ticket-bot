@@ -1051,7 +1051,7 @@ module.exports = async function (client, interaction) {
                             }
                         }
                     }
-                } catch (_) {}
+                } catch (_) {} 
 
                 // Show close ticket modal
                 const closeTicketModal = new ModalBuilder()
