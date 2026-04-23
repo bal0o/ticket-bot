@@ -134,6 +134,8 @@ module.exports = {
                 return;
             }
         }
+        const deliveryWarnings = [];
+
         // Notify staff roles for the target ticket type
         try {
             const pingRoleIDs = Array.isArray(questionFilesystem['ping-role-id']) ? questionFilesystem['ping-role-id'].filter(Boolean) : [];
@@ -142,9 +144,48 @@ module.exports = {
                 await channel.send({
                     content: `${tags}\nTicket moved to ${ticketType}.`,
                     allowedMentions: { parse: [], roles: pingRoleIDs }
-                }).catch(() => {});
+                }).catch((e) => {
+                    deliveryWarnings.push(`Could not post the move notification for ${ticketType}.`);
+                    func.handle_errors(e, client, 'move.js', 'Failed to send staff move notification');
+                });
             }
-        } catch (_) {}
+        } catch (e) {
+            deliveryWarnings.push(`Could not prepare the move notification for ${ticketType}.`);
+            func.handle_errors(e, client, 'move.js', 'Error preparing move notification');
+        }
+
+        // DM the ticket owner about the move and surface failures to staff
+        const topicUser = channel.topic;
+        if (topicUser) {
+            const user = await client.users.fetch(topicUser).catch(() => null);
+            if (user) {
+                try {
+                    await func.sendDMWithRetry(
+                        user,
+                        `Your ticket (${renameSucceeded ? newChannelName : channel.name}) has been moved to ${ticketType}.`,
+                        { maxAttempts: 2, baseDelayMs: 500 }
+                    );
+                } catch (dmError) {
+                    deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                    func.handle_errors(dmError, client, 'move.js', 'Failed to DM user after moving ticket');
+                }
+            } else {
+                deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
+            }
+        } else {
+            deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
+        }
+
+        if (deliveryWarnings.length > 0) {
+            await channel.send({
+                content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+            }).catch(e => func.handle_errors(e, client, 'move.js', 'Failed to send delivery warning to ticket channel'));
+            await interaction.editReply(
+                `Ticket moved to ${ticketType}${renameSucceeded ? '': ' (with errors)'}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+            );
+            return;
+        }
+
         await interaction.editReply(`Ticket moved to ${ticketType}${renameSucceeded ? '' : ' (with errors)'}.`);
     }
 }; 

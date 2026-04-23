@@ -217,8 +217,8 @@ module.exports = async function (client, interaction) {
                     }
                 } catch (webhookError) {
                     func.handle_errors(webhookError, client, 'interactionCreate.js', 'Error creating/fetching webhook for reply');
-                    // Fallback to regular message if webhook fails
-                    await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                    // Fallback to regular message if webhook fails; do not expose staff identity
+                    await channel.send(editedResponse);
                 }
                 
                 // Send via webhook to appear as staff member
@@ -245,39 +245,15 @@ module.exports = async function (client, interaction) {
                         });
                     } catch (webhookSendError) {
                         func.handle_errors(webhookSendError, client, 'interactionCreate.js', 'Error sending webhook message');
-                        // Fallback
-                        await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
+                        // Fallback; keep staff identity hidden
+                        await channel.send(editedResponse);
                     }
                 }
                 
-                // Send DM to user (similar to regular ticket replies)
+                // Send DM to user without exposing staff identity in /reply
                 if (user) {
                     try {
-                        let roleName = 'Staff';
-                        let displayName = interaction.user.username;
-                        let staffAvatar = interaction.user.displayAvatarURL();
-                        
-                        try {
-                            if (interaction.member) {
-                                displayName = interaction.member.displayName || interaction.user.username;
-                                staffAvatar = interaction.member.displayAvatarURL?.() || interaction.user.displayAvatarURL();
-                                
-                                const roles = interaction.member.roles?.cache
-                                    ?.filter(role => role.id !== interaction.guild.id)
-                                    ?.sort((a, b) => b.position - a.position);
-                                
-                                const highestRole = roles?.first();
-                                if (highestRole) {
-                                    roleName = highestRole.name;
-                                }
-                            }
-                        } catch (_) {}
-                        
                         const replyEmbed = new EmbedBuilder()
-                            .setAuthor({ 
-                                name: `${displayName} (${roleName})`, 
-                                iconURL: staffAvatar
-                            })
                             .setDescription(editedResponse)
                             .setColor(client.config.bot_settings.main_color);
                         
@@ -924,14 +900,24 @@ module.exports = async function (client, interaction) {
                         } catch (_) {}
                     }
 
+                    const deliveryWarnings = [];
+
                     // Staff ping for target type
                     try {
                         const pingRoleIDs = Array.isArray(qf['ping-role-id']) ? qf['ping-role-id'].filter(Boolean) : [];
                         if (pingRoleIDs.length > 0) {
                             const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
-                            await interaction.channel.send({ content: `${tags}\nTicket moved to ${displayType}.`, allowedMentions: { parse: [], roles: pingRoleIDs } }).catch(() => {});
+                            try {
+                                await interaction.channel.send({ content: `${tags}\nTicket moved to ${displayType}.`, allowedMentions: { parse: [], roles: pingRoleIDs } });
+                            } catch (pingError) {
+                                deliveryWarnings.push(`Could not post the move notification for ${displayType}.`);
+                                func.handle_errors(pingError, client, 'interactionCreate.js', 'Failed to send staff move notification');
+                            }
                         }
-                    } catch (_) {}
+                    } catch (notifyError) {
+                        deliveryWarnings.push(`Could not prepare the move notification for ${displayType}.`);
+                        func.handle_errors(notifyError, client, 'interactionCreate.js', 'Error preparing move notification');
+                    }
 
                     await interaction.message.delete().catch(() => {});
                     const topicUser = interaction.channel.topic;
@@ -939,10 +925,30 @@ module.exports = async function (client, interaction) {
                         const user = await client.users.fetch(topicUser).catch(() => null);
                         if (user) {
                             // Use sendDMWithRetry for better reliability with long-term tickets
-                            await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 }).catch(() => {});
+                            try {
+                                await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 });
+                            } catch (dmError) {
+                                deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                                func.handle_errors(dmError, client, 'interactionCreate.js', 'Failed to DM user after moving ticket');
+                            }
+                        } else {
+                            deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
                         }
+                    } else {
+                        deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
                     }
-                    await interaction.deleteReply().catch(() => {});
+                    if (deliveryWarnings.length > 0) {
+                        await interaction.channel.send({
+                            content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+                        }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning to ticket channel'));
+                        await interaction.editReply({
+                            content: `Ticket moved to ${displayType}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
+                            components: [],
+                            ephemeral: true
+                        }).catch(() => {});
+                    } else {
+                        await interaction.deleteReply().catch(() => {});
+                    }
                 })
                 .catch(async error => {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
@@ -1327,7 +1333,39 @@ module.exports = async function (client, interaction) {
                 func.handle_errors(error, client, 'move.js', null);
                 await channel.send("⚠️ I couldn't rename or move this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
             }
-            await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, ephemeral: true });
+            const deliveryWarnings = [];
+            const topicUser = channel.topic;
+            if (topicUser) {
+                const user = await client.users.fetch(topicUser).catch(() => null);
+                if (user) {
+                    try {
+                        await func.sendDMWithRetry(
+                            user,
+                            `Your ticket (${renameSucceeded ? ctx.newName : channel.name}) has been moved to ${ctx.ticketType}.`,
+                            { maxAttempts: 2, baseDelayMs: 500 }
+                        );
+                    } catch (dmError) {
+                        deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                        func.handle_errors(dmError, client, 'interactionCreate.js', 'Failed to DM user after modal move');
+                    }
+                } else {
+                    deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
+                }
+            } else {
+                deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
+            }
+
+            if (deliveryWarnings.length > 0) {
+                await channel.send({
+                    content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+                }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning for modal move'));
+                await interaction.reply({
+                    content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, ephemeral: true });
+            }
             // Clean up context
             client.moveTicketContext = undefined;
             return;
