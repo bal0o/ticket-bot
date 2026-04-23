@@ -4,7 +4,7 @@ const perms = require('../../utils/permissions.js');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -33,6 +33,17 @@ module.exports = {
         if (!categoryId) {
             return interaction.editReply('No category configured for this ticket type.');
         }
+        let category = channel.guild.channels.cache.get(categoryId);
+        if (!category) {
+            try {
+                category = await channel.guild.channels.fetch(categoryId);
+            } catch (_) {
+                return interaction.editReply('Configured category for this ticket type was not found.');
+            }
+        }
+        if (!category || category.type !== ChannelType.GuildCategory) {
+            return interaction.editReply('Configured category for this ticket type was not found.');
+        }
         // Build new channel name and embed title
         const nameParts = channel.name.split('-');
         let serverName = null;
@@ -56,10 +67,15 @@ module.exports = {
         // Move, rename, and reapply permissions for target ticket type
         let renameSucceeded = true;
         try {
-            await channel.setParent(categoryId);
+            await channel.setParent(categoryId, { lockPermissions: true });
             await channel.setName(newChannelName);
             // Rebuild permission overwrites based on new ticket type
-            const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: channel.guild, ticketType });
+            const overwrites = perms.buildPermissionOverwritesForTicketType({
+                client,
+                guild: channel.guild,
+                ticketType,
+                category
+            });
             if (Array.isArray(overwrites) && overwrites.length > 0) {
                 await channel.permissionOverwrites.set(overwrites);
             }

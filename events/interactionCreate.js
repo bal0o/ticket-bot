@@ -889,12 +889,17 @@ module.exports = async function (client, interaction) {
             const slugType = displayType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
             const newName = serverName ? `${serverName}-${slugType}-${ticketNumber}` : `${slugType}-${ticketNumber}`;
 
-            await interaction.channel.setParent(categoryId)
+            await interaction.channel.setParent(categoryId, { lockPermissions: true })
                 .then(async () => {
                     let renameSucceeded = true;
                     try {
                         await interaction.channel.setName(newName);
-                        const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: interaction.guild, ticketType: displayType });
+                        const overwrites = perms.buildPermissionOverwritesForTicketType({
+                            client,
+                            guild: interaction.guild,
+                            ticketType: displayType,
+                            category
+                        });
                         if (Array.isArray(overwrites) && overwrites.length > 0) await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
                     } catch (error) {
                         renameSucceeded = false;
@@ -1020,6 +1025,14 @@ module.exports = async function (client, interaction) {
                     if (interaction.member.roles.cache.find(x => x.id == role)) accepted++
                 }
                 if (interaction.member.roles.cache.find(x => x.id == client.config.role_ids.default_admin_role_id)) accepted++
+                // If role-based checks fail, allow users who already have effective access on this channel
+                // (important after move where category/channel overwrites can grant access).
+                if (accepted === 0) {
+                    try {
+                        const effectivePerms = interaction.channel?.permissionsFor(interaction.member);
+                        if (effectivePerms?.has('ViewChannel')) accepted++;
+                    } catch (_) {}
+                }
                 if (accepted === 0) {
                     let role = interaction.message.guild.roles.cache.find(role => role.id === client.config.role_ids.default_admin_role_id)
                     await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));

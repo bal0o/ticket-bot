@@ -46,22 +46,53 @@ function userHasAccessToTicketType({ userRoleIds, ticketType, config, adminRoleI
 	return false;
 }
 
-function buildPermissionOverwritesForTicketType({ client, guild, ticketType }) {
+function buildPermissionOverwritesForTicketType({ client, guild, ticketType, category = null }) {
 	const config = client?.config || {};
 	const staffGuild = guild || (client && client.guilds && client.guilds.cache.get(config.channel_ids?.staff_guild_id));
 	if (!staffGuild) return [];
 	const everyoneId = staffGuild.id;
 	const botId = client.user.id;
 	const accessRoles = getAccessRolesForTicketType(ticketType, config);
-	const overwrites = [
-		{ id: everyoneId, deny: ['ViewChannel', 'AddReactions'] },
-		{ id: botId, allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'] }
-	];
-	// Add each access role with basic view/send
-	for (const roleId of accessRoles) {
-		overwrites.push({ id: roleId, allow: ['ViewChannel', 'SendMessages'] });
+	const merged = new Map();
+	const upsert = (id, allow = [], deny = []) => {
+		if (!id) return;
+		const existing = merged.get(String(id)) || { id: String(id), allow: new Set(), deny: new Set() };
+		for (const perm of allow) {
+			existing.allow.add(perm);
+			existing.deny.delete(perm);
+		}
+		for (const perm of deny) {
+			existing.deny.add(perm);
+			existing.allow.delete(perm);
+		}
+		merged.set(String(id), existing);
+	};
+
+	// Start from the target category's overwrites so inherited access remains valid after move.
+	if (category && category.permissionOverwrites && category.permissionOverwrites.cache) {
+		for (const overwrite of category.permissionOverwrites.cache.values()) {
+			upsert(
+				overwrite.id,
+				overwrite.allow?.toArray?.() || [],
+				overwrite.deny?.toArray?.() || []
+			);
+		}
 	}
-	return overwrites;
+
+	// Enforce ticket privacy and required bot access.
+	upsert(everyoneId, [], ['ViewChannel', 'AddReactions']);
+	upsert(botId, ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'], []);
+
+	// Ensure ticket access roles can view and respond.
+	for (const roleId of accessRoles) {
+		upsert(roleId, ['ViewChannel', 'SendMessages'], []);
+	}
+
+	return Array.from(merged.values()).map(x => ({
+		id: x.id,
+		allow: Array.from(x.allow),
+		deny: Array.from(x.deny)
+	}));
 }
 
 module.exports = {
