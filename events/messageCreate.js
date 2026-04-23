@@ -65,6 +65,13 @@ function isExtensionAllowed(attachment, allowedExtensions) {
     return allowedExtensions.some(allowedExt => allowedExt.toLowerCase() === ext);
 }
 
+async function notifyDeliveryIssue(channel, details) {
+    try {
+        if (!channel) return;
+        await channel.send(`⚠️ ${details}`).catch(() => {});
+    } catch (_) {}
+}
+
 // Log every message (DMs and guild) into MySQL for transcript building
 async function logMessageToDB(message) {
     try {
@@ -394,11 +401,19 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                         channelName: message.channel.name
                     });
                 } catch (_) {}
+                await notifyDeliveryIssue(
+                    message.channel,
+                    `Could not deliver this message to the ticket owner because the owner ID could not be resolved for this channel.`
+                );
                 return;
             }
 
             const user = await client.users.fetch(userId).catch(() => null);
             if (!user) {
+                await notifyDeliveryIssue(
+                    message.channel,
+                    `Could not deliver this message because I could not resolve <@${userId}> as a valid user.`
+                );
                 return message.reply("Could not find the user to send the message to.");
             }
             
@@ -575,6 +590,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                                 targetId: user.id,
                                 error: dmText.error ? (dmText.error.message || String(dmText.error)) : 'unknown'
                             });
+                            await notifyDeliveryIssue(
+                                message.channel,
+                                `Could not DM <@${user.id}> for this staff reply. They may have DMs disabled.`
+                            );
                             await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                             return;
                         }
@@ -609,6 +628,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                             targetId: user.id,
                             error: dmEmb.error ? (dmEmb.error.message || String(dmEmb.error)) : 'unknown'
                         });
+                        await notifyDeliveryIssue(
+                            message.channel,
+                            `Could not DM <@${user.id}> for this staff reply. They may have DMs disabled.`
+                        );
                         await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                         return;
                     }
@@ -649,6 +672,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                             targetId: user.id,
                             error: dmAnon.error ? (dmAnon.error.message || String(dmAnon.error)) : 'unknown'
                         });
+                        await notifyDeliveryIssue(
+                            message.channel,
+                            `Could not DM <@${user.id}> for this anonymous reply. They may have DMs disabled.`
+                        );
                         await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                         return;
                     }
@@ -696,6 +723,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                                 targetId: user.id,
                                 error: dmAnon2.error ? (dmAnon2.error.message || String(dmAnon2.error)) : 'unknown'
                             });
+                            await notifyDeliveryIssue(
+                                message.channel,
+                                `Could not DM <@${user.id}> for this anonymous reply. They may have DMs disabled.`
+                            );
                             await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                             return;
                         }
@@ -727,6 +758,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                                     targetId: user.id,
                                     error: dmUrl.error ? (dmUrl.error.message || String(dmUrl.error)) : 'unknown'
                                 });
+                                await notifyDeliveryIssue(
+                                    message.channel,
+                                    `Could not DM <@${user.id}> for this staff reply. They may have DMs disabled.`
+                                );
                                 await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                                 return;
                             }
@@ -767,6 +802,10 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                                 targetId: user.id,
                                 error: dmEmb2.error ? (dmEmb2.error.message || String(dmEmb2.error)) : 'unknown'
                             });
+                            await notifyDeliveryIssue(
+                                message.channel,
+                                `Could not DM <@${user.id}> for this staff reply. They may have DMs disabled.`
+                            );
                             await message.reply("There was an error sending your message. The user may have DMs disabled.").catch(() => {});
                             return;
                         }

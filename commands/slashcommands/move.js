@@ -4,7 +4,7 @@ const perms = require('../../utils/permissions.js');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -33,6 +33,17 @@ module.exports = {
         if (!categoryId) {
             return interaction.editReply('No category configured for this ticket type.');
         }
+        let category = channel.guild.channels.cache.get(categoryId);
+        if (!category) {
+            try {
+                category = await channel.guild.channels.fetch(categoryId);
+            } catch (_) {
+                return interaction.editReply('Configured category for this ticket type was not found.');
+            }
+        }
+        if (!category || category.type !== ChannelType.GuildCategory) {
+            return interaction.editReply('Configured category for this ticket type was not found.');
+        }
         // Build new channel name and embed title
         const nameParts = channel.name.split('-');
         let serverName = null;
@@ -56,10 +67,15 @@ module.exports = {
         // Move, rename, and reapply permissions for target ticket type
         let renameSucceeded = true;
         try {
-            await channel.setParent(categoryId);
+            await channel.setParent(categoryId, { lockPermissions: true });
             await channel.setName(newChannelName);
             // Rebuild permission overwrites based on new ticket type
-            const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: channel.guild, ticketType });
+            const overwrites = perms.buildPermissionOverwritesForTicketType({
+                client,
+                guild: channel.guild,
+                ticketType,
+                category
+            });
             if (Array.isArray(overwrites) && overwrites.length > 0) {
                 await channel.permissionOverwrites.set(overwrites);
             }
@@ -134,6 +150,8 @@ module.exports = {
                 return;
             }
         }
+        const deliveryWarnings = [];
+
         // Notify staff roles for the target ticket type
         try {
             const pingRoleIDs = Array.isArray(questionFilesystem['ping-role-id']) ? questionFilesystem['ping-role-id'].filter(Boolean) : [];
@@ -142,9 +160,48 @@ module.exports = {
                 await channel.send({
                     content: `${tags}\nTicket moved to ${ticketType}.`,
                     allowedMentions: { parse: [], roles: pingRoleIDs }
-                }).catch(() => {});
+                }).catch((e) => {
+                    deliveryWarnings.push(`Could not post the move notification for ${ticketType}.`);
+                    func.handle_errors(e, client, 'move.js', 'Failed to send staff move notification');
+                });
             }
-        } catch (_) {}
+        } catch (e) {
+            deliveryWarnings.push(`Could not prepare the move notification for ${ticketType}.`);
+            func.handle_errors(e, client, 'move.js', 'Error preparing move notification');
+        }
+
+        // DM the ticket owner about the move and surface failures to staff
+        const topicUser = channel.topic;
+        if (topicUser) {
+            const user = await client.users.fetch(topicUser).catch(() => null);
+            if (user) {
+                try {
+                    await func.sendDMWithRetry(
+                        user,
+                        `Your ticket (${renameSucceeded ? newChannelName : channel.name}) has been moved to ${ticketType}.`,
+                        { maxAttempts: 2, baseDelayMs: 500 }
+                    );
+                } catch (dmError) {
+                    deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                    func.handle_errors(dmError, client, 'move.js', 'Failed to DM user after moving ticket');
+                }
+            } else {
+                deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
+            }
+        } else {
+            deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
+        }
+
+        if (deliveryWarnings.length > 0) {
+            await channel.send({
+                content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+            }).catch(e => func.handle_errors(e, client, 'move.js', 'Failed to send delivery warning to ticket channel'));
+            await interaction.editReply(
+                `Ticket moved to ${ticketType}${renameSucceeded ? '': ' (with errors)'}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+            );
+            return;
+        }
+
         await interaction.editReply(`Ticket moved to ${ticketType}${renameSucceeded ? '' : ' (with errors)'}.`);
     }
 }; 

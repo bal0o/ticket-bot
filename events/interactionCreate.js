@@ -250,36 +250,35 @@ module.exports = async function (client, interaction) {
                     }
                 }
                 
-                // Send DM to user (similar to regular ticket replies)
+                // Determine whether this ticket type should hide staff identity in DMs
+                let isAnonymousReply = false;
+                try {
+                    const handlerRawReply = require("../content/handler/options.json");
+                    for (const ticketTypeKey of Object.keys(handlerRawReply.options || {})) {
+                        const foundReply = Object.keys(handlerRawReply.options).find(x => x.toLowerCase() === ticketTypeKey.toLowerCase());
+                        if (!foundReply) continue;
+                        const typeFileReply = require(`../content/questions/${handlerRawReply.options[foundReply].question_file}`);
+                        if (typeFileReply && typeFileReply["ticket-category"] === channel.parentId) {
+                            isAnonymousReply = !!typeFileReply["anonymous-only-replies"];
+                            break;
+                        }
+                    }
+                } catch (_) {}
+
+                // Send DM to user; include staff identity unless anonymous replies are required
                 if (user) {
                     try {
-                        let roleName = 'Staff';
-                        let displayName = interaction.user.username;
-                        let staffAvatar = interaction.user.displayAvatarURL();
-                        
-                        try {
-                            if (interaction.member) {
-                                displayName = interaction.member.displayName || interaction.user.username;
-                                staffAvatar = interaction.member.displayAvatarURL?.() || interaction.user.displayAvatarURL();
-                                
-                                const roles = interaction.member.roles?.cache
-                                    ?.filter(role => role.id !== interaction.guild.id)
-                                    ?.sort((a, b) => b.position - a.position);
-                                
-                                const highestRole = roles?.first();
-                                if (highestRole) {
-                                    roleName = highestRole.name;
-                                }
-                            }
-                        } catch (_) {}
-                        
                         const replyEmbed = new EmbedBuilder()
-                            .setAuthor({ 
-                                name: `${displayName} (${roleName})`, 
-                                iconURL: staffAvatar
-                            })
                             .setDescription(editedResponse)
                             .setColor(client.config.bot_settings.main_color);
+
+                        if (!isAnonymousReply) {
+                            const displayName = interaction?.member?.displayName || interaction.user.username;
+                            replyEmbed.setAuthor({
+                                name: displayName,
+                                iconURL: interaction.user.displayAvatarURL()
+                            });
+                        }
                         
                         await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
                     } catch (dmError) {
@@ -890,12 +889,17 @@ module.exports = async function (client, interaction) {
             const slugType = displayType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
             const newName = serverName ? `${serverName}-${slugType}-${ticketNumber}` : `${slugType}-${ticketNumber}`;
 
-            await interaction.channel.setParent(categoryId)
+            await interaction.channel.setParent(categoryId, { lockPermissions: true })
                 .then(async () => {
                     let renameSucceeded = true;
                     try {
                         await interaction.channel.setName(newName);
-                        const overwrites = perms.buildPermissionOverwritesForTicketType({ client, guild: interaction.guild, ticketType: displayType });
+                        const overwrites = perms.buildPermissionOverwritesForTicketType({
+                            client,
+                            guild: interaction.guild,
+                            ticketType: displayType,
+                            category
+                        });
                         if (Array.isArray(overwrites) && overwrites.length > 0) await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
                     } catch (error) {
                         renameSucceeded = false;
@@ -905,13 +909,27 @@ module.exports = async function (client, interaction) {
 
                     // Update pinned embed title/footer and DB
                     const myPins = await func.fetchPinnedSafe(interaction.channel);
-                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
+                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
+                        || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && m.embeds[0].title.includes(`#${ticketNumber}`));
                     if (LastPin && LastPin.embeds[0]) {
-                        const embed = LastPin.embeds[0];
+                        const embed = EmbedBuilder.from(LastPin.embeds[0]);
                         try { embed.setTitle(`${displayType} #${ticketNumber}`); } catch (_) {}
-                        const footerParts = embed.footer.text.split('|');
-                        const idParts = footerParts[0].trim().split('-');
-                        embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                        const footerText = (embed.data && embed.data.footer && typeof embed.data.footer.text === 'string')
+                            ? embed.data.footer.text
+                            : null;
+                        let idParts = [];
+                        if (footerText) {
+                            const footerParts = footerText.split('|');
+                            idParts = (footerParts[0] || '').trim().split('-');
+                            if (idParts[0] && idParts[1]) {
+                                embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                            }
+                        }
+                        // If footer metadata is missing, recover it from channel topic + ticket number
+                        if ((!idParts[0] || !idParts[1]) && interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic) && /^\d+$/.test(ticketNumber)) {
+                            idParts = [interaction.channel.topic, ticketNumber];
+                            embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                        }
                         await LastPin.edit({ embeds: [embed] }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
                         // Update ticket type in MySQL tickets table (PlayerStats removed)
                         try { 
@@ -922,16 +940,33 @@ module.exports = async function (client, interaction) {
                                 );
                             }
                         } catch (_) {}
+                    } else {
+                        func.handle_errors(
+                            null,
+                            client,
+                            'interactionCreate.js',
+                            `Could not find a pinned ticket metadata embed to update after move for channel ${interaction.channel.name}(${interaction.channel.id}).`
+                        );
                     }
+
+                    const deliveryWarnings = [];
 
                     // Staff ping for target type
                     try {
                         const pingRoleIDs = Array.isArray(qf['ping-role-id']) ? qf['ping-role-id'].filter(Boolean) : [];
                         if (pingRoleIDs.length > 0) {
                             const tags = pingRoleIDs.map(id => `<@&${id}>`).join(' ');
-                            await interaction.channel.send({ content: `${tags}\nTicket moved to ${displayType}.`, allowedMentions: { parse: [], roles: pingRoleIDs } }).catch(() => {});
+                            try {
+                                await interaction.channel.send({ content: `${tags}\nTicket moved to ${displayType}.`, allowedMentions: { parse: [], roles: pingRoleIDs } });
+                            } catch (pingError) {
+                                deliveryWarnings.push(`Could not post the move notification for ${displayType}.`);
+                                func.handle_errors(pingError, client, 'interactionCreate.js', 'Failed to send staff move notification');
+                            }
                         }
-                    } catch (_) {}
+                    } catch (notifyError) {
+                        deliveryWarnings.push(`Could not prepare the move notification for ${displayType}.`);
+                        func.handle_errors(notifyError, client, 'interactionCreate.js', 'Error preparing move notification');
+                    }
 
                     await interaction.message.delete().catch(() => {});
                     const topicUser = interaction.channel.topic;
@@ -939,10 +974,30 @@ module.exports = async function (client, interaction) {
                         const user = await client.users.fetch(topicUser).catch(() => null);
                         if (user) {
                             // Use sendDMWithRetry for better reliability with long-term tickets
-                            await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 }).catch(() => {});
+                            try {
+                                await func.sendDMWithRetry(user, `Your ticket (${renameSucceeded ? newName : interaction.channel.name}) has been moved to ${displayType}.`, { maxAttempts: 2, baseDelayMs: 500 });
+                            } catch (dmError) {
+                                deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                                func.handle_errors(dmError, client, 'interactionCreate.js', 'Failed to DM user after moving ticket');
+                            }
+                        } else {
+                            deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
                         }
+                    } else {
+                        deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
                     }
-                    await interaction.deleteReply().catch(() => {});
+                    if (deliveryWarnings.length > 0) {
+                        await interaction.channel.send({
+                            content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+                        }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning to ticket channel'));
+                        await interaction.editReply({
+                            content: `Ticket moved to ${displayType}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
+                            components: [],
+                            ephemeral: true
+                        }).catch(() => {});
+                    } else {
+                        await interaction.deleteReply().catch(() => {});
+                    }
                 })
                 .catch(async error => {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
@@ -970,6 +1025,14 @@ module.exports = async function (client, interaction) {
                     if (interaction.member.roles.cache.find(x => x.id == role)) accepted++
                 }
                 if (interaction.member.roles.cache.find(x => x.id == client.config.role_ids.default_admin_role_id)) accepted++
+                // If role-based checks fail, allow users who already have effective access on this channel
+                // (important after move where category/channel overwrites can grant access).
+                if (accepted === 0) {
+                    try {
+                        const effectivePerms = interaction.channel?.permissionsFor(interaction.member);
+                        if (effectivePerms?.has('ViewChannel')) accepted++;
+                    } catch (_) {}
+                }
                 if (accepted === 0) {
                     let role = interaction.message.guild.roles.cache.find(role => role.id === client.config.role_ids.default_admin_role_id)
                     await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
@@ -988,7 +1051,7 @@ module.exports = async function (client, interaction) {
                             }
                         }
                     }
-                } catch (_) {}
+                } catch (_) {} 
 
                 // Show close ticket modal
                 const closeTicketModal = new ModalBuilder()
@@ -1304,18 +1367,38 @@ module.exports = async function (client, interaction) {
             }
             const channel = await client.channels.fetch(ctx.channelId);
             const myPins = await func.fetchPinnedSafe(channel);
-            const LastPin = myPins.last();
+            const ticketNumberFromName = (channel.name || '').split('-').pop();
+            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
+                || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && ticketNumberFromName && m.embeds[0].title.includes(`#${ticketNumberFromName}`));
             let embed;
             if (LastPin && LastPin.embeds[0]) {
-                embed = LastPin.embeds[0];
+                embed = EmbedBuilder.from(LastPin.embeds[0]);
                 // Add the server field
                 const serverValue = interaction.fields.getTextInputValue('serverInput');
                 embed.addFields({ name: 'Server', value: serverValue });
                 // Update the footer for the new ticket type
-                const footerParts = embed.footer.text.split("|");
-                const idParts = footerParts[0].trim().split('-');
-                embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ctx.ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
+                const footerText = (embed.data && embed.data.footer && typeof embed.data.footer.text === 'string')
+                    ? embed.data.footer.text
+                    : null;
+                let idParts = [];
+                if (footerText) {
+                    const footerParts = footerText.split("|");
+                    idParts = (footerParts[0] || '').trim().split('-');
+                }
+                if ((!idParts[0] || !idParts[1]) && channel.topic && /^\d{17,19}$/.test(channel.topic) && ticketNumberFromName && /^\d+$/.test(ticketNumberFromName)) {
+                    idParts = [channel.topic, ticketNumberFromName];
+                }
+                if (idParts[0] && idParts[1]) {
+                    embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ctx.ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
+                }
                 await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
+            } else {
+                func.handle_errors(
+                    null,
+                    client,
+                    'interactionCreate.js',
+                    `Could not find a pinned ticket metadata embed to update after modal move for channel ${channel.name}(${channel.id}).`
+                );
             }
             // Move and rename
             let renameSucceeded = true;
@@ -1327,7 +1410,39 @@ module.exports = async function (client, interaction) {
                 func.handle_errors(error, client, 'move.js', null);
                 await channel.send("⚠️ I couldn't rename or move this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
             }
-            await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, ephemeral: true });
+            const deliveryWarnings = [];
+            const topicUser = channel.topic;
+            if (topicUser) {
+                const user = await client.users.fetch(topicUser).catch(() => null);
+                if (user) {
+                    try {
+                        await func.sendDMWithRetry(
+                            user,
+                            `Your ticket (${renameSucceeded ? ctx.newName : channel.name}) has been moved to ${ctx.ticketType}.`,
+                            { maxAttempts: 2, baseDelayMs: 500 }
+                        );
+                    } catch (dmError) {
+                        deliveryWarnings.push(`Could not DM <@${user.id}> about this move.`);
+                        func.handle_errors(dmError, client, 'interactionCreate.js', 'Failed to DM user after modal move');
+                    }
+                } else {
+                    deliveryWarnings.push(`Could not resolve the ticket owner (<@${topicUser}>) to DM them about this move.`);
+                }
+            } else {
+                deliveryWarnings.push('Could not DM the ticket owner because this channel has no ticket owner in its topic.');
+            }
+
+            if (deliveryWarnings.length > 0) {
+                await channel.send({
+                    content: `⚠️ Move completed, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`
+                }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning for modal move'));
+                await interaction.reply({
+                    content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, ephemeral: true });
+            }
             // Clean up context
             client.moveTicketContext = undefined;
             return;
