@@ -217,8 +217,8 @@ module.exports = async function (client, interaction) {
                     }
                 } catch (webhookError) {
                     func.handle_errors(webhookError, client, 'interactionCreate.js', 'Error creating/fetching webhook for reply');
-                    // Fallback to regular message if webhook fails; do not expose staff identity
-                    await channel.send(editedResponse);
+                    // Fallback to regular message if webhook fails
+                    await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
                 }
                 
                 // Send via webhook to appear as staff member
@@ -245,17 +245,40 @@ module.exports = async function (client, interaction) {
                         });
                     } catch (webhookSendError) {
                         func.handle_errors(webhookSendError, client, 'interactionCreate.js', 'Error sending webhook message');
-                        // Fallback; keep staff identity hidden
-                        await channel.send(editedResponse);
+                        // Fallback
+                        await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
                     }
                 }
                 
-                // Send DM to user without exposing staff identity in /reply
+                // Determine whether this ticket type should hide staff identity in DMs
+                let isAnonymousReply = false;
+                try {
+                    const handlerRawReply = require("../content/handler/options.json");
+                    for (const ticketTypeKey of Object.keys(handlerRawReply.options || {})) {
+                        const foundReply = Object.keys(handlerRawReply.options).find(x => x.toLowerCase() === ticketTypeKey.toLowerCase());
+                        if (!foundReply) continue;
+                        const typeFileReply = require(`../content/questions/${handlerRawReply.options[foundReply].question_file}`);
+                        if (typeFileReply && typeFileReply["ticket-category"] === channel.parentId) {
+                            isAnonymousReply = !!typeFileReply["anonymous-only-replies"];
+                            break;
+                        }
+                    }
+                } catch (_) {}
+
+                // Send DM to user; include staff identity unless anonymous replies are required
                 if (user) {
                     try {
                         const replyEmbed = new EmbedBuilder()
                             .setDescription(editedResponse)
                             .setColor(client.config.bot_settings.main_color);
+
+                        if (!isAnonymousReply) {
+                            const displayName = interaction?.member?.displayName || interaction.user.username;
+                            replyEmbed.setAuthor({
+                                name: displayName,
+                                iconURL: interaction.user.displayAvatarURL()
+                            });
+                        }
                         
                         await func.sendDMWithRetry(user, { embeds: [replyEmbed] }, { maxAttempts: 2, baseDelayMs: 600 });
                     } catch (dmError) {
