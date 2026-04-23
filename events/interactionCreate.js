@@ -906,7 +906,7 @@ module.exports = async function (client, interaction) {
                     const myPins = await func.fetchPinnedSafe(interaction.channel);
                     const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
                     if (LastPin && LastPin.embeds[0]) {
-                        const embed = LastPin.embeds[0];
+                        const embed = EmbedBuilder.from(LastPin.embeds[0]);
                         try { embed.setTitle(`${displayType} #${ticketNumber}`); } catch (_) {}
                         const footerParts = embed.footer.text.split('|');
                         const idParts = footerParts[0].trim().split('-');
@@ -1336,7 +1336,7 @@ module.exports = async function (client, interaction) {
             const LastPin = myPins.last();
             let embed;
             if (LastPin && LastPin.embeds[0]) {
-                embed = LastPin.embeds[0];
+                embed = EmbedBuilder.from(LastPin.embeds[0]);
                 // Add the server field
                 const serverValue = interaction.fields.getTextInputValue('serverInput');
                 embed.addFields({ name: 'Server', value: serverValue });
