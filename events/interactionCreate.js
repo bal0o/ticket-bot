@@ -904,13 +904,27 @@ module.exports = async function (client, interaction) {
 
                     // Update pinned embed title/footer and DB
                     const myPins = await func.fetchPinnedSafe(interaction.channel);
-                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
+                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
+                        || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && m.embeds[0].title.includes(`#${ticketNumber}`));
                     if (LastPin && LastPin.embeds[0]) {
                         const embed = EmbedBuilder.from(LastPin.embeds[0]);
                         try { embed.setTitle(`${displayType} #${ticketNumber}`); } catch (_) {}
-                        const footerParts = embed.footer.text.split('|');
-                        const idParts = footerParts[0].trim().split('-');
-                        embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                        const footerText = (embed.data && embed.data.footer && typeof embed.data.footer.text === 'string')
+                            ? embed.data.footer.text
+                            : null;
+                        let idParts = [];
+                        if (footerText) {
+                            const footerParts = footerText.split('|');
+                            idParts = (footerParts[0] || '').trim().split('-');
+                            if (idParts[0] && idParts[1]) {
+                                embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                            }
+                        }
+                        // If footer metadata is missing, recover it from channel topic + ticket number
+                        if ((!idParts[0] || !idParts[1]) && interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic) && /^\d+$/.test(ticketNumber)) {
+                            idParts = [interaction.channel.topic, ticketNumber];
+                            embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
+                        }
                         await LastPin.edit({ embeds: [embed] }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
                         // Update ticket type in MySQL tickets table (PlayerStats removed)
                         try { 
@@ -921,6 +935,13 @@ module.exports = async function (client, interaction) {
                                 );
                             }
                         } catch (_) {}
+                    } else {
+                        func.handle_errors(
+                            null,
+                            client,
+                            'interactionCreate.js',
+                            `Could not find a pinned ticket metadata embed to update after move for channel ${interaction.channel.name}(${interaction.channel.id}).`
+                        );
                     }
 
                     const deliveryWarnings = [];
@@ -1333,7 +1354,9 @@ module.exports = async function (client, interaction) {
             }
             const channel = await client.channels.fetch(ctx.channelId);
             const myPins = await func.fetchPinnedSafe(channel);
-            const LastPin = myPins.last();
+            const ticketNumberFromName = (channel.name || '').split('-').pop();
+            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
+                || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && ticketNumberFromName && m.embeds[0].title.includes(`#${ticketNumberFromName}`));
             let embed;
             if (LastPin && LastPin.embeds[0]) {
                 embed = EmbedBuilder.from(LastPin.embeds[0]);
@@ -1341,10 +1364,28 @@ module.exports = async function (client, interaction) {
                 const serverValue = interaction.fields.getTextInputValue('serverInput');
                 embed.addFields({ name: 'Server', value: serverValue });
                 // Update the footer for the new ticket type
-                const footerParts = embed.footer.text.split("|");
-                const idParts = footerParts[0].trim().split('-');
-                embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ctx.ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
+                const footerText = (embed.data && embed.data.footer && typeof embed.data.footer.text === 'string')
+                    ? embed.data.footer.text
+                    : null;
+                let idParts = [];
+                if (footerText) {
+                    const footerParts = footerText.split("|");
+                    idParts = (footerParts[0] || '').trim().split('-');
+                }
+                if ((!idParts[0] || !idParts[1]) && channel.topic && /^\d{17,19}$/.test(channel.topic) && ticketNumberFromName && /^\d+$/.test(ticketNumberFromName)) {
+                    idParts = [channel.topic, ticketNumberFromName];
+                }
+                if (idParts[0] && idParts[1]) {
+                    embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ctx.ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
+                }
                 await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
+            } else {
+                func.handle_errors(
+                    null,
+                    client,
+                    'interactionCreate.js',
+                    `Could not find a pinned ticket metadata embed to update after modal move for channel ${channel.name}(${channel.id}).`
+                );
             }
             // Move and rename
             let renameSucceeded = true;
