@@ -540,13 +540,13 @@ function getRegionCodeFromResponses(responses) {
 function buildStaffQuickLinksValue(client, userId, steamId, responses) {
     const baseWeb = (client.config?.transcript_settings?.base_url || '').replace(/\/?transcripts\/?$/i, '') || 'http://localhost:3050';
     const lines = [
-        `**Previous Tickets** — [View on web](${baseWeb}/staff?user=${userId})`
+        `[Previous Tickets](${baseWeb}/staff?user=${userId})`
     ];
     if (steamId && steamId.toString().startsWith('7656119')) {
         const regionCode = getRegionCodeFromResponses(responses);
         let lookupUrl = `https://staff.britspve.com/lookup/player?steamid=${encodeURIComponent(String(steamId))}`;
         if (regionCode) lookupUrl += `&region=${regionCode}`;
-        lines.push(`**Player Lookup** — [Open in staff tool](${lookupUrl})`);
+        lines.push(`[Player Lookup](${lookupUrl})`);
     }
     return lines.join('\n');
 }
