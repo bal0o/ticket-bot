@@ -26,6 +26,11 @@
     ,"role_ids_checkcc_cmd": []
 },
 
+"presence_monitor": {
+"enabled": true,
+"guild_id": ""
+},
+
 "channel_ids": {
 "public_guild_id": "",
 "staff_guild_id": "",

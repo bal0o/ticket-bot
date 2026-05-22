@@ -4,11 +4,11 @@
   "description": "Discord.js v14 DM ticket bot",
   "main": "index.js",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --experimental-fetch index.js",
+    "start": "node index.js",
     "web": "node web/server.js",
     "backfill:index": "node scripts/backfill_index.js"
   },

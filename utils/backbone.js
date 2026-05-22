@@ -771,17 +771,28 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             try { logger.event('TicketOpenChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 			
 const openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID);
-// Kick off BM lookup without delaying ticket creation
+// Kick off BM lookup without delaying ticket creation; posts one combined staff-thread embed
 ;(async () => {
+    if (!func.willDeferStaffBmEmbed(client, SteamID, null)) return;
+
+    let thread = null;
+    let bmInfo = null;
     try {
-        if (!(SteamID && SteamID.toString().startsWith('7656119'))) return;
+        const threadId = openResult && openResult.staffThreadId ? openResult.staffThreadId : null;
+        if (threadId) {
+            try { thread = await client.channels.fetch(threadId).catch(() => null); } catch (_) { thread = null; }
+        }
+        if (!thread) return;
+
         const bmToken = client.config.tokens.battlemetricsToken;
         if (!bmToken) return;
+
         const axios = require('axios');
         const bmHeaders = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
         const bmPlayerUrl = `https://api.battlemetrics.com/players?filter[search]=${SteamID}&include=identifier,server`;
         const bmResponse = await axios.get(bmPlayerUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
         if (!(bmResponse && bmResponse.status >= 200 && bmResponse.status < 300 && bmResponse.data && bmResponse.data.data && bmResponse.data.data.length > 0)) return;
+
         const playerData = bmResponse.data.data[0];
         const playerId = playerData.id;
         let inGameName = null, mostRecentServer = null, mostRecentServerId = null, timePlayed = null, firstSeen = null, lastSeen = null;
@@ -818,36 +829,27 @@ const openResult = await func.openTicket(client, interaction, questionFilesystem
                 banInfo.push(`Ban on ${serverName}: ${reason}`);
             }
         }
-        const staffGuild = client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
-        if (!staffGuild) return;
-        const channel = staffGuild.channels.cache.get(questionFilesystem["ticket-category"]) || null;
-        const threadId = openResult && openResult.staffThreadId ? openResult.staffThreadId : null;
-        let thread = null;
-        if (threadId) {
-            try { thread = await user.client.channels.fetch(threadId).catch(() => null); } catch (_) { thread = null; }
-        }
-        if (thread && typeof thread.send === 'function') {
-            const { EmbedBuilder } = require('discord.js');
-            const staffEmbed = new EmbedBuilder()
-                .setColor(client.config.bot_settings.main_color)
-                .setTitle('User Info')
-                .setAuthor({ name: `${user.username} (${user.id})`, iconURL: user.displayAvatarURL() })
-                .addFields(
-                    { name: "BM Name", value: `${inGameName ? `[${inGameName}](https://www.battlemetrics.com/rcon/players/${playerId})` : 'N/A'}`, inline: true },
-                    { name: "BM Most Recent Server", value: `${mostRecentServer ? `[${mostRecentServer}](https://www.battlemetrics.com/servers/rust/${mostRecentServerId})` : 'N/A'}`, inline: true },
-                )
-                .addFields(
-                    { name: 'Time Played', value: `${timePlayed ? Math.floor(timePlayed / 3600) : 0} hours`, inline: true },
-                    { name: 'First Seen', value: `${firstSeen ? `<t:${Math.floor(new Date(firstSeen).getTime() / 1000)}:R>` : 'N/A'}`, inline: true },
-                    { name: 'Last Seen', value: `${lastSeen ? `<t:${Math.floor(new Date(lastSeen).getTime() / 1000)}:R>` : 'N/A'}`, inline: true },
-                )
-                .addFields(
-                    { name: 'Steam Profile', value: `[${SteamID}](https://steamcommunity.com/profiles/${SteamID})` }
-                );
-            if (banInfo.length > 0) { try { staffEmbed.addFields({ name: 'BM Bans', value: banInfo.join('\n').substring(0, 1024) }); } catch (_) {} }
-            try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
-        }
-    } catch (e) { func.handle_errors(e, client, 'backbone.js', 'BM async lookup failed'); }
+        bmInfo = {
+            inGameName,
+            playerId,
+            mostRecentServer,
+            mostRecentServerId,
+            timePlayed,
+            firstSeen,
+            lastSeen,
+            steamId: SteamID,
+            banInfo
+        };
+    } catch (e) {
+        func.handle_errors(e, client, 'backbone.js', 'BM async lookup failed');
+    } finally {
+        try {
+            if (!thread && openResult && openResult.staffThreadId) {
+                thread = await client.channels.fetch(openResult.staffThreadId).catch(() => null);
+            }
+            await func.sendStaffThreadInfo(client, thread, user, formattedTicketNumber, SteamID, responses, bmInfo);
+        } catch (_) {}
+    }
 })();
 try {
 	const m = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/);

@@ -16,7 +16,11 @@ const fs = require("fs");
 const func = require("../utils/functions.js");
 const { createDB } = require('../utils/mysql')
 
+const presenceMonitor = require('../utils/presenceMonitor');
+
 module.exports = async function (client, message) {
+    presenceMonitor.init(client);
+
     // Initialize the ticket status
     await func.updateTicketStatus(client);
     
@@ -39,6 +43,12 @@ module.exports = async function (client, message) {
         }
     } catch (e) {
         console.error('[Ready] Failed to fetch staff guild members:', e);
+    }
+
+    try {
+        await presenceMonitor.restoreOpenTickets(client);
+    } catch (e) {
+        console.error('[Ready] Failed to restore presence monitors:', e);
     }
 
     const db = createDB();

@@ -515,6 +515,120 @@ module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeU
 	}
 }
 
+/** Derive BM staff-tool region (eu/us/au) from ticket responses. */
+function getRegionCodeFromResponses(responses) {
+    if (typeof responses !== 'string' || !responses.length) return null;
+    try {
+        let regionSource = null;
+        const regionMatch = responses.match(/\*\*Region:\*\*\n(.*?)(?:\n\n|$)/i);
+        if (regionMatch && regionMatch[1]) {
+            regionSource = regionMatch[1].trim();
+        } else {
+            const serverMatch = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/i);
+            if (serverMatch && serverMatch[1]) regionSource = serverMatch[1].trim();
+        }
+        if (!regionSource) return null;
+        const lower = regionSource.toLowerCase();
+        if (lower.includes('eu')) return 'eu';
+        if (lower.includes('us')) return 'us';
+        if (lower.includes('au')) return 'au';
+    } catch (_) {}
+    return null;
+}
+
+/** Markdown value for staff-thread Quick Links embed field. */
+function buildStaffQuickLinksValue(client, userId, steamId, responses) {
+    const baseWeb = (client.config?.transcript_settings?.base_url || '').replace(/\/?transcripts\/?$/i, '') || 'http://localhost:3050';
+    const lines = [
+        `[Previous Tickets](${baseWeb}/staff?user=${userId})`
+    ];
+    if (steamId && steamId.toString().startsWith('7656119')) {
+        const regionCode = getRegionCodeFromResponses(responses);
+        let lookupUrl = `https://staff.britspve.com/lookup/player?steamid=${encodeURIComponent(String(steamId))}`;
+        if (regionCode) lookupUrl += `&region=${regionCode}`;
+        lines.push(`[Player Lookup](${lookupUrl})`);
+    }
+    return lines.join('\n');
+}
+
+/** True when BM lookup runs after open and will post the combined staff-thread embed. */
+module.exports.willDeferStaffBmEmbed = function (client, steamId, bmInfo) {
+    return !bmInfo
+        && steamId
+        && steamId.toString().startsWith('7656119')
+        && !!client.config?.tokens?.battlemetricsToken;
+};
+
+function buildStaffThreadEmbed(client, recepientMember, formattedTicketNumber, steamId, responses, bmInfo) {
+    const quickLinksField = {
+        name: 'Quick Links',
+        value: buildStaffQuickLinksValue(client, recepientMember.id, steamId, responses),
+        inline: false
+    };
+    const embed = new EmbedBuilder()
+        .setColor(client.config.bot_settings.main_color)
+        .setAuthor({ name: `${recepientMember.username} (${recepientMember.id})`, iconURL: recepientMember.displayAvatarURL() });
+
+    if (bmInfo) {
+        const steamProfileId = bmInfo.steamId || steamId;
+        embed.setTitle('User Info')
+            .addFields(quickLinksField)
+            .addFields(
+                {
+                    name: 'BM Name',
+                    value: bmInfo.inGameName && bmInfo.playerId
+                        ? `[${bmInfo.inGameName}](https://www.battlemetrics.com/rcon/players/${bmInfo.playerId})`
+                        : 'N/A',
+                    inline: true
+                },
+                {
+                    name: 'BM Most Recent Server',
+                    value: bmInfo.mostRecentServer && bmInfo.mostRecentServerId
+                        ? `[${bmInfo.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bmInfo.mostRecentServerId})`
+                        : 'N/A',
+                    inline: true
+                },
+            )
+            .addFields(
+                { name: 'Time Played', value: `${bmInfo.timePlayed ? Math.floor(bmInfo.timePlayed / 3600) : 0} hours`, inline: true },
+                {
+                    name: 'First Seen',
+                    value: bmInfo.firstSeen ? `<t:${Math.floor(new Date(bmInfo.firstSeen).getTime() / 1000)}:R>` : 'N/A',
+                    inline: true
+                },
+                {
+                    name: 'Last Seen',
+                    value: bmInfo.lastSeen ? `<t:${Math.floor(new Date(bmInfo.lastSeen).getTime() / 1000)}:R>` : 'N/A',
+                    inline: true
+                },
+            )
+            .addFields(
+                {
+                    name: 'Steam Profile',
+                    value: steamProfileId && steamProfileId.toString().startsWith('7656119')
+                        ? `[${steamProfileId}](https://steamcommunity.com/profiles/${steamProfileId})`
+                        : 'N/A'
+                }
+            );
+        if (bmInfo.banInfo && bmInfo.banInfo.length > 0) {
+            embed.addFields({ name: 'BM Bans', value: bmInfo.banInfo.join('\n').substring(0, 1024) });
+        }
+    } else {
+        embed.setTitle('Staff Resources')
+            .setDescription(`Ticket #${formattedTicketNumber}`)
+            .addFields(quickLinksField);
+    }
+    return embed;
+}
+
+module.exports.sendStaffThreadInfo = async function (client, thread, recepientMember, formattedTicketNumber, steamId, responses, bmInfo) {
+    if (!thread || typeof thread.send !== 'function') return;
+    const embed = buildStaffThreadEmbed(client, recepientMember, formattedTicketNumber, steamId, responses, bmInfo);
+    try {
+        await thread.send({ embeds: [embed] });
+    } catch (_) {}
+};
+
 /** Notify the user when ticket creation fails (ephemeral reply + DM when possible). */
 async function notifyTicketCreationFailed(interaction, recepientMember) {
     const message = 'Your ticket could not be created. Please try again or contact staff.';
@@ -913,80 +1027,9 @@ try {
             console.error('[Functions] Failed to seed staff thread:', seedErr);
         }
 
-        // Post a quick link to user's web ticket history for staff
-        try {
-            const baseWeb = (client.config?.transcript_settings?.base_url || '').replace(/\/?transcripts\/?$/i, '') || 'http://localhost:3050';
-            await thread.send({
-                content: `View user's ticket history on web: <${baseWeb}/staff?user=${recepientMember.id}>`,
-                allowedMentions: { parse: [] }
-            });
-        } catch (_) {}
-
-        // Post a quick link to external staff lookup (Steam-based) if SteamID is available
-        try {
-            if (steamId && steamId.toString().startsWith('7656119')) {
-                let regionCode = null;
-                try {
-                    if (typeof responses === 'string' && responses.length > 0) {
-                        // Prefer explicit Region field, fall back to Server name
-                        let regionSource = null;
-                        const regionMatch = responses.match(/\*\*Region:\*\*\n(.*?)(?:\n\n|$)/i);
-                        if (regionMatch && regionMatch[1]) {
-                            regionSource = regionMatch[1].trim();
-                        } else {
-                            const serverMatch = responses.match(/\*\*Server:\*\*\n(.*?)(?:\n\n|$)/i);
-                            if (serverMatch && serverMatch[1]) {
-                                regionSource = serverMatch[1].trim();
-                            }
-                        }
-                        if (regionSource) {
-                            const lower = regionSource.toLowerCase();
-                            if (lower.includes('eu')) {
-                                regionCode = 'eu';
-                            } else if (lower.includes('us')) {
-                                regionCode = 'us';
-                            } else if (
-                                lower.includes('au') 
-                            ) {
-                                regionCode = 'au';
-                            }
-                        }
-                    }
-                } catch (_) {}
-
-                let lookupUrl = `https://staff.britspve.com/lookup/player?steamid=${encodeURIComponent(String(steamId))}`;
-                if (regionCode) lookupUrl += `&region=${regionCode}`;
-
-                await thread.send({
-                    content: `Staff lookup: <${lookupUrl}>`,
-                    allowedMentions: { parse: [] }
-                });
-            }
-        } catch (_) {}
-
-        if (bmInfo) {
-            const staffEmbed = new EmbedBuilder()
-                .setColor(client.config.bot_settings.main_color)
-                .setTitle(`User Info`)
-                .setAuthor({ name: `${recepientMember.username} (${recepientMember.id})`, iconURL: recepientMember.displayAvatarURL() })
-                .addFields(
-                    { name: "BM Name", value: `[${bmInfo.inGameName}](https://www.battlemetrics.com/rcon/players/${bmInfo.playerId})`, inline: true },
-                    { name: "BM Most Recent Server", value: `[${bmInfo.mostRecentServer}](https://www.battlemetrics.com/servers/rust/${bmInfo.mostRecentServerId})`, inline: true },
-                )
-                .addFields(
-                    { name: 'Time Played', value: `${Math.floor(bmInfo.timePlayed / 3600)} hours`, inline: true },
-                    { name: 'First Seen', value: `<t:${Math.floor(new Date(bmInfo.firstSeen).getTime() / 1000)}:R>`, inline: true },
-                    { name: 'Last Seen', value: `<t:${Math.floor(new Date(bmInfo.lastSeen).getTime() / 1000)}:R>`, inline: true },
-                )
-                .addFields(
-                    { name: 'Steam Profile', value: `[${bmInfo.steamId}](https://steamcommunity.com/profiles/${bmInfo.steamId})` }
-                );
-
-                if (bmInfo.banInfo && bmInfo.banInfo.length > 0) {
-                staffEmbed.addFields({ name: 'BM Bans', value: bmInfo.banInfo.join('\n').substring(0, 1024) });
-            }
-            
-            try { await thread.send({ embeds: [staffEmbed] }); } catch (_) {}
+        // One staff-thread info embed (links + optional BM). Deferred when async BM lookup will post the combined embed.
+        if (!module.exports.willDeferStaffBmEmbed(client, steamId, bmInfo)) {
+            await module.exports.sendStaffThreadInfo(client, thread, recepientMember, formattedTicketNumber, steamId, responses, bmInfo);
         }
 
         // Add access roles to the staff thread
@@ -1094,6 +1137,18 @@ try {
             await db.set(`AppMap.ticketToApp.${formattedTicketNumber}`, appRec.id);
         }
     } catch(_){}
+
+    try {
+        const presenceMonitor = require('./presenceMonitor');
+        if (thread?.id && recepientMember?.id && ticketChannel?.id) {
+            await presenceMonitor.registerTicket(client, {
+                userId: recepientMember.id,
+                staffThreadId: thread.id,
+                ticketNumber: formattedTicketNumber,
+                ticketChannelId: ticketChannel.id
+            });
+        }
+    } catch (_) {}
 
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
@@ -1425,6 +1480,11 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         }
         // Update ticket count
         await module.exports.updateTicketStatus(client);
+
+        try {
+            const presenceMonitor = require('./presenceMonitor');
+            presenceMonitor.unregisterTicketChannel(client, channel.id);
+        } catch (_) {}
         
 		try {
 			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);

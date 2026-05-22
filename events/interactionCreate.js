@@ -12,7 +12,8 @@ const {
     TextInputStyle,
     StringSelectMenuBuilder,
     AttachmentBuilder,
-    ChannelType
+    ChannelType,
+    MessageFlags
 } = require("discord.js");
 const unirest = require("unirest");
 const func = require("../utils/functions.js");
@@ -132,7 +133,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'closeTicketModal') {
             try {
-                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
+                try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for closeTicketModal'); }
                 
                 const channel = interaction.channel;
                 if (!channel) {
@@ -175,7 +176,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'replyStandardResponse') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 
                 const context = client.replyContext?.get(interaction.user.id);
                 if (!context) {
@@ -525,7 +526,7 @@ module.exports = async function (client, interaction) {
         // Application stage buttons
         if (interaction.customId === 'app_next_stage' || interaction.customId === 'app_deny') {
             try {
-                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_next_stage/deny'); }
+                try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_next_stage/deny'); }
                 const channelId = interaction.channel.id;
                 const appId = await db.get(`AppMap.channelToApp.${channelId}`);
                 if (!appId) {
@@ -592,7 +593,7 @@ module.exports = async function (client, interaction) {
         // Close communication ticket button
         if (interaction.customId === 'app_comm_close') {
             try {
-                try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_comm_close'); }
+                try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for app_comm_close'); }
                 const channel = interaction.channel;
                 const appId = await db.get(`AppMap.channelToApp.${channel.id}`);
                 if (!appId) { await interaction.editReply({ content: 'Not linked to an application.' }); return; }
@@ -701,7 +702,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'convertTicket') {
-            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for convertTicket'); }
+            try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for convertTicket'); }
 
             const handlerRaw = require("../content/handler/options.json");
             const myPins = await func.fetchPinnedSafe(interaction.message.channel);
@@ -745,7 +746,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'selectTicketType') {
-            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectTicketType'); }
+            try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectTicketType'); }
 
             const newTicketType = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
@@ -790,7 +791,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'moveticket') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             } catch (e) {
                 // Tolerate expired/unknown interaction to avoid noisy errors
                 if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for moveticket');
@@ -850,7 +851,7 @@ module.exports = async function (client, interaction) {
         }
 
         if (interaction.customId === 'selectMoveType') {
-            try { await interaction.deferReply({ ephemeral: true }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectMoveType'); }
+            try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferReply failed for selectMoveType'); }
 
             const typeKey = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
@@ -1130,7 +1131,7 @@ module.exports = async function (client, interaction) {
                 // Guard against double-defer to avoid INTERACTION_ALREADY_REPLIED
                 if (!interaction.deferred && !interaction.replied) {
                     try {
-                        await interaction.deferReply({ ephemeral: true });
+                        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                     } catch (err) {
                         // Only log unexpected errors
                         const msg = (err && (err.code || err.message || err.name || "")).toString();
