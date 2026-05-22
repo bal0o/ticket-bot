@@ -1138,6 +1138,18 @@ try {
         }
     } catch(_){}
 
+    try {
+        const presenceMonitor = require('./presenceMonitor');
+        if (thread?.id && recepientMember?.id && ticketChannel?.id) {
+            await presenceMonitor.registerTicket(client, {
+                userId: recepientMember.id,
+                staffThreadId: thread.id,
+                ticketNumber: formattedTicketNumber,
+                ticketChannelId: ticketChannel.id
+            });
+        }
+    } catch (_) {}
+
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
 
@@ -1468,6 +1480,11 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         }
         // Update ticket count
         await module.exports.updateTicketStatus(client);
+
+        try {
+            const presenceMonitor = require('./presenceMonitor');
+            presenceMonitor.unregisterTicketChannel(client, channel.id);
+        } catch (_) {}
         
 		try {
 			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
