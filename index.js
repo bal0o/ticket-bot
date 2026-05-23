@@ -82,6 +82,7 @@ client.login(config.tokens.bot_token).then(() => {
 					debugLog(`[Interview Scheduler] Job ${jobId} scheduled for ${new Date(job.at).toISOString()}, current time: ${new Date(now).toISOString()}`);
 					if (now >= job.at) {
 						// Create voice channel
+						let guild = null;
 						try {
 							debugLog(`[Interview Scheduler] Processing job ${jobId} for app ${job.appId}`);
 							debugLog(`[Interview Scheduler] Job scheduled for: ${new Date(job.at).toISOString()} (${new Date(job.at).toLocaleString()})`);
@@ -95,7 +96,7 @@ client.login(config.tokens.bot_token).then(() => {
 							debugLog(`[Interview Scheduler] Looking for guild ${guildId} in ${client.guilds.cache.size} available guilds`);
 							debugLog(`[Interview Scheduler] Available guilds:`, Array.from(client.guilds.cache.keys()));
 							
-							const guild = client.guilds.cache.get(guildId);
+							guild = client.guilds.cache.get(guildId);
 							if (!guild) { 
 								debugLog(`[Interview Scheduler] Guild ${guildId} not found, erroring job ${jobId}`);
 								debugLog(`[Interview Scheduler] Guild cache keys:`, Array.from(client.guilds.cache.keys()));
@@ -116,7 +117,7 @@ client.login(config.tokens.bot_token).then(() => {
 							if (adminRoleId) {
 								const adminRole = guild.roles.cache.get(adminRoleId);
 								if (adminRole) {
-									perms.push({ id: adminRole, allow: ['ViewChannel','Connect','Speak'] });
+									perms.push({ id: adminRole.id, allow: ['ViewChannel','Connect','Speak'] });
 								} else {
 									debugLog(`[Interview Scheduler] Admin role ${adminRoleId} not found in guild`);
 								}
@@ -125,7 +126,7 @@ client.login(config.tokens.bot_token).then(() => {
 							// Add staff member
 							try {
 								const staffMember = await guild.members.fetch(job.staffId);
-								perms.push({ id: staffMember, allow: ['ViewChannel','Connect','Speak'] });
+								perms.push({ id: staffMember.id, allow: ['ViewChannel','Connect','Speak'] });
 							} catch (staffError) {
 								debugLog(`[Interview Scheduler] Staff member ${job.staffId} not found in guild, using ID directly`);
 								perms.push({ id: job.staffId, allow: ['ViewChannel','Connect','Speak'] });
@@ -134,7 +135,7 @@ client.login(config.tokens.bot_token).then(() => {
 							// Add applicant
 							try {
 								const applicantMember = await guild.members.fetch(appRec.userId);
-								perms.push({ id: applicantMember, allow: ['ViewChannel','Connect','Speak'] });
+								perms.push({ id: applicantMember.id, allow: ['ViewChannel','Connect','Speak'] });
 							} catch (applicantError) {
 								debugLog(`[Interview Scheduler] Applicant ${appRec.userId} not found in guild, using ID directly`);
 								perms.push({ id: appRec.userId, allow: ['ViewChannel','Connect','Speak'] });
@@ -151,7 +152,7 @@ client.login(config.tokens.bot_token).then(() => {
 							}
 							
                             debugLog(`[Interview Scheduler] Creating voice channel "${name}" for job ${jobId} with options:`, JSON.stringify(createOpts, null, 2));
-							const vc = await guild.channels.create(name, createOpts);
+							const vc = await guild.channels.create({ name, ...createOpts });
 							debugLog(`[Interview Scheduler] Successfully created voice channel ${vc.id} for job ${jobId}`);
 							// Mark job as done in MySQL schedules
 							await applications.completeSchedule(jobId, 'done', { channelId: vc.id });
@@ -217,13 +218,25 @@ client.login(config.tokens.bot_token).then(() => {
 								errorMessage = 'Unknown Channel: The specified channel does not exist';
 							} else if (e?.code === 10004) {
 								errorMessage = 'Unknown Guild: The specified guild does not exist';
+							} else if (e?.code === 50035) {
+								errorMessage = 'Invalid channel options: ' + errorMessage;
 							}
-							
-							await applications.completeSchedule(jobId, 'error', { message: errorMessage });
+
+							try {
+								await applications.completeSchedule(jobId, 'error', {
+									message: errorMessage,
+									code: e?.code ?? null,
+									status: e?.status ?? null
+								});
+							} catch (scheduleErr) {
+								logger.error(`[Interview Scheduler] Failed to mark job ${jobId} as error:`, scheduleErr);
+							}
 						}
 					}
 				}
-			} catch (_) {}
+			} catch (schedulerErr) {
+				logger.error('[Interview Scheduler] Scheduler loop error:', schedulerErr);
+			}
 			setTimeout(runScheduler, 15000);
 		}
 		runScheduler();
