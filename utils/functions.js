@@ -1143,6 +1143,7 @@ try {
         if (thread?.id && recepientMember?.id && ticketChannel?.id) {
             await presenceMonitor.registerTicket(client, {
                 userId: recepientMember.id,
+                username: recepientMember.username,
                 staffThreadId: thread.id,
                 ticketNumber: formattedTicketNumber,
                 ticketChannelId: ticketChannel.id
