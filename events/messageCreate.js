@@ -430,8 +430,12 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 }
             }
 
-            // For now, always DM the user for non-internal tickets; internal tickets never auto-DM.
-            const shouldForwardToUser = !ticketType?.internal;
+            const shouldForwardToUser = await func.shouldRelayStaffToTicketOwner(
+                client,
+                message.channel,
+                userId,
+                ticketType
+            );
 
             try {
                     logger.event('StaffTicketMessage', {

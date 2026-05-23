@@ -890,6 +890,28 @@ module.exports = async function (client, interaction) {
             const slugType = displayType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
             const newName = serverName ? `${serverName}-${slugType}-${ticketNumber}` : `${slugType}-${ticketNumber}`;
 
+            try {
+                const myPinsBeforeMove = await func.fetchPinnedSafe(interaction.channel);
+                const pinBeforeMove = myPinsBeforeMove.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
+                    || myPinsBeforeMove.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && m.embeds[0].title.includes(`#${ticketNumber}`));
+                let oldTicketType = pinBeforeMove ? func.parseTicketTypeFromEmbedFooter(pinBeforeMove.embeds[0].footer.text) : null;
+                const ownerId = interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic)
+                    ? interaction.channel.topic
+                    : null;
+                if (!oldTicketType && ownerId && ticketNumber && typeof db.query === 'function') {
+                    const [rows] = await db.query(
+                        'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                        [ownerId, ticketNumber]
+                    );
+                    if (rows && rows[0] && rows[0].ticket_type) oldTicketType = rows[0].ticket_type;
+                }
+                if (ownerId && ticketNumber) {
+                    await func.preserveTicketDmRelayOnMove(ownerId, ticketNumber, oldTicketType);
+                }
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'preserveTicketDmRelayOnMove failed');
+            }
+
             await interaction.channel.setParent(categoryId, { lockPermissions: true })
                 .then(async () => {
                     let renameSucceeded = true;

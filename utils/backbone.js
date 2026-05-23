@@ -938,6 +938,7 @@ try {
 				createdAt: createdAt,
 				globalTicketNumber: formattedTicketNumber
 			});
+			await func.setTicketDmRelay(user.id, formattedTicketNumber, !func.isTicketTypeInternal(ticketType));
 			console.log('[backbone] Successfully wrote ticket to MySQL', { ticketId: formattedTicketNumber });
 		} else {
 			console.warn('[backbone] writeTicket method not available on db adapter');

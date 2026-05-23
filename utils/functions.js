@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
 const func = require("./functions.js")
@@ -68,6 +68,75 @@ module.exports.shouldExcludeFromTicketCount = function(ticketType) {
     }
     
     return false;
+};
+
+function ticketDmRelayKey(userId, ticketId) {
+    return `TicketDmRelay.${userId}.${ticketId}`;
+}
+
+/** Parse ticket type label from pinned embed footer (`userId-num | Type | Ticket Opened:`). */
+module.exports.parseTicketTypeFromEmbedFooter = function(footerText) {
+    if (!footerText || typeof footerText !== 'string') return null;
+    const parts = footerText.split('|');
+    if (parts.length < 2) return null;
+    const label = (parts[1] || '').trim();
+    return label || null;
+};
+
+/** Parse numeric ticket id from channel name (e.g. appeal-1234 → 1234). */
+module.exports.parseTicketNumberFromChannelName = function(channelName) {
+    const parts = (channelName || '').split('-');
+    const last = parts[parts.length - 1];
+    return /^\d+$/.test(last) ? last : null;
+};
+
+module.exports.setTicketDmRelay = async function(userId, ticketId, enabled) {
+    if (!userId || !ticketId || typeof db.set !== 'function') return;
+    await db.set(ticketDmRelayKey(userId, ticketId), !!enabled);
+};
+
+module.exports.getTicketDmRelay = async function(userId, ticketId) {
+    if (!userId || !ticketId || typeof db.get !== 'function') return null;
+    const value = await db.get(ticketDmRelayKey(userId, ticketId));
+    if (value === true || value === 1 || value === '1') return true;
+    if (value === false || value === 0 || value === '0') return false;
+    return null;
+};
+
+/** Keep DM relay enabled when a public ticket is moved to an internal type. */
+module.exports.preserveTicketDmRelayOnMove = async function(userId, ticketId, oldTicketType) {
+    if (!userId || !ticketId) return;
+    const existing = await module.exports.getTicketDmRelay(userId, ticketId);
+    if (existing === true) return;
+    if (!module.exports.isTicketTypeInternal(oldTicketType)) {
+        await module.exports.setTicketDmRelay(userId, ticketId, true);
+    }
+};
+
+/**
+ * Whether staff messages in the ticket channel should be forwarded to the owner's DMs.
+ * Public tickets always relay; moved public→internal tickets keep relay via stored flag.
+ */
+module.exports.shouldRelayStaffToTicketOwner = async function(client, channel, userId, ticketTypeQuestionFile) {
+    const ticketId = module.exports.parseTicketNumberFromChannelName(channel && channel.name);
+    if (userId && ticketId) {
+        const stored = await module.exports.getTicketDmRelay(userId, ticketId);
+        if (stored === true) return true;
+        if (stored === false) return false;
+    }
+
+    if (!ticketTypeQuestionFile || !ticketTypeQuestionFile.internal) return true;
+
+    if (!channel || !channel.guild || !userId) return false;
+
+    try {
+        const member = await channel.guild.members.fetch(userId).catch(() => null);
+        if (!member) return true;
+        const perms = channel.permissionsFor(member);
+        return !perms || !perms.has(PermissionsBitField.Flags.ViewChannel);
+    } catch (_) {
+        return true;
+    }
 };
 
 /**
