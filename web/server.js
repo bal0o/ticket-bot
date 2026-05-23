@@ -370,6 +370,84 @@ function userHasOverride(_userId, _filename) {
     return false;
 }
 
+function transcriptBasename(filename) {
+    return String(filename || '').replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
+}
+
+/** Ticket number from channel/transcript basename (stable across renames/moves). */
+function extractTicketNumberFromBase(base) {
+    let name = transcriptBasename(base);
+    if (!name) return null;
+    name = name.replace(/-claimed$/i, '');
+    const parts = name.split('-');
+    for (let i = parts.length - 1; i >= 0; i--) {
+        if (/^\d{1,8}$/.test(parts[i])) return parts[i];
+    }
+    return null;
+}
+
+function ticketNumberLookupVariants(ticketNum) {
+    const variants = new Set();
+    const s = String(ticketNum || '').trim();
+    if (!/^\d+$/.test(s)) return [];
+    variants.add(s);
+    const n = parseInt(s, 10);
+    if (Number.isFinite(n)) {
+        variants.add(String(n));
+        variants.add(String(n).padStart(4, '0'));
+    }
+    return Array.from(variants);
+}
+
+async function lookupTicketByNumber(ticketNum) {
+    if (!ticketNum || typeof db.query !== 'function') return null;
+    for (const tid of ticketNumberLookupVariants(ticketNum)) {
+        try {
+            const [rows] = await db.query(
+                'SELECT user_id, ticket_type, ticket_id FROM tickets WHERE ticket_id = ? LIMIT 1',
+                [tid]
+            );
+            if (rows && rows.length > 0) {
+                return {
+                    ownerId: String(rows[0].user_id || ''),
+                    ticketId: String(rows[0].ticket_id || tid),
+                    ticketType: rows[0].ticket_type || null
+                };
+            }
+        } catch (_) {}
+    }
+    return null;
+}
+
+/** Build WHERE fragments for ticket_messages by stable ticket number. */
+function buildTicketMessageWhereClauses(mode, ticketNum) {
+    const variants = ticketNumberLookupVariants(ticketNum);
+    const whereClauses = [];
+    const params = [];
+    if (!variants.length) return { whereClauses, params };
+
+    if (mode === 'staff') {
+        const staffNames = variants.map((v) => `staff-chat-${v}`);
+        whereClauses.push(`channel_name IN (${staffNames.map(() => '?').join(',')})`);
+        params.push(...staffNames);
+        return { whereClauses, params };
+    }
+
+    // full / user: all main-ticket channel names that end with -<ticketNum> (excludes staff threads)
+    for (const suffix of variants) {
+        if (STAFF_GUILD_ID) {
+            whereClauses.push(
+                '(guild_id = ? AND channel_name LIKE ? AND channel_name NOT LIKE ?)'
+            );
+            params.push(String(STAFF_GUILD_ID), `%-${suffix}`, 'staff-chat%');
+        } else {
+            whereClauses.push('(channel_name LIKE ? AND channel_name NOT LIKE ?)');
+            params.push(`%-${suffix}`, 'staff-chat%');
+        }
+    }
+    return { whereClauses, params };
+}
+
 async function findTicketContextByFilename(filename) {
     // Return { ownerId, ticketId, ticketType } using fast in-memory index or MySQL lookup
     try {
@@ -409,26 +487,11 @@ async function findTicketContextByFilename(filename) {
                 }
             } catch (_) {}
         }
-        // Last resort: derive ticketId from filename suffix and query MySQL directly
-        const base = String(filename).replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
-        const idMatch = base.match(/-(\d{1,8})$/);
-        if (idMatch) {
-            const ticketId = idMatch[1];
-            try {
-                if (typeof db.query === 'function') {
-                    const [rows] = await db.query(
-                        'SELECT user_id, ticket_type FROM tickets WHERE ticket_id = ? LIMIT 1',
-                        [ticketId]
-                    );
-                    if (rows && rows.length > 0) {
-                        return {
-                            ownerId: String(rows[0].user_id || ''),
-                            ticketId: ticketId,
-                            ticketType: rows[0].ticket_type || null
-                        };
-                    }
-                }
-            } catch (_) {}
+        // Last resort: stable ticket number from basename (works after rename/move)
+        const ticketNum = extractTicketNumberFromBase(transcriptBasename(filename));
+        if (ticketNum) {
+            const row = await lookupTicketByNumber(ticketNum);
+            if (row) return row;
         }
     } catch (_) {}
     return null;
@@ -1763,28 +1826,16 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
 
         // Determine mode and base channel name from filename
         let mode = 'user';
-        let base = filename;
         if (filename.endsWith('.staff.html')) {
             mode = 'staff';
-            base = filename.replace(/\.staff\.html$/i, '');
         } else if (filename.endsWith('.full.html')) {
             mode = 'full';
-            base = filename.replace(/\.full\.html$/i, '');
         } else if (filename.endsWith('.html')) {
             mode = 'user';
-            base = filename.replace(/\.html$/i, '');
         }
 
-        // For staff transcripts, use only the staff thread channel name.
-        // This ensures "Staff" view shows staff-only discussion, not the main ticket.
-        let channelNames = [base];
-        if (mode === 'staff') {
-            const idMatch = base.match(/-(\d{1,8})$/);
-            if (idMatch) {
-                const ticketNum = idMatch[1];
-                channelNames = [`staff-chat-${ticketNum}`];
-            }
-        }
+        const base = transcriptBasename(filename);
+        let ticketNum = extractTicketNumberFromBase(base);
 
         // Load ticket / owner context (may be null for non-ticket transcripts)
         let ownerId = null;
@@ -1799,77 +1850,21 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             }
         } catch (_) {}
 
-        // Fetch messages from ticket_messages.
-        // Primary strategy is channel_name, but we also fall back to channel_id
-        // resolved via the tickets table so that transcripts continue to work
-        // even if channel names were changed or stored inconsistently.
+        if (!ticketNum && ticketId) {
+            ticketNum = extractTicketNumberFromBase(ticketId) || (/^\d+$/.test(String(ticketId).trim()) ? String(ticketId).trim() : null);
+        }
+
+        // Fetch messages from ticket_messages by stable ticket number (survives rename/move).
+        // Staff view: staff-chat-<num> only. Full/user: all channels ending in -<num>, excluding staff threads.
         let rows = [];
         if (typeof db.query === 'function') {
-            // Try to resolve channel_ids from tickets table using transcript index context
-            let channelIds = [];
-            try {
-                console.log('[transcripts] raw resolver ctx', {
-                    filename,
-                    ownerId,
-                    ticketId,
-                    ticketType
-                });
-                if (ownerId && ticketId) {
-                    const [ticketRows] = await db.query(
-                        'SELECT channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 5',
-                        [String(ownerId), String(ticketId)]
-                    );
-                    channelIds = (ticketRows || [])
-                        .map(r => r.channel_id)
-                        .filter(Boolean)
-                        .map(id => String(id));
-                    console.log('[transcripts] raw resolver channelIds from tickets', {
-                        filename,
-                        ownerId,
-                        ticketId,
-                        channelIds
-                    });
-                }
-            } catch (e) {
-                console.error('[transcripts] raw resolver ctx error', {
-                    filename,
-                    error: e && e.message
-                });
-            }
-
-            const namePlaceholders = channelNames.map(() => '?').join(',');
-            const idPlaceholders = channelIds.map(() => '?').join(',');
-            const whereClauses = [];
-            const params = [];
-
-            if (channelNames.length > 0) {
-                whereClauses.push(`channel_name IN (${namePlaceholders})`);
-                params.push(...channelNames);
-            }
-            if (channelIds.length > 0) {
-                whereClauses.push(`channel_id IN (${idPlaceholders})`);
-                params.push(...channelIds);
-            }
-            // Rows keep the channel_name from log time; renames do not rewrite history. Also,
-            // after a real channel move, old messages keep the previous channel_id. Match any
-            // staff-guild channel whose name ends with -<ticket_id> (ticket number is stable).
-            // Do not use this broad match for .staff.html (staff view must stay thread-only), and
-            // never include staff-only threads (staff-chat-*) in full/user transcripts.
-            const tidStr = ticketId != null ? String(ticketId).trim() : '';
-            if (tidStr && /^\d+$/.test(tidStr) && STAFF_GUILD_ID && mode !== 'staff') {
-                whereClauses.push(
-                    '(guild_id = ? AND channel_name LIKE ? AND (channel_name IS NULL OR channel_name NOT LIKE ?))'
-                );
-                params.push(String(STAFF_GUILD_ID), `%-${tidStr}`, 'staff-chat-%');
-            }
+            const { whereClauses, params } = buildTicketMessageWhereClauses(mode, ticketNum);
 
             if (whereClauses.length > 0) {
                 console.log('[transcripts] raw DB query', {
                     filename,
-                    channelNames,
-                    channelIds,
-                    ticketNameSuffix:
-                        tidStr && /^\d+$/.test(tidStr) && mode !== 'staff' ? `%-${tidStr} (not staff-chat-%)` : null,
+                    mode,
+                    ticketNum,
                     where: whereClauses.join(' OR ')
                 });
                 const [resRows] = await db.query(
@@ -1886,6 +1881,18 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                     filename,
                     rowCount: Array.isArray(rows) ? rows.length : 0
                 });
+            } else if (base) {
+                // Non-ticket transcripts (e.g. application comms) — match exact channel name only
+                const [resRows] = await db.query(
+                    `SELECT message_id, channel_id, channel_name, guild_id,
+                            author_id, author_tag, author_username, author_is_bot,
+                            created_at, content, pinned, type, webhook_id, embeds, attachments
+                     FROM ticket_messages
+                     WHERE channel_name = ?
+                     ORDER BY created_at ASC, message_id ASC`,
+                    [base]
+                );
+                rows = resRows || [];
             }
         } 
 

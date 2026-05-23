@@ -96,6 +96,10 @@ module.exports = {
             const idParts = footerParts[0].trim().split('-');
             const userId = idParts[0];
             const ticketNum = idParts[1];
+            const oldTicketType = func.parseTicketTypeFromEmbedFooter(embed.footer.text);
+            if (userId && ticketNum) {
+                await func.preserveTicketDmRelayOnMove(userId, ticketNum, oldTicketType);
+            }
             let footerTicketType = ticketType;
             // Always split on # and use only the part before for the footer
             if (footerTicketType.includes('#')) {
