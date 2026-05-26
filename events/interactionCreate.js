@@ -921,7 +921,7 @@ module.exports = async function (client, interaction) {
                             client,
                             guild: interaction.guild,
                             ticketType: displayType,
-                            category
+                            userId: interaction.channel.topic,
                         });
                         if (Array.isArray(overwrites) && overwrites.length > 0) await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
                     } catch (error) {
@@ -1423,11 +1423,20 @@ module.exports = async function (client, interaction) {
                     `Could not find a pinned ticket metadata embed to update after modal move for channel ${channel.name}(${channel.id}).`
                 );
             }
-            // Move and rename
+            // Move, rename, and reapply permissions for target ticket type
             let renameSucceeded = true;
             try {
-                await channel.setParent(ctx.categoryId);
+                await channel.setParent(ctx.categoryId, { lockPermissions: true });
                 await channel.setName(ctx.newName);
+                const overwrites = perms.buildPermissionOverwritesForTicketType({
+                    client,
+                    guild: channel.guild,
+                    ticketType: ctx.ticketType,
+                    userId: channel.topic,
+                });
+                if (Array.isArray(overwrites) && overwrites.length > 0) {
+                    await channel.permissionOverwrites.set(overwrites);
+                }
             } catch (error) {
                 renameSucceeded = false;
                 func.handle_errors(error, client, 'move.js', null);

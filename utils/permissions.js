@@ -46,53 +46,48 @@ function userHasAccessToTicketType({ userRoleIds, ticketType, config, adminRoleI
 	return false;
 }
 
-function buildPermissionOverwritesForTicketType({ client, guild, ticketType, category = null }) {
+/**
+ * Channel overwrites for a ticket — matches openTicket in functions.js (config roles only,
+ * not category inheritance). Replaces all overwrites on move so old type roles lose access.
+ */
+function buildPermissionOverwritesForTicketType({ client, guild, ticketType, userId = null }) {
 	const config = client?.config || {};
 	const staffGuild = guild || (client && client.guilds && client.guilds.cache.get(config.channel_ids?.staff_guild_id));
-	if (!staffGuild) return [];
-	const everyoneId = staffGuild.id;
-	const botId = client.user.id;
-	const accessRoles = getAccessRolesForTicketType(ticketType, config);
-	const merged = new Map();
-	const upsert = (id, allow = [], deny = []) => {
-		if (!id) return;
-		const existing = merged.get(String(id)) || { id: String(id), allow: new Set(), deny: new Set() };
-		for (const perm of allow) {
-			existing.allow.add(perm);
-			existing.deny.delete(perm);
-		}
-		for (const perm of deny) {
-			existing.deny.add(perm);
-			existing.allow.delete(perm);
-		}
-		merged.set(String(id), existing);
-	};
+	if (!staffGuild || !client?.user?.id) return [];
 
-	// Start from the target category's overwrites so inherited access remains valid after move.
-	if (category && category.permissionOverwrites && category.permissionOverwrites.cache) {
-		for (const overwrite of category.permissionOverwrites.cache.values()) {
-			upsert(
-				overwrite.id,
-				overwrite.allow?.toArray?.() || [],
-				overwrite.deny?.toArray?.() || []
-			);
-		}
+	const qf = getQuestionFileForType(ticketType);
+	const accessRoleIDs = Array.isArray(qf?.['access-role-id']) ? qf['access-role-id'].filter(Boolean) : [];
+
+	const overwrites = [
+		{ id: staffGuild.id, deny: ['ViewChannel', 'AddReactions'] },
+		{
+			id: client.user.id,
+			allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
+		},
+	];
+
+	if (config?.role_ids?.default_admin_role_id) {
+		overwrites.push({
+			id: config.role_ids.default_admin_role_id,
+			allow: ['ViewChannel', 'SendMessages'],
+		});
 	}
 
-	// Enforce ticket privacy and required bot access.
-	upsert(everyoneId, [], ['ViewChannel', 'AddReactions']);
-	upsert(botId, ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'], []);
-
-	// Ensure ticket access roles can view and respond.
-	for (const roleId of accessRoles) {
-		upsert(roleId, ['ViewChannel', 'SendMessages'], []);
+	const seen = new Set(overwrites.map((o) => String(o.id)));
+	for (const roleId of accessRoleIDs) {
+		if (!roleId || seen.has(String(roleId))) continue;
+		seen.add(String(roleId));
+		overwrites.push({ id: roleId, allow: ['ViewChannel', 'SendMessages'] });
 	}
 
-	return Array.from(merged.values()).map(x => ({
-		id: x.id,
-		allow: Array.from(x.allow),
-		deny: Array.from(x.deny)
-	}));
+	if (qf?.internal && userId && /^\d{17,19}$/.test(String(userId)) && !seen.has(String(userId))) {
+		overwrites.push({
+			id: String(userId),
+			allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+		});
+	}
+
+	return overwrites;
 }
 
 module.exports = {

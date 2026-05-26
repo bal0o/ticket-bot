@@ -74,7 +74,7 @@ module.exports = {
                 client,
                 guild: channel.guild,
                 ticketType,
-                category
+                userId: channel.topic,
             });
             if (Array.isArray(overwrites) && overwrites.length > 0) {
                 await channel.permissionOverwrites.set(overwrites);
