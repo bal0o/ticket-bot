@@ -48,7 +48,7 @@ async function resolveDisplayName(client, userId, member) {
     return name;
 }
 
-/** @returns {Map<string, { staffThreadId: string, ticketNumber: string, ticketChannelId: string, username?: string }>} */
+/** @returns {Map<string, { staffThreadId: string, ticketNumber: string, ticketChannelId: string, username?: string, statusMessageId?: string }>} */
 function getUserMonitors(client, userId) {
     ensureMaps(client);
     const key = String(userId);
@@ -72,11 +72,10 @@ async function resolveMember(client, userId) {
     return { member: null, guild: null };
 }
 
-function formatStatusMessage(displayName, online, { initial = false } = {}) {
+function formatStatusMessage(displayName, online) {
     const label = online ? '**online**' : '**offline**';
-    const verb = initial ? 'is currently' : 'is now';
     const name = displayName || 'Ticket user';
-    return `📡 **Ticket user status** — **${name}** ${verb} ${label}.`;
+    return `📡 **Ticket user status** — **${name}** is currently ${label}.`;
 }
 
 function formatUnableToMonitorMessage(displayName, guildName) {
@@ -84,23 +83,59 @@ function formatUnableToMonitorMessage(displayName, guildName) {
     return `📡 **Ticket user status** — Unable to monitor **${name}** (not found in **${guildName}**). They may not share a server with the bot, or presence tracking is unavailable.`;
 }
 
-async function postToStaffThread(client, staffThreadId, content) {
-    const thread = await client.channels.fetch(staffThreadId).catch(() => null);
-    if (!thread || typeof thread.send !== 'function') return;
+async function findExistingStatusMessage(client, thread) {
+    if (!thread?.messages?.fetch) return null;
     try {
-        await thread.send({ content, allowedMentions: { parse: [] } });
+        const messages = await thread.messages.fetch({ limit: 50 });
+        for (const msg of messages.values()) {
+            if (msg.author?.id === client.user?.id && msg.content?.startsWith('📡 **Ticket user status**')) {
+                return msg.id;
+            }
+        }
+    } catch (_) {}
+    return null;
+}
+
+async function upsertStatusMessage(client, staffThreadId, content, statusMessageId) {
+    const thread = await client.channels.fetch(staffThreadId).catch(() => null);
+    if (!thread || typeof thread.send !== 'function') return null;
+
+    const payload = { content, allowedMentions: { parse: [] } };
+
+    if (statusMessageId) {
+        const msg = await thread.messages.fetch(statusMessageId).catch(() => null);
+        if (msg && msg.author?.id === client.user?.id) {
+            try {
+                await msg.edit(payload);
+                return statusMessageId;
+            } catch (_) {}
+        }
+    }
+
+    try {
+        const sent = await thread.send(payload);
+        return sent?.id || null;
     } catch (e) {
         func.handle_errors(e, client, 'presenceMonitor.js', `Failed to post status to thread ${staffThreadId}`);
+        return null;
     }
 }
 
-async function broadcastStatus(client, userId, online, options = {}) {
+async function postStatusToMonitor(client, monitors, threadId, entry, content) {
+    const messageId = await upsertStatusMessage(client, entry.staffThreadId, content, entry.statusMessageId);
+    if (messageId && messageId !== entry.statusMessageId) {
+        entry.statusMessageId = messageId;
+        monitors.set(threadId, entry);
+    }
+}
+
+async function broadcastStatus(client, userId, online) {
     const monitors = getUserMonitors(client, userId);
     if (monitors.size === 0) return;
     const displayName = await resolveDisplayName(client, userId);
-    const content = formatStatusMessage(displayName, online, options);
-    for (const entry of monitors.values()) {
-        await postToStaffThread(client, entry.staffThreadId, content);
+    const content = formatStatusMessage(displayName, online);
+    for (const [threadId, entry] of monitors.entries()) {
+        await postStatusToMonitor(client, monitors, threadId, entry, content);
     }
 }
 
@@ -116,8 +151,8 @@ async function syncUserPresence(client, userId, { initial = false, notify = true
             const guildName = primaryGuild?.name || 'the configured server';
             const displayName = await resolveDisplayName(client, userId);
             const msg = formatUnableToMonitorMessage(displayName, guildName);
-            for (const entry of monitors.values()) {
-                await postToStaffThread(client, entry.staffThreadId, msg);
+            for (const [threadId, entry] of monitors.entries()) {
+                await postStatusToMonitor(client, monitors, threadId, entry, msg);
             }
         }
         return;
@@ -128,7 +163,7 @@ async function syncUserPresence(client, userId, { initial = false, notify = true
     const prev = client.presenceLastStatus.get(key);
 
     if (notify && (initial || (prev !== undefined && prev !== statusKey))) {
-        await broadcastStatus(client, userId, online, { initial: initial || prev === undefined });
+        await broadcastStatus(client, userId, online);
     }
 
     client.presenceLastStatus.set(key, statusKey);
@@ -154,16 +189,23 @@ module.exports.registerTicket = async function (client, { userId, username, staf
     const key = String(userId);
     const displayName = await resolveDisplayName(client, userId, member);
 
+    const threadKey = String(staffThreadId);
+    const entry = monitors.get(threadKey);
+
     if (!member) {
         const primaryGuild = client.guilds.cache.get(getPresenceGuildId(client));
         const guildName = primaryGuild?.name || 'the configured server';
-        await postToStaffThread(client, staffThreadId, formatUnableToMonitorMessage(displayName, guildName));
+        if (entry) {
+            await postStatusToMonitor(client, monitors, threadKey, entry, formatUnableToMonitorMessage(displayName, guildName));
+        }
         return;
     }
 
     const online = isUserOnline(member);
     const statusKey = online ? 'online' : 'offline';
-    await postToStaffThread(client, staffThreadId, formatStatusMessage(displayName, online, { initial: true }));
+    if (entry) {
+        await postStatusToMonitor(client, monitors, threadKey, entry, formatStatusMessage(displayName, online));
+    }
     client.presenceLastStatus.set(key, statusKey);
 };
 
@@ -210,7 +252,7 @@ module.exports.handlePresenceUpdate = async function (client, oldPresence, newPr
 
     client.presenceLastStatus.set(key, statusKey);
     await resolveDisplayName(client, userId, member);
-    await broadcastStatus(client, userId, online, { initial: false });
+    await broadcastStatus(client, userId, online);
 };
 
 module.exports.restoreOpenTickets = async function (client) {
@@ -244,10 +286,12 @@ module.exports.restoreOpenTickets = async function (client) {
         const monitors = getUserMonitors(client, topic);
         if (monitors.has(thread.id)) continue;
 
+        const statusMessageId = await findExistingStatusMessage(client, thread);
         monitors.set(String(thread.id), {
             staffThreadId: String(thread.id),
             ticketNumber: String(ticketNumber),
-            ticketChannelId: String(channel.id)
+            ticketChannelId: String(channel.id),
+            ...(statusMessageId ? { statusMessageId } : {})
         });
         await resolveDisplayName(client, topic).catch(() => {});
         restored++;
