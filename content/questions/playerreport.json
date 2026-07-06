@@ -1,5 +1,15 @@
 {
+	"server_selection": {
+		"enabled": true,
+		"question": "Which region are you reporting this issue on?",
+		"servers": [
+			"EU",
+			"US",
+			"AU"
+		]
+	},
 	"questions": [
+		"What world / server were you playing on? (W1, R1, Hub etc)",
 		"Who are you reporting?  Provide as much identifying information as you have.",
 		"Is there anyone else involved?  If yes, provide their information here.",
 		"Please describe the situation.  Be as detailed as you can.",
@@ -64,22 +74,5 @@
 		"Would you be happy to use our system again?",
 		"You can only have 5 questions in your forms."
 	],
-	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone.",
-
-	"server_selection": {
-		"enabled": true,
-		"question": "Which server are you reporting this issue on?",
-	    "servers": [
-			"EU1",
-			"EU2",
-			"EU3",
-			"EU4",
-			"EU5",
-			"US1",
-			"US2",
-			"US3",
-			"US4",
-			"US5"
-		]
-	}
+	"successful_feedback_message": "Thanks for your feedback! It really helps us make our systems better for everyone."
 }
