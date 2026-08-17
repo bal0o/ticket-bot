@@ -16,15 +16,15 @@ module.exports = {
         try {
             const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
             if (!staffGuild) {
-                return interaction.reply({ content: "Error: Staff guild not configured.", ephemeral: true }).catch(console.error);
+                return interaction.reply({ content: "Error: Staff guild not configured.", flags: func.EPHEMERAL }).catch(console.error);
             }
             const member = interaction.member;
 
             if (!member || !member.roles.cache.has(client.config.role_ids.default_admin_role_id)) {
-                return interaction.reply({ content: "You do not have permission to use this command.", ephemeral: true }).catch(console.error);
+                return interaction.reply({ content: "You do not have permission to use this command.", flags: func.EPHEMERAL }).catch(console.error);
             }
 
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: func.EPHEMERAL });
 
             const userId = interaction.options.getString("discordid");
             let user;
@@ -103,7 +103,7 @@ module.exports = {
 
             collector.on('collect', async i => {
                 if (i.user.id !== interaction.user.id) {
-                    return i.reply({ content: "You can't use these buttons.", ephemeral: true });
+                    return i.reply({ content: "You can't use these buttons.", flags: func.EPHEMERAL });
                 }
                 
                 await i.deferUpdate();
@@ -127,7 +127,7 @@ module.exports = {
 
         } catch (error) {
             func.handle_errors(error, client, "history.js");
-            const replyPayload = { content: 'An error occurred while executing the command. It has been logged.', ephemeral: true };
+            const replyPayload = { content: 'An error occurred while executing the command. It has been logged.', flags: func.EPHEMERAL };
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(replyPayload).catch(console.error);
             } else {

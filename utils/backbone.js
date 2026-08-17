@@ -412,7 +412,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 								.replace(`{{TICKETTYPE}}`, `\`${ticketType}\``)
 								.replace(`{{VERIFYLINK}}`, client.config.linking_settings.verify_link)
 							: `<@${user.id}>, you need to verify to make a '${ticketType}' ticket. Verify at ${client.config.linking_settings.verify_link}`,
-						ephemeral: true
+						flags: func.EPHEMERAL
 					});
 				}
 			}
@@ -426,7 +426,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             const result = await func.sendDMWithRetry(user, '------------ BRIT SUPPORT -------------', { maxAttempts: 3, baseDelayMs: 500 });
             if (!result.delivered) {
                 errorFound++
-                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
                 try { logger.warn('[TicketDM] Failed initial divider DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
@@ -438,13 +438,13 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             const result = await func.sendDMWithRetry(user, welcomeText, { maxAttempts: 3, baseDelayMs: 600 });
             if (!result.delivered) {
                 errorFound++
-                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
                 try { logger.warn('[TicketDM] Failed welcome DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
 
 			if (errorFound == 1) return;
-		await interaction.editReply({content: "I've sent you a DM to continue our conversation!", ephemeral: true}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+		await interaction.editReply({content: "I've sent you a DM to continue our conversation!", flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
 			
 			var stop = false;
 

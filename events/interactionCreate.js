@@ -70,7 +70,7 @@ module.exports = async function (client, interaction) {
 
             await interaction.reply({
                 content:`An error occured while executing that command!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             })
         }
             return;
@@ -137,7 +137,7 @@ module.exports = async function (client, interaction) {
                 
                 const channel = interaction.channel;
                 if (!channel) {
-                    try { await interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true }); } catch(_) {}
+                    try { await interaction.editReply({ content: 'Could not find the ticket channel.', flags: MessageFlags.Ephemeral }); } catch(_) {}
                     return;
                 }
                 
@@ -153,7 +153,7 @@ module.exports = async function (client, interaction) {
                     func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
                 }
                 try {
-                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', ephemeral: true };
+                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', flags: MessageFlags.Ephemeral };
                     if (interaction.deferred || interaction.replied) {
                         await interaction.editReply(payload);
                     } else {
@@ -166,7 +166,7 @@ module.exports = async function (client, interaction) {
             } catch (error) {
                 func.handle_errors(error, client, 'interactionCreate.js', 'Error handling close ticket modal');
                 try {
-                    await interaction.editReply({ content: 'An error occurred while closing the ticket. Please try again.', ephemeral: true });
+                    await interaction.editReply({ content: 'An error occurred while closing the ticket. Please try again.', flags: MessageFlags.Ephemeral });
                 } catch (e) {
                     // If we can't edit the reply, the interaction has probably timed out
                 }
@@ -180,20 +180,20 @@ module.exports = async function (client, interaction) {
                 
                 const context = client.replyContext?.get(interaction.user.id);
                 if (!context) {
-                    return interaction.editReply({ content: 'Session expired. Please use /reply again.', ephemeral: true });
+                    return interaction.editReply({ content: 'Session expired. Please use /reply again.', flags: MessageFlags.Ephemeral });
                 }
                 
                 const { channelId, userId } = context;
                 const editedResponse = interaction.fields.getTextInputValue('replyText');
                 
                 if (!editedResponse || !editedResponse.trim()) {
-                    return interaction.editReply({ content: 'Response cannot be empty.', ephemeral: true });
+                    return interaction.editReply({ content: 'Response cannot be empty.', flags: MessageFlags.Ephemeral });
                 }
                 
                 // Get the channel
                 const channel = await client.channels.fetch(channelId).catch(() => null);
                 if (!channel) {
-                    return interaction.editReply({ content: 'Could not find the ticket channel.', ephemeral: true });
+                    return interaction.editReply({ content: 'Could not find the ticket channel.', flags: MessageFlags.Ephemeral });
                 }
                 
                 // Get the user for DM
@@ -291,11 +291,11 @@ module.exports = async function (client, interaction) {
                 // Clean up context
                 client.replyContext?.delete(interaction.user.id);
                 
-                await interaction.editReply({ content: 'Response sent successfully!', ephemeral: true });
+                await interaction.editReply({ content: 'Response sent successfully!', flags: MessageFlags.Ephemeral });
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error handling replyStandardResponse modal');
                 try {
-                    await interaction.editReply({ content: 'An error occurred while sending the response.', ephemeral: true });
+                    await interaction.editReply({ content: 'An error occurred while sending the response.', flags: MessageFlags.Ephemeral });
                 } catch (_) {}
                 client.replyContext?.delete(interaction.user.id);
             }
@@ -395,7 +395,7 @@ module.exports = async function (client, interaction) {
                 }
             } else {
                 await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})
-                let errormsg = await interaction.channel.send({content: lang.misc["no-user-found"] != "" ? lang.misc["no-user-found"] : "Could not find that user to send them a message. Have they left the discord?", ephemeral: true}).catch(e => { func.handle_errors(e, client, `interactionCreate.js`, null) });
+                let errormsg = await interaction.channel.send({content: lang.misc["no-user-found"] != "" ? lang.misc["no-user-found"] : "Could not find that user to send them a message. Have they left the discord?"}).catch(e => { func.handle_errors(e, client, `interactionCreate.js`, null) });
                 setTimeout(async () => {
                     return await errormsg.delete().catch(e => func.handle_errors(e, client, `interactionCreate.js`, null))
                 }, client.config.timeouts.user_error_message_timeout_in_seconds * 1000);
@@ -420,7 +420,7 @@ module.exports = async function (client, interaction) {
                 // If already claimed by someone else, block
                 const existing = client.claims.get(claimKey);
                 if (existing && existing.userId !== interaction.user.id) {
-                    await interaction.followUp({ content: `This ticket is already claimed by <@${existing.userId}>.`, ephemeral: true }).catch(()=>{});
+                    await interaction.followUp({ content: `This ticket is already claimed by <@${existing.userId}>.`, flags: MessageFlags.Ephemeral }).catch(()=>{});
                     return;
                 }
 
@@ -462,7 +462,7 @@ module.exports = async function (client, interaction) {
                         });
                         await interaction.message.edit({ components: rows }).catch(()=>{});
                     } catch (_) {}
-                    await interaction.followUp({ content: 'Unclaimed ticket.', ephemeral: true }).catch(()=>{});
+                    await interaction.followUp({ content: 'Unclaimed ticket.', flags: MessageFlags.Ephemeral }).catch(()=>{});
                     return;
                 }
 
@@ -511,7 +511,7 @@ module.exports = async function (client, interaction) {
                     });
                     await interaction.message.edit({ components: rows }).catch(()=>{});
                 } catch (_) {}
-                await interaction.followUp({ content: `You claimed this ticket.`, ephemeral: true }).catch(()=>{});
+                await interaction.followUp({ content: `You claimed this ticket.`, flags: MessageFlags.Ephemeral }).catch(()=>{});
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error in claimticket');
             }
@@ -704,21 +704,21 @@ module.exports = async function (client, interaction) {
             const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
-                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Get the user ID from the channel topic
             const userId = interaction.message.channel.topic;
             if (!userId || !/^\d{17,19}$/.test(userId)) {
-                await interaction.editReply({ content: 'Could not find the user information. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the user information. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Get the user
             const user = await client.users.fetch(userId).catch(() => null);
             if (!user) {
-                await interaction.editReply({ content: 'Could not find the user. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -737,7 +737,7 @@ module.exports = async function (client, interaction) {
                         )
                 );
 
-            await interaction.editReply({ content: 'Select the new ticket type:', components: [row], ephemeral: true });
+            await interaction.editReply({ content: 'Select the new ticket type:', components: [row], flags: MessageFlags.Ephemeral });
         }
 
         if (interaction.customId === 'selectTicketType') {
@@ -749,28 +749,28 @@ module.exports = async function (client, interaction) {
             const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
-                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Get the user ID from the channel topic
             const userId = interaction.message.channel.topic;
             if (!userId || !/^\d{17,19}$/.test(userId)) {
-                await interaction.editReply({ content: 'Could not find the user information. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the user information. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Get the user
             const user = await client.users.fetch(userId).catch(() => null);
             if (!user) {
-                await interaction.editReply({ content: 'Could not find the user. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Get the new ticket type configuration
             const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == newTicketType.toLowerCase());
             if (!found) {
-                await interaction.editReply({ content: 'Invalid ticket type selected. Please try again.', ephemeral: true });
+                await interaction.editReply({ content: 'Invalid ticket type selected. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -823,7 +823,7 @@ module.exports = async function (client, interaction) {
             }
 
             if (typeOptions.length === 0) {
-                await interaction.editReply({ content: 'No valid ticket types found with configured categories. Please check options and question files.', ephemeral: true });
+                await interaction.editReply({ content: 'No valid ticket types found with configured categories. Please check options and question files.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -842,7 +842,7 @@ module.exports = async function (client, interaction) {
                         )
                 );
 
-            await interaction.editReply({ content: 'Select the ticket type to move this ticket to:', components: [row], ephemeral: true });
+            await interaction.editReply({ content: 'Select the ticket type to move this ticket to:', components: [row], flags: MessageFlags.Ephemeral });
         }
 
         if (interaction.customId === 'selectMoveType') {
@@ -851,11 +851,11 @@ module.exports = async function (client, interaction) {
             const typeKey = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
             const opt = handlerRaw.options[typeKey];
-            if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', ephemeral: true }); return; }
+            if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', flags: MessageFlags.Ephemeral }); return; }
             const qf = require(`../content/questions/${opt.question_file}`);
             const categoryId = qf["ticket-category"];
             if (!categoryId) {
-                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
                 return;
             }
             // Try cache first, then fetch if not found
@@ -864,12 +864,12 @@ module.exports = async function (client, interaction) {
                 try {
                     category = await interaction.guild.channels.fetch(categoryId);
                 } catch (_) {
-                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
                     return;
                 }
             }
             if (!category || category.type !== ChannelType.GuildCategory) {
-                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', ephemeral: true });
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -1011,7 +1011,7 @@ module.exports = async function (client, interaction) {
                         await interaction.editReply({
                             content: `Ticket moved to ${displayType}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
                             components: [],
-                            ephemeral: true
+                            flags: MessageFlags.Ephemeral
                         }).catch(() => {});
                     } else {
                         await interaction.deleteReply().catch(() => {});
@@ -1019,7 +1019,7 @@ module.exports = async function (client, interaction) {
                 })
                 .catch(async error => {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
-                    try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', ephemeral: true }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
+                    try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', flags: MessageFlags.Ephemeral }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
                 });
         }
 
@@ -1053,7 +1053,7 @@ module.exports = async function (client, interaction) {
                 }
                 if (accepted === 0) {
                     let role = interaction.message.guild.roles.cache.find(role => role.id === client.config.role_ids.default_admin_role_id)
-                    await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                    await interaction.reply({content: lang.misc["incorrect-roles-for-action"] != "" ? lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role?.name || 'Admin'}\``) : `It seems you do not have the correct roles to perform that action! You need the \`${role?.name || 'Admin'}\` role or an "access-role" if one is set!`, flags: MessageFlags.Ephemeral}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                     return;
                 }
                 // Claim enforcement: only claimer (or bypass) can close when restricted
@@ -1064,7 +1064,7 @@ module.exports = async function (client, interaction) {
                             const bypassRoles = new Set((client.config?.claims?.role_bypass_ids || []).concat([client.config.role_ids.default_admin_role_id].filter(Boolean)));
                             const hasBypass = interaction.member.roles.cache.some(r => bypassRoles.has(r.id));
                             if (!hasBypass) {
-                                await interaction.reply({ content: `This ticket is claimed by <@${claim.userId}>.`, ephemeral: true }).catch(() => {});
+                                await interaction.reply({ content: `This ticket is claimed by <@${claim.userId}>.`, flags: MessageFlags.Ephemeral }).catch(() => {});
                                 return;
                             }
                         }
@@ -1114,7 +1114,7 @@ module.exports = async function (client, interaction) {
             // Get the member object
             const member = interaction.member;
             if (!member) {
-                await interaction.reply({ content: 'Could not find member information.', ephemeral: true });
+                await interaction.reply({ content: 'Could not find member information.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -1127,7 +1127,7 @@ module.exports = async function (client, interaction) {
                 let recepient = client.users.cache.find(x => x.id == recepientId);
                 if (!recepient) recepient = await client.users.fetch(recepientId).catch(() => null);
                 if (!recepient) {
-                    await interaction.reply({ content: `Could not find user with ID ${recepientId}.`, ephemeral: true });
+                    await interaction.reply({ content: `Could not find user with ID ${recepientId}.`, flags: MessageFlags.Ephemeral });
                     return;
                 }
                 // Only call switcher if recepient is valid
@@ -1138,7 +1138,7 @@ module.exports = async function (client, interaction) {
                     content: lang.misc["incorrect-roles-for-action"] != "" ? 
                         lang.misc["incorrect-roles-for-action"].replace(`{{ROLENAME}}`, `\`${role.name}\``) : 
                         `It seems you do not have the correct roles to perform that action! You need the \`${role.name}\` role or an "access-role" if one is set!`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 }).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                 return;
             }
@@ -1159,7 +1159,7 @@ module.exports = async function (client, interaction) {
                 }
 
                 if (client.blocked_users.has(interaction.member.user.id) || client.cooldown.has(interaction.member.user.id)) {
-                    const payload = { content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", ephemeral: true };
+                    const payload = { content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", flags: MessageFlags.Ephemeral };
                     if (interaction.deferred) {
                         await interaction.editReply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                     } else {
@@ -1191,7 +1191,7 @@ module.exports = async function (client, interaction) {
 
                 if (!client.config.tokens.Linking_System_API_Key_Or_Secret || client.config.tokens.Linking_System_API_Key_Or_Secret == "") {
                         func.handle_errors(null, client, `interactionCreate.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     }
                     
                 // Simple Link is 1
@@ -1202,12 +1202,12 @@ module.exports = async function (client, interaction) {
                             if (SteamIDGrab?.body?.toString().startsWith("7656119")) {
                                 SteamID = SteamIDGrab.body
                             } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                             }
                         }
                     } else {
                         func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system?\n\n**Linking System:** Simple Link`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     
                     }
     
@@ -1220,18 +1220,18 @@ module.exports = async function (client, interaction) {
                         if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId) {
                             if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId.toString().startsWith("7656119")) {
                             } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                             }
                         } else {
-                            return interaction.editReply({content:  lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                            return interaction.editReply({content:  lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                     
                         }
                     } else {
-                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                     }
                     } else {
                         func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system and/or is your subscription active?\n\n**Linking System:** Steamcord`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     }
                     
                     // Platform Sync is 3
@@ -1244,23 +1244,23 @@ module.exports = async function (client, interaction) {
                                 if (SteamIDGrab.body?.steam_id) {
                                     if (SteamIDGrab.body?.steam_id?.toString().startsWith("7656119")) {
                                     } else {
-                                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                                     }
                                 } else {
-                                    return interaction.editReply({content: lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                                    return interaction.editReply({content: lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                             
                                 }
                             } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, ephemeral: true})
+                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                             }
                         } else {
                             func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Is your API Key correct and is it a paid subscription?\n\n**Linking System:** Platform Sync`)
-                            return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                            return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                         
                         }   
                     } else {
                         func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system?\n\n**Linking System:** Platform Sync`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     }
     
                 }
@@ -1270,7 +1270,7 @@ module.exports = async function (client, interaction) {
             if (!questionFilesystem["open-as-ticket"]) {
             let postchannel = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id).channels.fetch(questionFilesystem["post-channel"])
             if (!postchannel) {
-                await interaction.editReply({content: lang.misc["generic-error-message"] != "" ? lang.misc["generic-error-message"] : `Sorry we could not perform this action right now, the staff team have been made aware of the issue!`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));	
+                await interaction.editReply({content: lang.misc["generic-error-message"] != "" ? lang.misc["generic-error-message"] : `Sorry we could not perform this action right now, the staff team have been made aware of the issue!`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));	
 			    return func.handle_errors(null, client, `interactionCreate.js`, `I could not find the designated ticket creation channel for the bot, please make sure the ID is set correctly in your ticket specific config(s).\nVariable: post_channel\nTicketType: ${ticketType}`)
             }
             let maxCount = 0
@@ -1284,7 +1284,7 @@ module.exports = async function (client, interaction) {
             }
 
             if (maxCount >= questionFilesystem["max-active-tickets"]) {
-				let errormsg = await interaction.editReply({content: lang.user_errors["too-many-pending-tickets"] != "" ? lang.user_errors["too-many-pending-tickets"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have too many tickets open, please wait for them to be resolved.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+				let errormsg = await interaction.editReply({content: lang.user_errors["too-many-pending-tickets"] != "" ? lang.user_errors["too-many-pending-tickets"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have too many tickets open, please wait for them to be resolved.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 				return;
                 }
             }
@@ -1358,7 +1358,7 @@ module.exports = async function (client, interaction) {
 				}
 				
 				if (openTicketCount >= client.config.bot_settings.max_tickets_per_user) {
-					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, ephemeral: true}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 					return;
 				}
 			}
@@ -1374,7 +1374,7 @@ module.exports = async function (client, interaction) {
             // Retrieve context
             const ctx = client.moveTicketContext;
             if (!ctx) {
-                await interaction.reply({ content: 'Move context missing. Please try again.', ephemeral: true });
+                await interaction.reply({ content: 'Move context missing. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const channel = await client.channels.fetch(ctx.channelId);
@@ -1459,10 +1459,10 @@ module.exports = async function (client, interaction) {
                 }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning for modal move'));
                 await interaction.reply({
                     content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             } else {
-                await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, ephemeral: true });
+                await interaction.reply({ content: `Ticket moved to ${ctx.ticketType}${renameSucceeded ? '' : ' (with errors)'}.`, flags: MessageFlags.Ephemeral });
             }
             // Clean up context
             client.moveTicketContext = undefined;
@@ -1473,7 +1473,7 @@ module.exports = async function (client, interaction) {
             try {
                 // Null checks for administratorMember and recepientMember
                 if (!administratorMember || !recepientMember) {
-                    await interaction.reply({ content: 'Could not find required user/member information to process this ticket action.', ephemeral: true }).catch(() => {});
+                    await interaction.reply({ content: 'Could not find required user/member information to process this ticket action.', flags: MessageFlags.Ephemeral }).catch(() => {});
                     return;
                 }
 

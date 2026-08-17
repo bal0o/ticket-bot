@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, MessageFlags, Collection } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
 const func = require("./functions.js")
@@ -112,6 +112,8 @@ module.exports.preserveTicketDmRelayOnMove = async function(userId, ticketId, ol
         await module.exports.setTicketDmRelay(userId, ticketId, true);
     }
 };
+
+module.exports.EPHEMERAL = MessageFlags.Ephemeral;
 
 /** Fetch a specific guild member by ID (REST; does not require Guild Members intent). */
 module.exports.resolveGuildMember = async function(guild, userId, { force = false } = {}) {
@@ -329,7 +331,13 @@ module.exports.fetchPinnedSafe = async function(channel) {
         while (attempt < maxAttempts) {
             try {
                 lastFetchTimes.set(channelId, Date.now());
-                const messages = await channel.messages.fetchPinned();
+                const pinData = await channel.messages.fetchPins();
+                const messages = new Collection();
+                for (const item of pinData.items || []) {
+                    if (item?.message?.id) {
+                        messages.set(item.message.id, item.message);
+                    }
+                }
                 // Cache the result
                 pinnedCache.set(channelId, { messages, timestamp: Date.now() });
                 return messages;
@@ -677,7 +685,7 @@ module.exports.sendStaffThreadInfo = async function (client, thread, recepientMe
 async function notifyTicketCreationFailed(interaction, recepientMember) {
     const message = 'Your ticket could not be created. Please try again or contact staff.';
     if (interaction?.editReply) {
-        await interaction.editReply({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.editReply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
     if (recepientMember?.send) {
         await recepientMember.send(message).catch(() => {});
@@ -689,7 +697,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     if (!recepientMember) {
         func.handle_errors(null, client, 'functions.js', 'openTicket called with null recepientMember');
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.', ephemeral: true });
+            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.', flags: MessageFlags.Ephemeral });
         }
         return;
     }
@@ -769,7 +777,7 @@ if (questionFilesystem.server_selection?.enabled) {
     } else if (typesRequireServer.includes(ticketType.toLowerCase())) {
         // If required and missing, notify and do not create ticket
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.`, ephemeral: true });
+            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.`, flags: MessageFlags.Ephemeral });
         }
         return;
     }

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
 const { createDB } = require('../../utils/mysql');
@@ -128,7 +128,7 @@ module.exports = {
             );
             return interaction.reply({
                 content: `Staff applications are currently **${enabled ? 'ENABLED' : 'DISABLED'}**.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -137,7 +137,7 @@ module.exports = {
             await db.set(key, enable);
         } catch (_) {}
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const channelId = client.config?.channel_ids?.post_embed_channel_id;
         const postChannel = channelId ? client.channels.cache.get(channelId) : null;

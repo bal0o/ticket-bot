@@ -10,7 +10,7 @@ module.exports = {
                 .setDescription('Reason for closing the ticket')
                 .setRequired(false)),
     async execute(interaction, client) {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: func.EPHEMERAL });
         const channel = interaction.channel;
         if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) {
             return interaction.editReply('This is not a valid ticket channel.');
