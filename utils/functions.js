@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, MessageFlags, Collection } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, MessageFlags, Collection, StringSelectMenuBuilder } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
 const func = require("./functions.js")
@@ -19,6 +19,7 @@ try {
 const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
+const perms = require('./permissions');
 
 /**
  * Check if a ticket type is internal by looking up the question file
@@ -1494,24 +1495,39 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // After ticket close, aggregates are now derived directly from the MySQL tickets/message tables; 
         // legacy Prometheus aggregation has been removed.
         // removed debug
-        // DM user
+        // DM original owner plus any merged reporters
+        const closeRecipientIds = new Set([String(DiscordID)]);
+        try {
+            if (typeof db.getTicketParticipants === 'function' && globalTicketNumber) {
+                const extras = await db.getTicketParticipants(globalTicketNumber);
+                for (const row of extras || []) {
+                    if (row && row.userId) closeRecipientIds.add(String(row.userId));
+                }
+            }
+        } catch (e) {
+            func.handle_errors(e, client, 'functions.js', 'Failed to load ticket participants for close DMs');
+        }
+
         if (typeFile.send_close_dm !== false) {
             let reply = `Your ticket (#${globalTicketNumber}) has been closed.\nReason: ${reason}`;
             if (client.config.transcript_settings?.base_url) {
                 const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
                 reply += `\n\nView your transcript: <${userUrl}>`;
             }
-            // Use sendDMWithRetry for better reliability with long-term tickets (handles stale DM channels)
-            try {
-                const result = await module.exports.sendDMWithRetry(user, reply, { maxAttempts: 3, baseDelayMs: 600 });
-                const sentMsg = result && result.message ? result.message : null;
-                // Extra safety: try suppressing embeds in case Discord still attempts a preview
-                if (sentMsg && sentMsg.suppressEmbeds) {
-                    try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+            for (const recipientId of closeRecipientIds) {
+                const recipient = recipientId === String(DiscordID)
+                    ? user
+                    : await client.users.fetch(recipientId).catch(() => null);
+                if (!recipient) continue;
+                try {
+                    const result = await module.exports.sendDMWithRetry(recipient, reply, { maxAttempts: 3, baseDelayMs: 600 });
+                    const sentMsg = result && result.message ? result.message : null;
+                    if (sentMsg && sentMsg.suppressEmbeds) {
+                        try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+                    }
+                } catch (e) {
+                    func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${recipientId}`);
                 }
-            } catch (e) {
-                // Log error but don't fail ticket closure
-                func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${DiscordID}`);
             }
         }
         // Update ticket count
@@ -1530,13 +1546,15 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
 			}
 		}
 
-        // Remove from user's ticket index
-        try {
-            const key = `UserTicketIndex.${DiscordID}`;
-            const list = (await db.get(key)) || [];
-            const updated = list.filter(id => id !== channel.id);
-            await db.set(key, updated);
-        } catch (_) {}
+        // Remove from every participant's ticket index
+        for (const participantId of closeRecipientIds) {
+            try {
+                const key = `UserTicketIndex.${participantId}`;
+                const list = (await db.get(key)) || [];
+                const updated = list.filter(id => id !== channel.id);
+                await db.set(key, updated);
+            } catch (_) {}
+        }
 
         // Delete the ticket channel after a short delay so logs/embeds finish
         try {
@@ -1560,4 +1578,349 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
     }
+};
+
+const MERGE_PAGE_SIZE = 25;
+
+function ticketTypeSlug(ticketType) {
+    return String(ticketType || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function channelNameMatchesTicketType(channelName, ticketType) {
+    const slug = ticketTypeSlug(ticketType);
+    if (!slug) return false;
+    const name = String(channelName || '').toLowerCase();
+    return name.includes(`-${slug}-`) || name.startsWith(`${slug}-`);
+}
+
+module.exports.MERGE_PAGE_SIZE = MERGE_PAGE_SIZE;
+
+module.exports.normalizeTicketType = function(ticketType) {
+    if (!ticketType) return null;
+    const handlerRaw = require('../content/handler/options.json');
+    const found = Object.keys(handlerRaw.options || {}).find(x => x.toLowerCase() === String(ticketType).toLowerCase());
+    return found || ticketType;
+};
+
+module.exports.resolveTicketTypeFromChannel = async function(channel) {
+    try {
+        const pins = await module.exports.fetchPinnedSafe(channel);
+        const pin = pins.find(m => m.embeds?.[0]?.footer?.text && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || pins.last();
+        if (pin?.embeds?.[0]?.footer?.text) {
+            const parsed = module.exports.parseTicketTypeFromEmbedFooter(pin.embeds[0].footer.text);
+            if (parsed) return module.exports.normalizeTicketType(parsed);
+        }
+    } catch (_) {}
+    const ownerId = channel?.topic;
+    const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    if (ownerId && ticketNum && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [ownerId, ticketNum]
+            );
+            if (rows?.[0]?.ticket_type) return module.exports.normalizeTicketType(rows[0].ticket_type);
+        } catch (_) {}
+    }
+    return null;
+};
+
+module.exports.getExtraParticipantUserIds = async function(ticketId, ownerId) {
+    if (!ticketId || typeof db.getTicketParticipants !== 'function') return [];
+    try {
+        const rows = await db.getTicketParticipants(ticketId);
+        return (rows || []).map(r => String(r.userId || '')).filter(id => id && id !== String(ownerId || ''));
+    } catch (_) {
+        return [];
+    }
+};
+
+module.exports.applyTicketTypeOverwrites = async function(client, channel, ticketType, ownerId) {
+    const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    const extraUserIds = await module.exports.getExtraParticipantUserIds(ticketNum, ownerId);
+    const overwrites = perms.buildPermissionOverwritesForTicketType({
+        client,
+        guild: channel.guild,
+        ticketType,
+        userId: ownerId,
+        extraUserIds,
+    });
+    if (!Array.isArray(overwrites) || overwrites.length === 0) return;
+    try {
+        await channel.permissionOverwrites.set(overwrites);
+    } catch (err) {
+        const baseOverwrites = perms.buildPermissionOverwritesForTicketType({
+            client,
+            guild: channel.guild,
+            ticketType,
+            userId: ownerId,
+            extraUserIds: [],
+        });
+        if (baseOverwrites.length > 0) {
+            await channel.permissionOverwrites.set(baseOverwrites);
+        }
+        for (const uid of extraUserIds) {
+            try {
+                await channel.permissionOverwrites.edit(uid, {
+                    ViewChannel: true,
+                    SendMessages: true,
+                    ReadMessageHistory: true,
+                });
+            } catch (extraErr) {
+                module.exports.handle_errors(extraErr, client, 'functions.js', `Failed to restore merged participant overwrite for ${uid}`);
+            }
+        }
+        module.exports.handle_errors(err, client, 'functions.js', 'Failed to set ticket overwrites in one pass; restored extras individually');
+    }
+};
+
+async function addChannelToUserTicketIndex(userId, channelId) {
+    if (!userId || !channelId) return;
+    try {
+        const key = `UserTicketIndex.${userId}`;
+        const list = (await db.get(key)) || [];
+        if (!list.includes(channelId)) {
+            list.push(channelId);
+            await db.set(key, list);
+        }
+    } catch (_) {}
+}
+
+async function getFormAnswersForTicket(userId, ticketId, sourceChannel) {
+    if (userId && ticketId && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT responses FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [String(userId), String(ticketId)]
+            );
+            if (rows?.[0]?.responses) return String(rows[0].responses);
+        } catch (_) {}
+    }
+    try {
+        const pins = await module.exports.fetchPinnedSafe(sourceChannel);
+        const pin = pins.find(m => m.embeds?.[0]?.footer?.text && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || pins.last();
+        if (pin?.embeds?.[0]?.description) return String(pin.embeds[0].description);
+        if (Array.isArray(pin?.embeds?.[0]?.fields) && pin.embeds[0].fields.length) {
+            return pin.embeds[0].fields.map(f => `**${f.name}**\n${f.value}`).join('\n\n');
+        }
+    } catch (_) {}
+    return '';
+}
+
+module.exports.listOpenTicketsOfType = async function(guild, ticketType, excludeChannelId) {
+    const results = [];
+    const seen = new Set();
+    if (!guild) return results;
+    try { await guild.channels.fetch(); } catch (_) {}
+
+    try {
+        if (typeof db.query === 'function') {
+            const [rows] = await db.query(
+                `SELECT user_id, ticket_id, username, responses
+                 FROM tickets
+                 WHERE LOWER(ticket_type) = LOWER(?)
+                   AND (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`,
+                [ticketType]
+            );
+            for (const row of rows || []) {
+                const userId = String(row.user_id || '');
+                const ticketId = String(row.ticket_id || '');
+                const channel = guild.channels.cache.find(c =>
+                    c.type === ChannelType.GuildText &&
+                    String(c.topic || '') === userId &&
+                    (c.name.endsWith(`-${ticketId}`) || c.name.endsWith(ticketId)) &&
+                    c.id !== excludeChannelId
+                );
+                if (!channel || seen.has(channel.id)) continue;
+                seen.add(channel.id);
+                results.push({
+                    channelId: channel.id,
+                    name: channel.name,
+                    ownerId: userId,
+                    ownerName: row.username || userId,
+                    ticketNumber: ticketId,
+                    responses: row.responses || null,
+                });
+            }
+        }
+    } catch (_) {}
+
+    for (const channel of guild.channels.cache.values()) {
+        if (channel.type !== ChannelType.GuildText) continue;
+        if (channel.id === excludeChannelId) continue;
+        if (seen.has(channel.id)) continue;
+        if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) continue;
+        if (!channelNameMatchesTicketType(channel.name, ticketType)) continue;
+        const ticketNumber = module.exports.parseTicketNumberFromChannelName(channel.name);
+        if (!ticketNumber) continue;
+        seen.add(channel.id);
+        results.push({
+            channelId: channel.id,
+            name: channel.name,
+            ownerId: channel.topic,
+            ownerName: channel.topic,
+            ticketNumber,
+            responses: null,
+        });
+    }
+
+    results.sort((a, b) => String(a.ticketNumber).localeCompare(String(b.ticketNumber), undefined, { numeric: true }));
+    return results;
+};
+
+module.exports.buildMergeSelectComponents = function(candidates, page) {
+    const total = candidates.length;
+    const pageCount = Math.max(1, Math.ceil(total / MERGE_PAGE_SIZE));
+    const safePage = Math.min(Math.max(0, page), pageCount - 1);
+    const start = safePage * MERGE_PAGE_SIZE;
+    const pageItems = candidates.slice(start, start + MERGE_PAGE_SIZE);
+    const rows = [];
+
+    if (pageItems.length > 0) {
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('merge_select')
+            .setPlaceholder('Select one or more tickets to merge into this one')
+            .setMinValues(1)
+            .setMaxValues(pageItems.length)
+            .addOptions(pageItems.map(item => {
+                const label = `#${item.ticketNumber} · ${item.ownerName || item.ownerId}`.slice(0, 100);
+                return {
+                    label,
+                    value: item.channelId,
+                    description: String(item.name || 'Ticket').slice(0, 100) || 'Ticket',
+                };
+            }));
+        rows.push(new ActionRowBuilder().addComponents(select));
+    }
+
+    if (pageCount > 1) {
+        rows.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`merge_page:${safePage - 1}`)
+                .setLabel('Previous')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(safePage <= 0),
+            new ButtonBuilder()
+                .setCustomId(`merge_page:${safePage + 1}`)
+                .setLabel('Next')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(safePage >= pageCount - 1)
+        ));
+    }
+
+    const end = Math.min(start + pageItems.length, total);
+    const content = pageCount > 1
+        ? `Select tickets to merge into this one. Showing ${start + 1}–${end} of ${total}.`
+        : `Select tickets to merge into this one (${total} open).`;
+    return { content, components: rows, page: safePage };
+};
+
+module.exports.mergeTickets = async function(client, survivorChannel, sourceChannelIds, staffMember) {
+    const succeeded = [];
+    const failed = [];
+    const ownerId = survivorChannel?.topic;
+    const survivorNumber = module.exports.parseTicketNumberFromChannelName(survivorChannel?.name);
+    const survivorType = await module.exports.resolveTicketTypeFromChannel(survivorChannel);
+
+    if (!survivorChannel || !ownerId || !/^\d{17,19}$/.test(ownerId) || !survivorNumber || !survivorType) {
+        return { succeeded, failed: [{ id: survivorChannel?.id, error: 'Could not resolve this ticket.' }] };
+    }
+    if (!perms.ticketTypeAllowsMerges(survivorType)) {
+        return { succeeded, failed: [{ id: survivorChannel.id, error: 'This ticket type cannot be merged.' }] };
+    }
+
+    const uniqueSourceIds = [...new Set((sourceChannelIds || []).map(String))].filter(id => id && id !== survivorChannel.id);
+    const addedUserIds = new Set();
+
+    try {
+        if (typeof db.addTicketParticipant === 'function') {
+            await db.addTicketParticipant(survivorNumber, ownerId, null);
+        }
+    } catch (e) {
+        func.handle_errors(e, client, 'functions.js', 'Failed to record original ticket owner as participant');
+    }
+
+    for (const sourceId of uniqueSourceIds) {
+        let sourceChannel = null;
+        try {
+            sourceChannel = survivorChannel.guild.channels.cache.get(sourceId)
+                || await survivorChannel.guild.channels.fetch(sourceId).catch(() => null);
+            if (!sourceChannel || sourceChannel.type !== ChannelType.GuildText) {
+                failed.push({ id: sourceId, error: 'Channel not found.' });
+                continue;
+            }
+            if (!sourceChannel.topic || !/^\d{17,19}$/.test(sourceChannel.topic)) {
+                failed.push({ id: sourceId, error: 'Not a valid ticket channel.' });
+                continue;
+            }
+            const sourceType = await module.exports.resolveTicketTypeFromChannel(sourceChannel);
+            if (!sourceType || sourceType.toLowerCase() !== survivorType.toLowerCase()) {
+                failed.push({ id: sourceId, error: 'Different ticket type.' });
+                continue;
+            }
+            const sourceOwnerId = String(sourceChannel.topic);
+            const sourceNumber = module.exports.parseTicketNumberFromChannelName(sourceChannel.name);
+            if (!sourceNumber) {
+                failed.push({ id: sourceId, error: 'Could not parse ticket number.' });
+                continue;
+            }
+
+            const formAnswers = await getFormAnswersForTicket(sourceOwnerId, sourceNumber, sourceChannel);
+            const sourceUser = await client.users.fetch(sourceOwnerId).catch(() => null);
+            const extraParts = typeof db.getTicketParticipants === 'function'
+                ? await db.getTicketParticipants(sourceNumber).catch(() => [])
+                : [];
+            const usersToAdd = new Set([sourceOwnerId, ...((extraParts || []).map(p => String(p.userId || '')).filter(Boolean))]);
+
+            for (const uid of usersToAdd) {
+                try {
+                    await survivorChannel.permissionOverwrites.edit(uid, {
+                        ViewChannel: true,
+                        SendMessages: true,
+                        ReadMessageHistory: true,
+                    });
+                } catch (permErr) {
+                    func.handle_errors(permErr, client, 'functions.js', `Failed to add <@${uid}> to merged ticket overwrites`);
+                }
+                try {
+                    if (typeof db.addTicketParticipant === 'function') {
+                        const srcId = uid === sourceOwnerId ? sourceNumber : ((extraParts || []).find(p => String(p.userId) === uid)?.sourceTicketId || sourceNumber);
+                        await db.addTicketParticipant(survivorNumber, uid, srcId);
+                    }
+                } catch (dbErr) {
+                    func.handle_errors(dbErr, client, 'functions.js', 'Failed to store merged ticket participant');
+                }
+                await addChannelToUserTicketIndex(uid, survivorChannel.id);
+                addedUserIds.add(uid);
+            }
+
+            const answers = (formAnswers || '').trim() || 'No form answers found.';
+            const embed = new EmbedBuilder()
+                .setColor(client.config?.bot_settings?.main_color || 0x208cdd)
+                .setTitle(`Merged from ${survivorType} #${sourceNumber}`)
+                .setDescription(answers.slice(0, 4000))
+                .setFooter({ text: `Original ticket ${sourceChannel.name}` });
+            if (sourceUser) {
+                embed.setAuthor({ name: sourceUser.username, iconURL: sourceUser.displayAvatarURL() });
+            }
+            const pingList = [...usersToAdd].map(id => `<@${id}>`).join(' ');
+            try {
+                await survivorChannel.send({
+                    content: `${pingList} your report was merged into this ticket. You can keep adding information here.`,
+                    embeds: [embed],
+                    allowedMentions: { users: [...usersToAdd] },
+                });
+            } catch (embedErr) {
+                func.handle_errors(embedErr, client, 'functions.js', `Failed to post merged form answers from ${sourceChannel.name}`);
+            }
+
+            await module.exports.closeTicket(client, sourceChannel, staffMember, `Merged into #${survivorNumber}`);
+            succeeded.push({ id: sourceId, name: sourceChannel.name, ticketNumber: sourceNumber });
+        } catch (err) {
+            func.handle_errors(err, client, 'functions.js', `Failed to merge ticket ${sourceId}`);
+            failed.push({ id: sourceId, error: err.message || 'Unexpected error.' });
+        }
+    }
+
+    return { succeeded, failed, survivorNumber, addedCount: addedUserIds.size };
 };

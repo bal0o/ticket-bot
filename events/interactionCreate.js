@@ -75,6 +75,94 @@ module.exports = async function (client, interaction) {
         }
             return;
     }
+
+        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('merge_page:')) {
+            try {
+                const channel = interaction.channel;
+                if (!channel?.topic || !/^\d{17,19}$/.test(channel.topic)) {
+                    await interaction.reply({ content: 'This is not a valid ticket channel.', flags: MessageFlags.Ephemeral });
+                    return;
+                }
+                const ticketType = await func.resolveTicketTypeFromChannel(channel);
+                if (!ticketType || !perms.ticketTypeAllowsMerges(ticketType)) {
+                    await interaction.reply({ content: 'This ticket type cannot be merged.', flags: MessageFlags.Ephemeral });
+                    return;
+                }
+                const page = parseInt(interaction.customId.split(':')[1], 10) || 0;
+                const candidates = await func.listOpenTicketsOfType(channel.guild, ticketType, channel.id);
+                if (!candidates.length) {
+                    await interaction.update({ content: `No other open ${ticketType} tickets found to merge.`, components: [] });
+                    return;
+                }
+                const built = func.buildMergeSelectComponents(candidates, page);
+                await interaction.update({ content: built.content, components: built.components });
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'merge pagination failed');
+                try {
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.followUp({ content: 'Could not update the merge list.', flags: MessageFlags.Ephemeral });
+                    } else {
+                        await interaction.reply({ content: 'Could not update the merge list.', flags: MessageFlags.Ephemeral });
+                    }
+                } catch (_) {}
+            }
+            return;
+        }
+
+        if (interaction.isStringSelectMenu() && interaction.customId === 'merge_select') {
+            try {
+                await interaction.deferUpdate();
+            } catch (e) {
+                if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, 'interactionCreate.js', 'deferUpdate failed for merge_select');
+            }
+            try {
+                const channel = interaction.channel;
+                if (!channel?.topic || !/^\d{17,19}$/.test(channel.topic)) {
+                    await interaction.editReply({ content: 'This is not a valid ticket channel.', components: [] });
+                    return;
+                }
+                const ticketType = await func.resolveTicketTypeFromChannel(channel);
+                if (!ticketType || !perms.ticketTypeAllowsMerges(ticketType)) {
+                    await interaction.editReply({ content: 'This ticket type cannot be merged.', components: [] });
+                    return;
+                }
+                const qf = perms.getQuestionFileForType(ticketType);
+                const explicitRoles = Array.isArray(qf?.['access-role-id']) ? qf['access-role-id'].filter(Boolean) : [];
+                if (explicitRoles.length > 0) {
+                    const userRoleIds = interaction.member?.roles?.cache ? Array.from(interaction.member.roles.cache.keys()) : [];
+                    if (!perms.userHasAccessToTicketType({ userRoleIds, ticketType, config: client.config })) {
+                        await interaction.editReply({ content: 'You do not have permission to merge this ticket type.', components: [] });
+                        return;
+                    }
+                }
+
+                await interaction.editReply({ content: 'Merging selected tickets…', components: [] });
+                const result = await func.mergeTickets(client, channel, interaction.values || [], interaction.member);
+                const lines = [];
+                if (result.succeeded?.length) {
+                    lines.push(`Merged ${result.succeeded.length} ticket${result.succeeded.length === 1 ? '' : 's'} into #${result.survivorNumber}:`);
+                    for (const item of result.succeeded) {
+                        lines.push(`- #${item.ticketNumber} (${item.name})`);
+                    }
+                }
+                if (result.failed?.length) {
+                    lines.push(`${result.failed.length} ticket${result.failed.length === 1 ? '' : 's'} could not be merged:`);
+                    for (const item of result.failed) {
+                        lines.push(`- ${item.id}: ${item.error}`);
+                    }
+                }
+                if (!lines.length) {
+                    lines.push('No tickets were merged.');
+                }
+                await interaction.editReply({ content: lines.join('\n'), components: [] });
+            } catch (e) {
+                func.handle_errors(e, client, 'interactionCreate.js', 'merge_select failed');
+                try {
+                    await interaction.editReply({ content: 'An error occurred while merging tickets.', components: [] });
+                } catch (_) {}
+            }
+            return;
+        }
         
         if (interaction.customId === "feedbackModal") {
             try { await interaction.deferReply(); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, `interactionCreate.js`, null); }
@@ -912,13 +1000,9 @@ module.exports = async function (client, interaction) {
                     let renameSucceeded = true;
                     try {
                         await interaction.channel.setName(newName);
-                        const overwrites = perms.buildPermissionOverwritesForTicketType({
-                            client,
-                            guild: interaction.guild,
-                            ticketType: displayType,
-                            userId: interaction.channel.topic,
-                        });
-                        if (Array.isArray(overwrites) && overwrites.length > 0) await interaction.channel.permissionOverwrites.set(overwrites).catch(()=>{});
+                        try {
+                            await func.applyTicketTypeOverwrites(client, interaction.channel, displayType, interaction.channel.topic);
+                        } catch (_) {}
                     } catch (error) {
                         renameSucceeded = false;
                         func.handle_errors(error, client, 'interactionCreate.js', null);
@@ -1417,15 +1501,7 @@ module.exports = async function (client, interaction) {
             try {
                 await channel.setParent(ctx.categoryId, { lockPermissions: true });
                 await channel.setName(ctx.newName);
-                const overwrites = perms.buildPermissionOverwritesForTicketType({
-                    client,
-                    guild: channel.guild,
-                    ticketType: ctx.ticketType,
-                    userId: channel.topic,
-                });
-                if (Array.isArray(overwrites) && overwrites.length > 0) {
-                    await channel.permissionOverwrites.set(overwrites);
-                }
+                await func.applyTicketTypeOverwrites(client, channel, ctx.ticketType, channel.topic);
             } catch (error) {
                 renameSucceeded = false;
                 func.handle_errors(error, client, 'move.js', null);

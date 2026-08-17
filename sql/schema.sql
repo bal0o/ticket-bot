@@ -190,4 +190,16 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     INDEX idx_guild_channel (guild_id, channel_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Extra reporters added when tickets are merged into a surviving ticket
+CREATE TABLE IF NOT EXISTS ticket_participants (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    source_ticket_id VARCHAR(255) NULL,
+    merged_at BIGINT NOT NULL,
+    UNIQUE KEY unique_ticket_user (ticket_id, user_id),
+    INDEX idx_ticket_id (ticket_id),
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 

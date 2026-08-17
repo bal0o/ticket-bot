@@ -1,6 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const func = require('../../utils/functions.js');
-const perms = require('../../utils/permissions.js');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
@@ -70,15 +69,7 @@ module.exports = {
             await channel.setParent(categoryId, { lockPermissions: true });
             await channel.setName(newChannelName);
             // Rebuild permission overwrites based on new ticket type
-            const overwrites = perms.buildPermissionOverwritesForTicketType({
-                client,
-                guild: channel.guild,
-                ticketType,
-                userId: channel.topic,
-            });
-            if (Array.isArray(overwrites) && overwrites.length > 0) {
-                await channel.permissionOverwrites.set(overwrites);
-            }
+            await func.applyTicketTypeOverwrites(client, channel, ticketType, channel.topic);
         } catch (error) {
             renameSucceeded = false;
             func.handle_errors(error, client, 'move.js', null);

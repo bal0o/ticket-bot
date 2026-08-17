@@ -85,6 +85,18 @@ function createDB() {
                         INDEX idx_ticket_id (ticket_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 `);
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS ticket_participants (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        ticket_id VARCHAR(255) NOT NULL,
+                        user_id VARCHAR(255) NOT NULL,
+                        source_ticket_id VARCHAR(255) NULL,
+                        merged_at BIGINT NOT NULL,
+                        UNIQUE KEY unique_ticket_user (ticket_id, user_id),
+                        INDEX idx_ticket_id (ticket_id),
+                        INDEX idx_user_id (user_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
                 conn.release();
                 console.log('[mysql] ✓ Connection test and core table check successful');
             } catch (err) {
@@ -460,6 +472,78 @@ class MySQLAdapter {
         }
     }
     
+    // Ensure ticket_participants table exists (idempotent)
+    async ensureTicketParticipantsTable(conn) {
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS ticket_participants (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                ticket_id VARCHAR(255) NOT NULL,
+                user_id VARCHAR(255) NOT NULL,
+                source_ticket_id VARCHAR(255) NULL,
+                merged_at BIGINT NOT NULL,
+                UNIQUE KEY unique_ticket_user (ticket_id, user_id),
+                INDEX idx_ticket_id (ticket_id),
+                INDEX idx_user_id (user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+    }
+
+    async addTicketParticipant(ticketId, userId, sourceTicketId = null) {
+        if (!ticketId || !userId) return;
+        const conn = await this.pool.getConnection();
+        try {
+            try {
+                await conn.query(
+                    `INSERT INTO ticket_participants (ticket_id, user_id, source_ticket_id, merged_at)
+                     VALUES (?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE source_ticket_id = COALESCE(VALUES(source_ticket_id), source_ticket_id)`,
+                    [String(ticketId), String(userId), sourceTicketId ? String(sourceTicketId) : null, Math.floor(Date.now() / 1000)]
+                );
+            } catch (err) {
+                if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146)) {
+                    await this.ensureTicketParticipantsTable(conn);
+                    await conn.query(
+                        `INSERT INTO ticket_participants (ticket_id, user_id, source_ticket_id, merged_at)
+                         VALUES (?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE source_ticket_id = COALESCE(VALUES(source_ticket_id), source_ticket_id)`,
+                        [String(ticketId), String(userId), sourceTicketId ? String(sourceTicketId) : null, Math.floor(Date.now() / 1000)]
+                    );
+                    return;
+                }
+                throw err;
+            }
+        } finally {
+            conn.release();
+        }
+    }
+
+    async getTicketParticipants(ticketId) {
+        if (!ticketId) return [];
+        const conn = await this.pool.getConnection();
+        try {
+            try {
+                const [rows] = await conn.query(
+                    'SELECT ticket_id, user_id, source_ticket_id, merged_at FROM ticket_participants WHERE ticket_id = ?',
+                    [String(ticketId)]
+                );
+                return (rows || []).map(row => ({
+                    ticketId: String(row.ticket_id || ''),
+                    userId: String(row.user_id || ''),
+                    sourceTicketId: row.source_ticket_id ? String(row.source_ticket_id) : null,
+                    mergedAt: row.merged_at || null
+                }));
+            } catch (err) {
+                if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146)) {
+                    await this.ensureTicketParticipantsTable(conn);
+                    return [];
+                }
+                throw err;
+            }
+        } finally {
+            conn.release();
+        }
+    }
+
     // Ensure ticket_messages table exists (idempotent)
     async ensureTicketMessagesTable(conn) {
         await conn.query(`
@@ -568,6 +652,15 @@ class MySQLAdapter {
                     /ticket_messages/i.test(sql)
                 ) {
                     await this.ensureTicketMessagesTable(conn);
+                    return await conn.query(sql, params);
+                }
+                if (
+                    err &&
+                    (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) &&
+                    typeof sql === 'string' &&
+                    /ticket_participants/i.test(sql)
+                ) {
+                    await this.ensureTicketParticipantsTable(conn);
                     return await conn.query(sql, params);
                 }
                 throw err;
@@ -779,7 +872,20 @@ class MySQLAdapter {
     async query(sql, params = []) {
         const conn = await this.pool.getConnection();
         try {
-            return await conn.query(sql, params);
+            try {
+                return await conn.query(sql, params);
+            } catch (err) {
+                if (
+                    err &&
+                    (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) &&
+                    typeof sql === 'string' &&
+                    /ticket_participants/i.test(sql)
+                ) {
+                    await this.ensureTicketParticipantsTable(conn);
+                    return await conn.query(sql, params);
+                }
+                throw err;
+            }
         } finally {
             conn.release();
         }
