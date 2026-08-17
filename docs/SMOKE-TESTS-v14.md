@@ -22,8 +22,7 @@ Run these after deploying the Discord.js v14 and DB-backed transcript changes.
 
 ## 4. Slash commands
 - `/tickethistory <discordId>` – returns paginated embeds and transcript links.
-- `/stats` (staff/org) – runs without errors.
-- `/reply`, `/move`, `/checkcc`, `/blacklist`, `/wipestats` – run as appropriate for your roles/channels.
+- `/reply`, `/move`, `/checkcc` – run as appropriate for your roles/channels.
 
 ## 5. Bot startup
 - Start the bot and confirm slash commands register (no “discord-api-types/v10” or REST version errors).

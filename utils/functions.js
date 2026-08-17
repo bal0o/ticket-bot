@@ -113,6 +113,62 @@ module.exports.preserveTicketDmRelayOnMove = async function(userId, ticketId, ol
     }
 };
 
+/** Fetch a specific guild member by ID (REST; does not require Guild Members intent). */
+module.exports.resolveGuildMember = async function(guild, userId, { force = false } = {}) {
+    if (!guild || !userId) return null;
+    try {
+        if (force) {
+            return await guild.members.fetch({ user: userId, force: true });
+        }
+        const cached = guild.members.cache.get(String(userId));
+        if (cached) return cached;
+        return await guild.members.fetch({ user: userId });
+    } catch (_) {
+        return null;
+    }
+};
+
+/** Resolve the guild member who sent a message, fetching by ID when needed. */
+module.exports.resolveMessageMember = async function(message, { force = false } = {}) {
+    if (message?.member) return message.member;
+    if (!message?.guild || !message?.author?.id) return null;
+    return module.exports.resolveGuildMember(message.guild, message.author.id, { force });
+};
+
+/** Build staff author details for relay embeds. */
+module.exports.getStaffReplyAuthorInfo = function(member, author) {
+    const authorName = author?.globalName || author?.username || 'Staff';
+    if (!member) {
+        return {
+            displayName: authorName,
+            roleName: 'Staff',
+            avatarURL: typeof author?.displayAvatarURL === 'function' ? author.displayAvatarURL() : null
+        };
+    }
+
+    let roleName = 'Staff';
+    try {
+        const roles = member.roles.cache
+            .filter(role => role.id !== member.guild.id)
+            .sort((a, b) => b.position - a.position);
+        const highestRole = roles.first();
+        if (highestRole) roleName = highestRole.name;
+    } catch (_) {}
+
+    const displayName = member.displayName || authorName;
+    const avatarURL = (typeof member.displayAvatarURL === 'function' && member.displayAvatarURL())
+        || (typeof author?.displayAvatarURL === 'function' && author.displayAvatarURL())
+        || null;
+
+    return { displayName, roleName, avatarURL };
+};
+
+/** Check whether a member has any of the given role IDs. */
+module.exports.memberHasAnyRole = function(member, roleIds) {
+    if (!member || !Array.isArray(roleIds) || roleIds.length === 0) return false;
+    return member.roles.cache.some(role => roleIds.includes(role.id));
+};
+
 /**
  * Whether staff messages in the ticket channel should be forwarded to the owner's DMs.
  * Public tickets always relay; moved public→internal tickets keep relay via stored flag.
@@ -130,7 +186,7 @@ module.exports.shouldRelayStaffToTicketOwner = async function(client, channel, u
     if (!channel || !channel.guild || !userId) return false;
 
     try {
-        const member = await channel.guild.members.fetch(userId).catch(() => null);
+        const member = await module.exports.resolveGuildMember(channel.guild, userId, { force: true });
         if (!member) return true;
         const perms = channel.permissionsFor(member);
         return !perms || !perms.has(PermissionsBitField.Flags.ViewChannel);
@@ -457,26 +513,6 @@ module.exports.handle_errors = async (err, client, file, message) => {
     })
 }
 
-module.exports.updateResponseTimes = async (openTime, closeTime, ticketType, ButtonType) => {
-
-    let newTicketType = ticketType.replace(/ /g,`_`)
-    let ServerResponseTimes = await db.get(`ServerStats.ResponseTimes`)
-
-
-    let ticketDifference = closeTime - openTime
-    if (ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent == null || ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent == undefined) {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTimeSpent`, ticketDifference)
-    } else {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTimeSpent`, ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent + ticketDifference)
-    }
-
-    if ( ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTicketsHandled == null ||  ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTicketsHandled == undefined) {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTicketsHandled`, 1)
-    } else {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTicketsHandled`, ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`].totalTicketsHandled + 1)
-    }
-}
-
 module.exports.padTo2Digits = async (num) => {
     return num.toString().padStart(2, '0');
 }
@@ -495,67 +531,6 @@ module.exports.convertMsToTime = async (milliseconds) => {
     return `${await func.padTo2Digits(hours)} hours, ${await func.padTo2Digits(minutes)} minutes and ${await func.padTo2Digits(
       seconds,
     )} seconds`;
-}
-
-module.exports.staffStats = async (ticketType, directory, userid) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`)
-
-	if (userStats?.[`${ticketType}`]?.[`${directory}`] == null || userStats?.[`${ticketType}`]?.[`${directory}`] == undefined) {
-		await db.set(`StaffStats.${userid}.${ticketType}.${directory}`, 1);
-	} else {
-		await db.set(`StaffStats.${userid}.${ticketType}.${directory}`, userStats?.[`${ticketType}`]?.[`${directory}`] + 1);
-	}
-
-    if (userStats?.totalActions == null || userStats?.totalActions == undefined) {
-        await db.set(`StaffStats.${userid}.totalActions`, 1);
-    } else {
-        await db.set(`StaffStats.${userid}.totalActions`, userStats?.totalActions + 1);
-    }
-
-    if (userStats?.[`${ticketType}`]?.[`total`] == null || userStats?.[`${ticketType}`]?.[`total`] == undefined) {
-		await db.set(`StaffStats.${userid}.${ticketType}.total`, 1);
-	} else {
-		await db.set(`StaffStats.${userid}.${ticketType}.total`, userStats?.[`${ticketType}`]?.[`total`] + 1);
-	}
-
-    await db.set(`StaffStats.${userid}.lastAction`, Date.now());
-
-}
-
-
-module.exports.GrabUserStaffStats = async (userid, TicketType) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`);
-
-    let soloUserStats = {
-        totalActions: ``,
-        acceptedActions: userStats?.[TicketType]?.accepted ? userStats?.[TicketType]?.accepted : 0,
-        deniedActions: userStats?.[TicketType]?.denied ? userStats?.[TicketType]?.denied : 0,
-        customCloseActions: userStats?.[TicketType]?.customclose ? userStats?.[TicketType]?.customclose : 0,
-        openTicketActions: userStats?.[TicketType]?.openticket ? userStats?.[TicketType]?.openticket : 0,
-        closeTicketActions: userStats?.[TicketType]?.closeticket ? userStats?.[TicketType]?.closeticket : 0,
-        ticketMessagesHiddenActions: userStats?.[TicketType]?.ticketmessageshidden ? userStats?.[TicketType]?.ticketmessageshidden : 0,
-        ticketMessagesVisibleActions: userStats?.[TicketType]?.ticketmessages ? userStats?.[TicketType]?.ticketmessages : 0
-        
-    }
-    soloUserStats.totalActions = soloUserStats.acceptedActions + soloUserStats.deniedActions + soloUserStats.customCloseActions + soloUserStats.openTicketActions + soloUserStats.closeTicketActions + soloUserStats.ticketMessagesHiddenActions + soloUserStats.ticketMessagesVisibleActions
-    return soloUserStats;
-}
-
-module.exports.CombineActionCountsUser = async (userid, actiontype) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`);
-    let UserActionStats = 0
-    const handlerRaw = require("../content/handler/options.json");
-	const handlerKeys = Object.keys(handlerRaw.options);	
-
-    for (let TicketType of handlerKeys) {
-        if (userStats?.[`${TicketType}`]?.[`${actiontype}`] == null) continue;
-        UserActionStats = UserActionStats + userStats?.[`${TicketType}`]?.[`${actiontype}`]
-    }
-
-    return UserActionStats;
 }
 
 module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL = null) => {
@@ -1190,10 +1165,6 @@ try {
         }
     } catch (_) {}
     
-    if (administratorMember) {
-        await func.staffStats(ticketType, `openticket`, administratorMember.id);
-    }
-
     // If application, create application record and link mapping
     try {
         if (ticketType && ticketType.toLowerCase().includes('application')) {
@@ -1206,19 +1177,6 @@ try {
             await db.set(`AppMap.ticketToApp.${formattedTicketNumber}`, appRec.id);
         }
     } catch(_){}
-
-    try {
-        const presenceMonitor = require('./presenceMonitor');
-        if (thread?.id && recepientMember?.id && ticketChannel?.id) {
-            await presenceMonitor.registerTicket(client, {
-                userId: recepientMember.id,
-                username: recepientMember.username,
-                staffThreadId: thread.id,
-                ticketNumber: formattedTicketNumber,
-                ticketChannelId: ticketChannel.id
-            });
-        }
-    } catch (_) {}
 
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
@@ -1551,11 +1509,6 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
         // Update ticket count
         await module.exports.updateTicketStatus(client);
 
-        try {
-            const presenceMonitor = require('./presenceMonitor');
-            presenceMonitor.unregisterTicketChannel(client, channel.id);
-        } catch (_) {}
-        
 		try {
 			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
 			if (thread) {

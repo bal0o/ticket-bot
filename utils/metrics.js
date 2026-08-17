@@ -277,14 +277,8 @@ module.exports = {
 	// Update usernames for existing users (updates tickets table)
 	updateExistingUsernames: async (client) => {
 		try {
-			if (!client || !client.guilds) {
+			if (!client?.users) {
 				console.log('[Metrics] Client not ready, cannot update existing usernames');
-				return;
-			}
-			
-			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
-			if (!staffGuild) {
-				console.log('[Metrics] Staff guild not found, cannot update existing usernames');
 				return;
 			}
 			
@@ -299,9 +293,9 @@ module.exports = {
 			for (const row of userRows) {
 				const userId = String(row.user_id);
 				try {
-					const member = staffGuild.members.cache.get(userId);
-					if (member && member.user) {
-						const newUsername = member.user.username || member.user.tag || 'unknown';
+					const user = await client.users.fetch(userId).catch(() => null);
+					if (user) {
+						const newUsername = user.username || user.globalName || user.tag || 'unknown';
 						await kv.query(
 							'UPDATE tickets SET username = ? WHERE user_id = ?',
 							[newUsername, userId]
@@ -459,137 +453,69 @@ module.exports = {
 		} catch (_) {}
 	},
 	
-	// Initialize metrics with actual staff user IDs from roles (called after bot is ready)
+	// Initialize metrics for staff already recorded in the database (no bulk member list required).
 	initStaffMetrics: async (client) => {
 		try {
 			if (!client || !client.guilds) {
 				console.log('[Metrics] Client not ready, cannot initialize staff metrics');
 				return;
 			}
-			
-			console.log(`[Metrics] Client config:`, {
-				hasConfig: !!client.config,
-				hasChannelIds: !!client.config?.channel_ids,
-				staffGuildId: client.config?.channel_ids?.staff_guild_id,
-				availableGuilds: Array.from(client.guilds.cache.keys())
-			});
-			
+
 			const staffGuild = client.guilds.cache.get(client.config?.channel_ids?.staff_guild_id);
 			if (!staffGuild) {
 				console.log('[Metrics] Staff guild not found, cannot initialize staff metrics');
 				return;
 			}
-			
-			console.log(`[Metrics] Found staff guild: ${staffGuild.name} (${staffGuild.id})`);
-			console.log(`[Metrics] Guild has ${staffGuild.roles.cache.size} roles and ${staffGuild.members.cache.size} members`);
-			
-			// Try to fetch members if the cache is empty
-			if (staffGuild.members.cache.size === 0) {
-				console.log('[Metrics] Guild member cache is empty, attempting to fetch members...');
-				try {
-					await staffGuild.members.fetch();
-					console.log(`[Metrics] After fetch: Guild now has ${staffGuild.members.cache.size} members`);
-				} catch (fetchError) {
-					console.error('[Metrics] Error fetching guild members:', fetchError);
-					console.log('[Metrics] This usually means the bot lacks the "Server Members Intent" permission in Discord Developer Portal');
-				}
-			}
-			
-			// Check if we still have very few members (just the bot)
-			if (staffGuild.members.cache.size <= 1) {
-				console.log('[Metrics] Warning: Guild member cache still very small. This indicates:');
-				console.log('[Metrics] 1. The bot lacks "Server Members Intent" in Discord Developer Portal, OR');
-				console.log('[Metrics] 2. The bot lacks permission to view members in this guild');
-				console.log('[Metrics] 3. The guild is still loading (try increasing the delay)');
-				
-				// Try one more fetch with a longer timeout
-				try {
-					console.log('[Metrics] Attempting one more fetch with longer timeout...');
-					await Promise.race([
-						staffGuild.members.fetch(),
-						new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
-					]);
-					console.log(`[Metrics] After second fetch: Guild now has ${staffGuild.members.cache.size} members`);
-				} catch (secondError) {
-					console.error('[Metrics] Second fetch also failed:', secondError);
-				}
-			}
-			
+
 			const handlerRaw = require("../content/handler/options.json");
 			const allTicketTypes = Object.keys(handlerRaw.options);
-			
-			// Get all unique user IDs from access roles across all ticket types
 			const allStaffUserIds = new Set();
-			for (const ticketType of allTicketTypes) {
-				try {
-					const questionFile = require(`../content/questions/${handlerRaw.options[ticketType].question_file}`);
-					if (questionFile["access-role-id"] && Array.isArray(questionFile["access-role-id"])) {
-						console.log(`[Metrics] Processing ${ticketType} with access roles:`, questionFile["access-role-id"]);
-						for (const roleId of questionFile["access-role-id"]) {
-							if (!roleId) continue;
-							const role = staffGuild.roles.cache.get(roleId);
-							if (role) {
-								console.log(`[Metrics] Found role ${role.name} (${role.id}) with ${role.members?.size || 0} members`);
-								
-								// Get members with this role from the guild member cache
-								const membersWithRole = staffGuild.members.cache.filter(member => member.roles.cache.has(roleId));
-								console.log(`[Metrics] Role ${role.name} has ${membersWithRole.size} members (from guild cache)`);
-								
-								if (membersWithRole.size > 0) {
-									// Add all user IDs from this role
-									for (const [userId, member] of membersWithRole) {
-										allStaffUserIds.add(userId);
-										console.log(`[Metrics] Added staff member: ${member.user?.tag || userId} (${userId})`);
-									}
-								} else {
-									console.log(`[Metrics] Warning: Role ${role.name} has no members in guild cache`);
-								}
-							} else {
-								console.log(`[Metrics] Warning: Role ID ${roleId} not found in guild`);
-							}
-						}
+
+			try {
+				const { createDB } = require('./mysql');
+				const db = createDB();
+				if (typeof db.query === 'function') {
+					const [statRows] = await db.query('SELECT DISTINCT user_id FROM staff_stats WHERE user_id IS NOT NULL');
+					for (const row of statRows || []) {
+						if (row.user_id) allStaffUserIds.add(String(row.user_id));
 					}
-				} catch (error) {
-					console.error(`[Metrics] Error processing ${ticketType}:`, error);
+					const [ticketRows] = await db.query(
+						'SELECT DISTINCT close_user_id AS user_id FROM tickets WHERE close_user_id IS NOT NULL UNION SELECT DISTINCT user_id FROM tickets WHERE user_id IS NOT NULL'
+					);
+					for (const row of ticketRows || []) {
+						if (row.user_id) allStaffUserIds.add(String(row.user_id));
+					}
 				}
+			} catch (dbErr) {
+				console.log('[Metrics] Could not load staff IDs from database:', dbErr.message);
 			}
-			
-			console.log(`[Metrics] Initializing staff metrics for ${allStaffUserIds.size} staff members across ${allTicketTypes.length} ticket types`);
-			
+
+			console.log(`[Metrics] Initializing staff metrics for ${allStaffUserIds.size} known staff user(s) across ${allTicketTypes.length} ticket types`);
+
 			if (allStaffUserIds.size === 0) {
-				console.log('[Metrics] Warning: No staff members found! This may indicate an issue with role configuration or guild access.');
+				console.log('[Metrics] No known staff user IDs yet; counters will initialize when staff actions occur');
 				return;
 			}
-			
-			// Initialize metrics for all staff members
+
 			for (const ticketType of allTicketTypes) {
-				// Initialize "closed by" metrics for all staff members
 				for (const staffId of allStaffUserIds) {
-					const member = staffGuild.members.cache.get(staffId);
-					const username = member?.user?.username || member?.user?.tag || 'unknown';
+					let username = 'unknown';
+					try {
+						const member = await staffGuild.members.fetch({ user: staffId }).catch(() => null);
+						username = member?.user?.username || member?.user?.tag || username;
+					} catch (_) {}
 					ticketsClosedCounter.inc({ type: ticketType, closed_by: staffId, closed_by_name: username }, 0);
-				}
-				
-				// Initialize staff actions counter for all staff members
-				for (const staffId of allStaffUserIds) {
-					const member = staffGuild.members.cache.get(staffId);
-					const username = member?.user?.username || member?.user?.tag || 'unknown';
 					staffActionsCounter.inc({ action: 'openticket', type: ticketType, staff_id: staffId, staff_name: username }, 0);
 					staffActionsCounter.inc({ action: 'closeticket', type: ticketType, staff_id: staffId, staff_name: username }, 0);
 					staffActionsCounter.inc({ action: 'moveticket', type: ticketType, staff_id: staffId, staff_name: username }, 0);
 					staffActionsCounter.inc({ action: 'claimticket', type: ticketType, staff_id: staffId, staff_name: username }, 0);
 				}
-				
-				// Initialize tickets claimed counter for this ticket type
 				ticketsClaimedCounter.inc({ type: ticketType }, 0);
 			}
-			
-			// Usernames are now stored in tickets table - no need to store separately
-			console.log('[Metrics] Staff usernames will be updated from tickets table as needed');
-			
-			console.log(`[Metrics] Staff metrics initialization complete`);
+
+			console.log('[Metrics] Staff metrics initialization complete');
 		} catch (error) {
-			console.error(`[Metrics] Error initializing staff metrics:`, error);
+			console.error('[Metrics] Error initializing staff metrics:', error);
 		}
 	},
 	

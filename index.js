@@ -19,11 +19,9 @@ const client = new Client({
 		GatewayIntentBits.Guilds,
 		GatewayIntentBits.GuildMessageReactions,
 		GatewayIntentBits.GuildEmojisAndStickers,
-		GatewayIntentBits.GuildMembers,
-		GatewayIntentBits.GuildPresences,
 		GatewayIntentBits.GuildMessages,
 		GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.MessageContent
+		GatewayIntentBits.MessageContent
 	],
 	partials: [
 		Partials.Message,
@@ -123,23 +121,8 @@ client.login(config.tokens.bot_token).then(() => {
 								}
 							}
 							
-							// Add staff member
-							try {
-								const staffMember = await guild.members.fetch(job.staffId);
-								perms.push({ id: staffMember.id, allow: ['ViewChannel','Connect','Speak'] });
-							} catch (staffError) {
-								debugLog(`[Interview Scheduler] Staff member ${job.staffId} not found in guild, using ID directly`);
-								perms.push({ id: job.staffId, allow: ['ViewChannel','Connect','Speak'] });
-							}
-							
-							// Add applicant
-							try {
-								const applicantMember = await guild.members.fetch(appRec.userId);
-								perms.push({ id: applicantMember.id, allow: ['ViewChannel','Connect','Speak'] });
-							} catch (applicantError) {
-								debugLog(`[Interview Scheduler] Applicant ${appRec.userId} not found in guild, using ID directly`);
-								perms.push({ id: appRec.userId, allow: ['ViewChannel','Connect','Speak'] });
-							}
+							perms.push({ id: job.staffId, allow: ['ViewChannel', 'Connect', 'Speak'] });
+							perms.push({ id: appRec.userId, allow: ['ViewChannel', 'Connect', 'Speak'] });
 							const baseUsername = String(appRec.username || appRec.userId || 'user');
 							const safeUser = baseUsername.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 							const name = `interview-${safeUser || 'user'}`;

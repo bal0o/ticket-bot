@@ -332,12 +332,7 @@ module.exports = async function (client, interaction) {
             const logs_channel = await interaction.message.guild.channels.cache.find(x => x.id === transcriptChannel);
             const embedFinal = interaction.message.embeds[0]
 
-            func.updateResponseTimes(interaction.message.embeds[0].timestamp, Date.now(), ticketTypeCustomFinal, "CustomClose")
-                
-            await func.staffStats(ticketTypeCustomFinal, `customclose`, interaction.user.id);
-            
-
-                if (logs_channel) {
+                            if (logs_channel) {
                     embedFinal.setAuthor({name: lang.custom_reply_close_ticket["close-transcript-embed-title"] != "" ? lang.custom_reply_close_ticket["close-transcript-embed-title"].replace(`{{ADMIN}}`, `${interaction.user.username}/${interaction.user.id}`) + `\n${embedFinal?.author?.name}`: `Custom Reply by ${interaction.user.username}/${interaction.user.id} \n${embedFinal?.author?.name}`, iconURL: interaction.user.displayAvatarURL()});
                     embedFinal.addFields({
                         name: lang.custom_reply_close_ticket["close-transcript-embed-reason-title"] != "" ? lang.custom_reply_close_ticket["close-transcript-embed-reason-title"] : `Reply`,
@@ -1174,12 +1169,6 @@ module.exports = async function (client, interaction) {
                 }
             }
 
-            let blacklistedRole = await interaction.message.guild.roles.fetch(client.config.role_ids.ticket_blacklisted_role_id).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
-            if (interaction.member.roles.cache.find(x => x.id == blacklistedRole)) {
-                await interaction.editReply({content: lang.ticket_creation["blacklisted-user-error"] != "" ? lang.ticket_creation["blacklisted-user-error"] : "You are not allowed to use this system.", ephemeral: true}).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
-                return;
-            }
-
             const handlerRaw = require("../content/handler/options.json");
             let validOption = ""
             let ticketType = ""
@@ -1526,10 +1515,6 @@ module.exports = async function (client, interaction) {
                             func.handle_errors(null, client, `interactionCreate.js`, `Could not accept/deny ticket correctly. Could not find files for that ticket type (${ticketType})`)
 						}
 
-                        func.updateResponseTimes(interaction.message.embeds[0].timestamp, Date.now(), ticketType, "Accepted")
-
-                        await func.staffStats(ticketType, `accepted`, user.id);
-                        
 
 					let endresponse = new EmbedBuilder()
                     .setTitle(lang.accepted_ticket["player-accepted-embed-title"] != "" ? 
@@ -1582,10 +1567,6 @@ module.exports = async function (client, interaction) {
                             func.handle_errors(null, client, `interactionCreate.js`, `Could not accept/deny ticket correctly. Could not find files for that ticket type (${ticketType})`)
 						}
 	
-                        func.updateResponseTimes(interaction.message.embeds[0].timestamp, Date.now(), ticketType, "Denied")
-
-                        await func.staffStats(ticketType, `denied`, user.id);
-                        
 
 					let endresponse = new EmbedBuilder()
                     .setTitle(lang.denied_ticket["player-denied-embed-title"] != "" ? 

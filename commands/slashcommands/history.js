@@ -18,7 +18,7 @@ module.exports = {
             if (!staffGuild) {
                 return interaction.reply({ content: "Error: Staff guild not configured.", ephemeral: true }).catch(console.error);
             }
-            const member = await staffGuild.members.fetch(interaction.user.id).catch(() => null);
+            const member = interaction.member;
 
             if (!member || !member.roles.cache.has(client.config.role_ids.default_admin_role_id)) {
                 return interaction.reply({ content: "You do not have permission to use this command.", ephemeral: true }).catch(console.error);

@@ -16,19 +16,10 @@
 "role_ids": {
 "role_ids_ban_cmd": [],
 "role_ids_info_cmd": [],
-"role_ids_stats_cmd": [],
-"role_ids_wipestats_cmd": [],
-"role_ids_blacklist_cmd": [],
-        "role_ids_anonymous_cmd": [],
+"role_ids_anonymous_cmd": [],
+"role_ids_checkcc_cmd": [],
 "default_admin_role_id": "",
-"application_admin_role_id": "",
-"ticket_blacklisted_role_id": ""
-    ,"role_ids_checkcc_cmd": []
-},
-
-"presence_monitor": {
-"enabled": true,
-"guild_id": ""
+"application_admin_role_id": ""
 },
 
 "channel_ids": {

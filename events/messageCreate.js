@@ -416,6 +416,8 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 );
                 return message.reply("Could not find the user to send the message to.");
             }
+
+            const staffMember = await func.resolveMessageMember(message, { force: true });
             
             const prefix = client.config.bot_settings.prefix;
             const handlerRaw = require("../content/handler/options.json");
@@ -459,7 +461,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                     const claim = (client.claims && client.claims.get(message.channel.id)) || await db.get(`Claims.${message.channel.id}`);
                     if (claim && claim.userId && claim.userId !== message.author.id) {
                         const bypassRoles = new Set(client.config?.claims?.role_bypass_ids || []);
-                        const hasBypass = message.member.roles.cache.some(r => bypassRoles.has(r.id));
+                        const hasBypass = func.memberHasAnyRole(staffMember, [...bypassRoles]);
                         if (!hasBypass) {
                             await message.reply(`This ticket is claimed by <@${claim.userId}>.`).catch(() => {});
                             return;
@@ -608,18 +610,11 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                         }
                         return await db.set(`StaffForwardMap.${message.id}`, staffForward).catch(e => func.handle_errors(e, client, `messageCreate.js`, null));
                     }
-                    const roles = message.member.roles.cache
-                        .filter(role => role.id !== message.guild.id)
-                        .sort((a, b) => b.position - a.position);
-                    
-                    const highestRole = roles.first();
-                    const roleName = highestRole ? highestRole.name : 'Staff';
-                    
-                    const staffAvatar = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
+                    const authorInfo = func.getStaffReplyAuthorInfo(staffMember, message.author);
                     const replyEmbed = new EmbedBuilder()
                         .setAuthor({ 
-                            name: `${message.member.displayName} (${roleName})`, 
-                            iconURL: staffAvatar
+                            name: `${authorInfo.displayName} (${authorInfo.roleName})`, 
+                            iconURL: authorInfo.avatarURL
                         })
                         .setDescription(replyContent)
                         .setColor(client.config.bot_settings.main_color)
@@ -652,7 +647,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
             } else if (shouldForwardToUser && message.content.startsWith(`${prefix}r`)) {
                 if (ticketType && ticketType["anonymous-only-replies"] === false) {
                     const allowedRoles = client.config.role_ids.role_ids_anonymous_cmd;
-                    if (!message.member.roles.cache.some(role => allowedRoles.includes(role.id))) {
+                    if (!func.memberHasAnyRole(staffMember, allowedRoles)) {
                         return message.reply("You do not have permission to use this command.");
                     }
                 }
@@ -696,7 +691,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
 
             } else if (message.content.startsWith(`${prefix}close`)) {
                 const reason = message.content.slice(`${prefix}close`.length).trim() || 'No Reason Provided.';
-                await func.closeTicket(client, message.channel, message.member, reason);
+                await func.closeTicket(client, message.channel, staffMember || message.author, reason);
             
             } else if (message.content.startsWith(prefix)) {
                 const args = message.content.slice(prefix.length).trim().split(/ +/);
@@ -776,18 +771,11 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                             }
 							return;
 						}
-                        const roles = message.member.roles.cache
-                            .filter(role => role.id !== message.guild.id)
-                            .sort((a, b) => b.position - a.position);
-                        
-                        const highestRole = roles.first();
-                        const roleName = highestRole ? highestRole.name : 'Staff';
-                        
-                        const staffAvatar2 = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
+                        const authorInfo = func.getStaffReplyAuthorInfo(staffMember, message.author);
                         const replyEmbed = new EmbedBuilder()
                             .setAuthor({ 
-                                name: `${message.member.displayName} (${roleName})`, 
-                                iconURL: staffAvatar2
+                                name: `${authorInfo.displayName} (${authorInfo.roleName})`, 
+                                iconURL: authorInfo.avatarURL
                             })
                             .setDescription(replyContent)
                             .setColor(client.config.bot_settings.main_color)
