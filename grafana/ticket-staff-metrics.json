@@ -167,14 +167,15 @@
           ]
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "avg_handle_after_pickup" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "avg_claim_to_reply" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "tickets_touched" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "picked_up" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Picked-up tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=first_responder&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "stale_pickups" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Stale pickups", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=stale&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "closed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Closed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=closer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "claimed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Claimed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=claimer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] }
+          { "matcher": { "id": "byName", "options": "staff_user_id" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "Handle" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Claim reply" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Touched" }, "properties": [{ "id": "decimals", "value": 0 }] },
+          { "matcher": { "id": "byName", "options": "Msgs" }, "properties": [{ "id": "decimals", "value": 0 }] },
+          { "matcher": { "id": "byName", "options": "Pickup" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Picked-up tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=first_responder&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "Stale" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Stale pickups", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=stale&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "Closed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Closed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=closer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "Claimed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Claimed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=claimer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] }
         ]
       },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
@@ -185,7 +186,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  staff_name,\n  staff_user_id,\n  COUNT(DISTINCT ticket_id) AS tickets_touched,\n  SUM(message_count) AS messages,\n  COUNT(DISTINCT CASE WHEN is_first_responder = 1 THEN ticket_id END) AS picked_up,\n  COUNT(DISTINCT CASE WHEN is_stale_pickup = 1 THEN ticket_id END) AS stale_pickups,\n  COUNT(DISTINCT CASE WHEN is_closer = 1 THEN ticket_id END) AS closed,\n  COUNT(DISTINCT CASE WHEN is_claimer = 1 THEN ticket_id END) AS claimed,\n  AVG(handle_after_pickup_seconds) AS avg_handle_after_pickup,\n  AVG(claim_to_first_message_seconds) AS avg_claim_to_reply\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY tickets_touched DESC, closed DESC",
+          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  COUNT(DISTINCT ticket_id) AS Touched,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT CASE WHEN is_first_responder = 1 THEN ticket_id END) AS Pickup,\n  COUNT(DISTINCT CASE WHEN is_stale_pickup = 1 THEN ticket_id END) AS Stale,\n  COUNT(DISTINCT CASE WHEN is_closer = 1 THEN ticket_id END) AS Closed,\n  COUNT(DISTINCT CASE WHEN is_claimer = 1 THEN ticket_id END) AS Claimed,\n  AVG(handle_after_pickup_seconds) AS Handle,\n  AVG(claim_to_first_message_seconds) AS `Claim reply`\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Touched DESC, Closed DESC",
           "refId": "A"
         }
       ],
@@ -219,7 +220,9 @@
           "custom": { "align": "auto" },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "staff_user_id" }, "properties": [{ "id": "custom.hidden", "value": true }] }
+        ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "id": 9,
@@ -229,7 +232,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  staff_name,\n  staff_user_id,\n  SUM(message_count) AS messages,\n  COUNT(DISTINCT ticket_id) AS tickets\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY messages DESC",
+          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT ticket_id) AS Tickets\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Msgs DESC",
           "refId": "A"
         }
       ],

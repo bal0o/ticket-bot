@@ -120,11 +120,11 @@
           "decimals": 0
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "queue_wait_seconds" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "handle_after_pickup_seconds" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "age_at_engagement_seconds" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Queue" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Handle" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "Age" }, "properties": [{ "id": "unit", "value": "s" }] },
           {
-            "matcher": { "id": "byName", "options": "transcript" },
+            "matcher": { "id": "byName", "options": "Link" },
             "properties": [
               {
                 "id": "links",
@@ -152,7 +152,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  a.ticket_id,\n  a.ticket_type,\n  IFNULL(a.server, 'none') AS server,\n  tm.opener_name,\n  FROM_UNIXTIME(a.created_at) AS opened_at,\n  FROM_UNIXTIME(a.first_message_at) AS their_first_message,\n  FROM_UNIXTIME(a.close_time) AS closed_at,\n  tm.close_user,\n  tm.close_type,\n  tm.close_reason,\n  a.queue_wait_seconds,\n  a.handle_after_pickup_seconds,\n  a.age_at_engagement_seconds,\n  a.message_count,\n  a.is_first_responder,\n  a.is_closer,\n  a.is_claimer,\n  a.is_stale_pickup,\n  CASE WHEN tm.transcript_url IS NULL OR tm.transcript_url = '' THEN NULL ELSE 'Open' END AS transcript,\n  tm.transcript_url\nFROM grafana_staff_activity a\nINNER JOIN grafana_ticket_metrics tm ON tm.ticket_id = a.ticket_id\nWHERE $__unixEpochFilter(a.created_at)\n  AND a.staff_user_id IN ($staff)\n  AND a.ticket_type IN ($ticket_type)\n  AND IFNULL(a.server, 'none') IN ($server)\n  AND (\n    '$involvement' = 'all'\n    OR ('$involvement' = 'first_responder' AND a.is_first_responder = 1)\n    OR ('$involvement' = 'closer' AND a.is_closer = 1)\n    OR ('$involvement' = 'claimer' AND a.is_claimer = 1)\n    OR ('$involvement' = 'stale' AND a.is_stale_pickup = 1)\n  )\nORDER BY a.created_at DESC\nLIMIT 2000",
+          "rawSql": "SELECT\n  a.ticket_id AS ID,\n  a.ticket_type AS Type,\n  IFNULL(a.server, 'none') AS Server,\n  tm.opener_name AS Opener,\n  FROM_UNIXTIME(a.created_at) AS Opened,\n  FROM_UNIXTIME(a.first_message_at) AS `First msg`,\n  FROM_UNIXTIME(a.close_time) AS Closed,\n  tm.close_user AS Closer,\n  tm.close_type AS `Close type`,\n  tm.close_reason AS Reason,\n  a.queue_wait_seconds AS Queue,\n  a.handle_after_pickup_seconds AS Handle,\n  a.age_at_engagement_seconds AS Age,\n  a.message_count AS Msgs,\n  a.is_first_responder AS Pickup,\n  a.is_closer AS `Did close`,\n  a.is_claimer AS Claimed,\n  a.is_stale_pickup AS Stale,\n  CASE WHEN tm.transcript_url IS NULL OR tm.transcript_url = '' THEN NULL ELSE 'Open' END AS Link,\n  tm.transcript_url\nFROM grafana_staff_activity a\nINNER JOIN grafana_ticket_metrics tm ON tm.ticket_id = a.ticket_id\nWHERE $__unixEpochFilter(a.created_at)\n  AND a.staff_user_id IN ($staff)\n  AND a.ticket_type IN ($ticket_type)\n  AND IFNULL(a.server, 'none') IN ($server)\n  AND (\n    '$involvement' = 'all'\n    OR ('$involvement' = 'first_responder' AND a.is_first_responder = 1)\n    OR ('$involvement' = 'closer' AND a.is_closer = 1)\n    OR ('$involvement' = 'claimer' AND a.is_claimer = 1)\n    OR ('$involvement' = 'stale' AND a.is_stale_pickup = 1)\n  )\nORDER BY a.created_at DESC\nLIMIT 2000",
           "refId": "A"
         }
       ],
