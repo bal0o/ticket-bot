@@ -14,7 +14,19 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Staff ticket list",
+      "type": "link",
+      "url": "/d/ticket-staff-metrics-detail"
+    }
+  ],
   "panels": [
     {
       "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
@@ -145,17 +157,24 @@
       "fieldConfig": {
         "defaults": {
           "custom": { "align": "auto" },
-          "decimals": 1
+          "decimals": 1,
+          "links": [
+            {
+              "title": "Tickets for this staff",
+              "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=all&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}",
+              "targetBlank": false
+            }
+          ]
         },
         "overrides": [
           { "matcher": { "id": "byName", "options": "avg_handle_after_pickup" }, "properties": [{ "id": "unit", "value": "s" }] },
           { "matcher": { "id": "byName", "options": "avg_claim_to_reply" }, "properties": [{ "id": "unit", "value": "s" }] },
           { "matcher": { "id": "byName", "options": "tickets_touched" }, "properties": [{ "id": "decimals", "value": 0 }] },
           { "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "picked_up" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "stale_pickups" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "closed" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "claimed" }, "properties": [{ "id": "decimals", "value": 0 }] }
+          { "matcher": { "id": "byName", "options": "picked_up" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Picked-up tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=first_responder&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "stale_pickups" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Stale pickups", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=stale&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "closed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Closed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=closer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "claimed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Claimed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=claimer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] }
         ]
       },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },

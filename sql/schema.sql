@@ -239,6 +239,7 @@ SELECT
     t.close_user_id,
     t.close_user,
     t.close_reason,
+    t.transcript_url,
     CASE
         WHEN t.first_staff_response_at IS NULL THEN NULL
         WHEN t.first_staff_response_at > 9999999999 THEN FLOOR(t.first_staff_response_at / 1000)
