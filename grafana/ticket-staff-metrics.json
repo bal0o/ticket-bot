@@ -168,14 +168,20 @@
         },
         "overrides": [
           { "matcher": { "id": "byName", "options": "staff_user_id" }, "properties": [{ "id": "custom.hidden", "value": true }] },
-          { "matcher": { "id": "byName", "options": "Handle" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "Claim reply" }, "properties": [{ "id": "unit", "value": "s" }] },
-          { "matcher": { "id": "byName", "options": "Touched" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "Msgs" }, "properties": [{ "id": "decimals", "value": 0 }] },
-          { "matcher": { "id": "byName", "options": "Pickup" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Picked-up tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=first_responder&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "Stale" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Stale pickups", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=stale&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "Closed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Closed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=closer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
-          { "matcher": { "id": "byName", "options": "Claimed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "links", "value": [{ "title": "Claimed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=claimer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] }
+          { "matcher": { "id": "byName", "options": "__tip_Staff" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Touched" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Msgs" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Pickup" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Stale" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Closed" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Handle" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "Staff" }, "properties": [{ "id": "description", "value": "Discord display name. Click for this person tickets." }, { "id": "custom.tooltip.field", "value": "__tip_Staff" }] },
+          { "matcher": { "id": "byName", "options": "Handle" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "description", "value": "Average time from this person first message to close." }, { "id": "custom.tooltip.field", "value": "__tip_Handle" }] },
+          { "matcher": { "id": "byName", "options": "Touched" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "description", "value": "Distinct tickets this person sent a staff message on." }, { "id": "custom.tooltip.field", "value": "__tip_Touched" }] },
+          { "matcher": { "id": "byName", "options": "Msgs" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "description", "value": "Staff messages this person sent." }, { "id": "custom.tooltip.field", "value": "__tip_Msgs" }] },
+          { "matcher": { "id": "byName", "options": "Pickup" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "description", "value": "Tickets where this person was the first staff to reply." }, { "id": "custom.tooltip.field", "value": "__tip_Pickup" }, { "id": "links", "value": [{ "title": "Picked-up tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=first_responder&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "Stale" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "description", "value": "First replies after the ticket sat more than 4 hours. Counts clearing the pile, not a time penalty." }, { "id": "custom.tooltip.field", "value": "__tip_Stale" }, { "id": "links", "value": [{ "title": "Stale pickups", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=stale&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] },
+          { "matcher": { "id": "byName", "options": "Closed" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "description", "value": "Tickets this person closed." }, { "id": "custom.tooltip.field", "value": "__tip_Closed" }, { "id": "links", "value": [{ "title": "Closed tickets", "url": "/d/ticket-staff-metrics-detail?var-staff=${__data.fields.staff_user_id}&var-involvement=closer&${__url_time_range}&${ticket_type:queryparam}&${server:queryparam}", "targetBlank": false }] }] }
         ]
       },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
@@ -186,7 +192,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  COUNT(DISTINCT ticket_id) AS Touched,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT CASE WHEN is_first_responder = 1 THEN ticket_id END) AS Pickup,\n  COUNT(DISTINCT CASE WHEN is_stale_pickup = 1 THEN ticket_id END) AS Stale,\n  COUNT(DISTINCT CASE WHEN is_closer = 1 THEN ticket_id END) AS Closed,\n  COUNT(DISTINCT CASE WHEN is_claimer = 1 THEN ticket_id END) AS Claimed,\n  AVG(handle_after_pickup_seconds) AS Handle,\n  AVG(claim_to_first_message_seconds) AS `Claim reply`\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Touched DESC, Closed DESC",
+          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  COUNT(DISTINCT ticket_id) AS Touched,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT CASE WHEN is_first_responder = 1 THEN ticket_id END) AS Pickup,\n  COUNT(DISTINCT CASE WHEN is_stale_pickup = 1 THEN ticket_id END) AS Stale,\n  COUNT(DISTINCT CASE WHEN is_closer = 1 THEN ticket_id END) AS Closed,\n  AVG(handle_after_pickup_seconds) AS Handle,\n  'Discord display name. Click for this person tickets.' AS __tip_Staff,\n  'Distinct tickets this person sent a staff message on.' AS __tip_Touched,\n  'Staff messages this person sent.' AS __tip_Msgs,\n  'Tickets where this person was the first staff to reply.' AS __tip_Pickup,\n  'First replies after the ticket sat more than 4 hours. Counts clearing the pile, not a time penalty.' AS __tip_Stale,\n  'Tickets this person closed.' AS __tip_Closed,\n  'Average time from this person first message to close.' AS __tip_Handle\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Touched DESC, Closed DESC",
           "refId": "A"
         }
       ],
@@ -221,7 +227,13 @@
           "unit": "short"
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "staff_user_id" }, "properties": [{ "id": "custom.hidden", "value": true }] }
+          { "matcher": { "id": "byName", "options": "staff_user_id" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Staff" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Msgs" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "__tip_Tickets" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+          { "matcher": { "id": "byName", "options": "Staff" }, "properties": [{ "id": "description", "value": "Discord display name." }, { "id": "custom.tooltip.field", "value": "__tip_Staff" }] },
+          { "matcher": { "id": "byName", "options": "Msgs" }, "properties": [{ "id": "description", "value": "Staff messages this person sent." }, { "id": "custom.tooltip.field", "value": "__tip_Msgs" }] },
+          { "matcher": { "id": "byName", "options": "Tickets" }, "properties": [{ "id": "description", "value": "Distinct tickets this person messaged on." }, { "id": "custom.tooltip.field", "value": "__tip_Tickets" }] }
         ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
@@ -232,7 +244,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT ticket_id) AS Tickets\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Msgs DESC",
+          "rawSql": "SELECT\n  staff_name AS Staff,\n  staff_user_id,\n  SUM(message_count) AS Msgs,\n  COUNT(DISTINCT ticket_id) AS Tickets,\n  'Discord display name.' AS __tip_Staff,\n  'Staff messages this person sent.' AS __tip_Msgs,\n  'Distinct tickets this person messaged on.' AS __tip_Tickets\nFROM grafana_staff_activity\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id, staff_name\nORDER BY Msgs DESC",
           "refId": "A"
         }
       ],
