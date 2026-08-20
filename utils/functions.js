@@ -86,7 +86,7 @@ module.exports.parseTicketTypeFromEmbedFooter = function(footerText) {
 
 /** Parse numeric ticket id from channel name (e.g. appeal-1234 → 1234). */
 module.exports.parseTicketNumberFromChannelName = function(channelName) {
-    const parts = (channelName || '').split('-');
+    const parts = String(channelName || '').replace(/-claimed$/i, '').split('-');
     const last = parts[parts.length - 1];
     return /^\d+$/.test(last) ? last : null;
 };
@@ -543,9 +543,12 @@ module.exports.convertMsToTime = async (milliseconds) => {
 }
 
 module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL = null) => {
-	// Update MySQL tickets table instead of PlayerStats (PlayerStats removed)
 	try {
 		if (typeof db.query === 'function') {
+			let closeTimeSeconds = Number(closeTime);
+			if (!Number.isFinite(closeTimeSeconds)) closeTimeSeconds = Math.floor(Date.now() / 1000);
+			if (closeTimeSeconds > 9999999999) closeTimeSeconds = Math.floor(closeTimeSeconds / 1000);
+			else closeTimeSeconds = Math.floor(closeTimeSeconds);
 			await db.query(
 				`UPDATE tickets SET 
 					close_type = ?, 
@@ -555,7 +558,7 @@ module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeU
 					close_reason = ?,
 					transcript_url = COALESCE(?, transcript_url)
 				WHERE user_id = ? AND ticket_id = ?`,
-				[closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL, String(userid), String(ticketUniqueID)]
+				[closeType, closeUser, closeUserID, closeTimeSeconds, closeReason, transcriptURL, String(userid), String(ticketUniqueID)]
 			);
 		}
 	} catch (err) {
@@ -1433,7 +1436,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 'closed',
                 staffMember.user.username,
                 staffMember.id,
-                Date.now(),
+                Math.floor(Date.now() / 1000),
                 reason,
                 savedTranscriptURL
             );
@@ -1466,13 +1469,21 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     closeUser: String(staffMember.user?.username || staffMember.username || ''),
                     closeReason: String(reason || ''),
                     transcriptFilename: `${channel.name}.html`,
-                    transcriptURL: savedTranscriptURL || null
+                    transcriptURL: savedTranscriptURL || null,
+                    channelId: channel.id || null
                 };
 
                 if (typeof db.writeTicket === 'function') {
                     await db.writeTicket(ticketRow);
                 } else {
                     throw new Error('MySQL writeTicket method not available');
+                }
+                if (typeof db.finalizeTicketMetrics === 'function') {
+                    await db.finalizeTicketMetrics({
+                        channelId: channel.id,
+                        ticketId: String(globalTicketNumber),
+                        openerId: String(DiscordID)
+                    });
                 }
             } catch (err) {
                 console.error('[closeTicket] Error writing ticket data:', err.message);

@@ -767,10 +767,11 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 			}
 		}
 		
+		let openResult = null;
 		if (questionFilesystem["open-as-ticket"] == true) {
             try { logger.event('TicketOpenChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 			
-const openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID);
+openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID);
 // Kick off BM lookup without delaying ticket creation; posts one combined staff-thread embed
 ;(async () => {
     if (!func.willDeferStaffBmEmbed(client, SteamID, null)) return;
@@ -936,7 +937,8 @@ try {
 				steamId: SteamID && SteamID.toString().startsWith('7656119') ? String(SteamID) : null,
 				responses: responses || null,
 				createdAt: createdAt,
-				globalTicketNumber: formattedTicketNumber
+				globalTicketNumber: formattedTicketNumber,
+				channelId: openResult && openResult.ticketChannelId ? openResult.ticketChannelId : null
 			});
 			await func.setTicketDmRelay(user.id, formattedTicketNumber, !func.isTicketTypeInternal(ticketType));
 			console.log('[backbone] Successfully wrote ticket to MySQL', { ticketId: formattedTicketNumber });

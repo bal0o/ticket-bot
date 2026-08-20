@@ -338,6 +338,19 @@ module.exports = async function (client, interaction) {
                         await channel.send(`**${interaction.user.username}:** ${editedResponse}`);
                     }
                 }
+
+                try {
+                    if (typeof db.recordStaffTicketActivity === 'function') {
+                        await db.recordStaffTicketActivity({
+                            channelId: channel.id,
+                            ticketId: func.parseTicketNumberFromChannelName(channel.name),
+                            openerId: userId,
+                            staffId: interaction.user.id,
+                            staffName: interaction.user.username || interaction.user.globalName || null,
+                            at: Date.now()
+                        });
+                    }
+                } catch (_) {}
                 
                 // Determine whether this ticket type should hide staff identity in DMs
                 let isAnonymousReply = false;
@@ -557,6 +570,21 @@ module.exports = async function (client, interaction) {
                 // Claim
                 client.claims.set(claimKey, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber });
                 try { await db.set(`Claims.${interaction.channel.id}`, { userId: interaction.user.id, at: Date.now(), ticketType, ticketId: globalTicketNumber }); } catch (_) {}
+                try {
+                    if (typeof db.recordTicketClaim === 'function') {
+                        const openerId = interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic)
+                            ? interaction.channel.topic
+                            : null;
+                        await db.recordTicketClaim({
+                            channelId: interaction.channel.id,
+                            ticketId: globalTicketNumber,
+                            openerId,
+                            staffId: interaction.user.id,
+                            staffName: interaction.user.username || interaction.user.globalName || null,
+                            at: Date.now()
+                        });
+                    }
+                } catch (_) {}
                 try { 
 					const scopeClaim = (function(){ try { const handlerRaw = require("../content/handler/options.json"); const tf = require(`../content/questions/${handlerRaw.options[displayType || ticketType].question_file}`); return tf && tf.internal ? 'internal' : 'public'; } catch(_) { return 'public'; } })();
 					// Claim/staff action metrics are now derived from the tickets table; Prometheus metrics removed.

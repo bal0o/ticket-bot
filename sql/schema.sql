@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS tickets (
     close_reason TEXT,
     transcript_url VARCHAR(500),
     global_ticket_number VARCHAR(255),
+    channel_id VARCHAR(32),
+    first_staff_response_at BIGINT,
+    first_staff_response_user_id VARCHAR(255),
+    first_staff_response_user VARCHAR(255),
+    last_staff_response_at BIGINT,
+    last_staff_response_user_id VARCHAR(255),
+    last_staff_response_user VARCHAR(255),
+    claimed_by_user_id VARCHAR(255),
+    claimed_by_user VARCHAR(255),
+    claimed_at BIGINT,
     INDEX idx_user_id (user_id),
     INDEX idx_ticket_id (ticket_id),
     INDEX idx_ticket_type (ticket_type),
@@ -37,6 +47,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     INDEX idx_close_user_id (close_user_id),
     INDEX idx_created_at (created_at),
     INDEX idx_close_time (close_time),
+    INDEX idx_channel_id (channel_id),
+    INDEX idx_first_staff_response_user_id (first_staff_response_user_id),
+    INDEX idx_claimed_by_user_id (claimed_by_user_id),
     UNIQUE KEY unique_user_ticket (user_id, ticket_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -201,5 +214,231 @@ CREATE TABLE IF NOT EXISTS ticket_participants (
     INDEX idx_ticket_id (ticket_id),
     INDEX idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE OR REPLACE VIEW grafana_ticket_metrics AS
+SELECT
+    t.id AS ticket_pk,
+    t.ticket_id,
+    t.global_ticket_number,
+    t.ticket_type,
+    t.server,
+    t.channel_id,
+    t.user_id AS opener_id,
+    t.username AS opener_name,
+    CASE
+        WHEN t.created_at IS NULL THEN NULL
+        WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000)
+        ELSE t.created_at
+    END AS created_at,
+    CASE
+        WHEN t.close_time IS NULL THEN NULL
+        WHEN t.close_time > 9999999999 THEN FLOOR(t.close_time / 1000)
+        ELSE t.close_time
+    END AS close_time,
+    t.close_type,
+    t.close_user_id,
+    t.close_user,
+    t.close_reason,
+    CASE
+        WHEN t.first_staff_response_at IS NULL THEN NULL
+        WHEN t.first_staff_response_at > 9999999999 THEN FLOOR(t.first_staff_response_at / 1000)
+        ELSE t.first_staff_response_at
+    END AS first_staff_response_at,
+    t.first_staff_response_user_id,
+    t.first_staff_response_user,
+    CASE
+        WHEN t.last_staff_response_at IS NULL THEN NULL
+        WHEN t.last_staff_response_at > 9999999999 THEN FLOOR(t.last_staff_response_at / 1000)
+        ELSE t.last_staff_response_at
+    END AS last_staff_response_at,
+    t.last_staff_response_user_id,
+    t.last_staff_response_user,
+    t.claimed_by_user_id,
+    t.claimed_by_user,
+    CASE
+        WHEN t.claimed_at IS NULL THEN NULL
+        WHEN t.claimed_at > 9999999999 THEN FLOOR(t.claimed_at / 1000)
+        ELSE t.claimed_at
+    END AS claimed_at,
+    (t.close_time IS NOT NULL OR t.close_type IS NOT NULL OR t.transcript_url IS NOT NULL) AS is_closed,
+    CASE
+        WHEN t.first_staff_response_at IS NULL OR t.created_at IS NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            (CASE WHEN t.first_staff_response_at > 9999999999 THEN FLOOR(t.first_staff_response_at / 1000) ELSE t.first_staff_response_at END)
+            - (CASE WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000) ELSE t.created_at END)
+        )
+    END AS time_to_first_response_seconds,
+    CASE
+        WHEN t.close_time IS NULL OR t.created_at IS NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            (CASE WHEN t.close_time > 9999999999 THEN FLOOR(t.close_time / 1000) ELSE t.close_time END)
+            - (CASE WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000) ELSE t.created_at END)
+        )
+    END AS time_open_seconds,
+    CASE
+        WHEN t.close_time IS NULL OR t.first_staff_response_at IS NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            (CASE WHEN t.close_time > 9999999999 THEN FLOOR(t.close_time / 1000) ELSE t.close_time END)
+            - (CASE WHEN t.first_staff_response_at > 9999999999 THEN FLOOR(t.first_staff_response_at / 1000) ELSE t.first_staff_response_at END)
+        )
+    END AS first_response_to_close_seconds,
+    CASE
+        WHEN t.claimed_at IS NULL OR t.created_at IS NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            (CASE WHEN t.claimed_at > 9999999999 THEN FLOOR(t.claimed_at / 1000) ELSE t.claimed_at END)
+            - (CASE WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000) ELSE t.created_at END)
+        )
+    END AS time_to_claim_seconds,
+    CASE
+        WHEN t.close_time IS NOT NULL OR t.close_type IS NOT NULL OR t.transcript_url IS NOT NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            UNIX_TIMESTAMP()
+            - CASE
+                WHEN t.last_staff_response_at IS NOT NULL THEN
+                    CASE WHEN t.last_staff_response_at > 9999999999 THEN FLOOR(t.last_staff_response_at / 1000) ELSE t.last_staff_response_at END
+                WHEN t.created_at IS NOT NULL THEN
+                    CASE WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000) ELSE t.created_at END
+                ELSE UNIX_TIMESTAMP()
+            END
+        )
+    END AS open_wait_seconds
+FROM tickets t;
+
+CREATE OR REPLACE VIEW grafana_staff_involvement AS
+SELECT
+    m.ticket_pk,
+    m.ticket_id,
+    m.ticket_type,
+    m.server,
+    m.created_at,
+    m.close_time,
+    m.is_closed,
+    m.time_to_first_response_seconds,
+    m.time_open_seconds,
+    m.first_response_to_close_seconds,
+    m.time_to_claim_seconds,
+    'first_responder' AS involvement,
+    m.first_staff_response_user_id AS staff_user_id,
+    m.first_staff_response_user AS staff_name
+FROM grafana_ticket_metrics m
+WHERE m.first_staff_response_user_id IS NOT NULL
+UNION ALL
+SELECT
+    m.ticket_pk,
+    m.ticket_id,
+    m.ticket_type,
+    m.server,
+    m.created_at,
+    m.close_time,
+    m.is_closed,
+    m.time_to_first_response_seconds,
+    m.time_open_seconds,
+    m.first_response_to_close_seconds,
+    m.time_to_claim_seconds,
+    'closer' AS involvement,
+    m.close_user_id AS staff_user_id,
+    m.close_user AS staff_name
+FROM grafana_ticket_metrics m
+WHERE m.close_user_id IS NOT NULL
+UNION ALL
+SELECT
+    m.ticket_pk,
+    m.ticket_id,
+    m.ticket_type,
+    m.server,
+    m.created_at,
+    m.close_time,
+    m.is_closed,
+    m.time_to_first_response_seconds,
+    m.time_open_seconds,
+    m.first_response_to_close_seconds,
+    m.time_to_claim_seconds,
+    'claimer' AS involvement,
+    m.claimed_by_user_id AS staff_user_id,
+    m.claimed_by_user AS staff_name
+FROM grafana_ticket_metrics m
+WHERE m.claimed_by_user_id IS NOT NULL;
+
+CREATE OR REPLACE VIEW grafana_staff_messages AS
+SELECT
+    t.ticket_id,
+    t.ticket_type,
+    t.server,
+    CASE
+        WHEN t.created_at IS NULL THEN NULL
+        WHEN t.created_at > 9999999999 THEN FLOOR(t.created_at / 1000)
+        ELSE t.created_at
+    END AS created_at,
+    m.author_id AS staff_user_id,
+    MAX(m.author_username) AS staff_name,
+    COUNT(*) AS message_count,
+    MIN(m.created_at) AS first_message_at,
+    MAX(m.created_at) AS last_message_at
+FROM tickets t
+INNER JOIN ticket_messages m ON m.channel_id = t.channel_id
+LEFT JOIN ticket_participants p ON p.ticket_id = t.ticket_id AND p.user_id = m.author_id
+WHERE t.channel_id IS NOT NULL
+  AND m.author_is_bot = 0
+  AND m.author_id <> t.user_id
+  AND p.id IS NULL
+  AND (m.channel_name IS NULL OR m.channel_name NOT LIKE 'staff-chat-%')
+GROUP BY t.ticket_id, t.ticket_type, t.server, t.created_at, m.author_id;
+
+CREATE OR REPLACE VIEW grafana_staff_activity AS
+SELECT
+    sm.ticket_id,
+    sm.ticket_type,
+    sm.server,
+    sm.created_at,
+    tm.close_time,
+    tm.is_closed,
+    sm.staff_user_id,
+    sm.staff_name,
+    sm.message_count,
+    CASE
+        WHEN sm.first_message_at > 9999999999 THEN FLOOR(sm.first_message_at / 1000)
+        ELSE sm.first_message_at
+    END AS first_message_at,
+    CASE
+        WHEN sm.last_message_at > 9999999999 THEN FLOOR(sm.last_message_at / 1000)
+        ELSE sm.last_message_at
+    END AS last_message_at,
+    tm.time_to_first_response_seconds AS queue_wait_seconds,
+    GREATEST(
+        0,
+        (CASE WHEN sm.first_message_at > 9999999999 THEN FLOOR(sm.first_message_at / 1000) ELSE sm.first_message_at END)
+        - sm.created_at
+    ) AS age_at_engagement_seconds,
+    CASE
+        WHEN tm.close_time IS NULL THEN NULL
+        ELSE GREATEST(
+            0,
+            tm.close_time
+            - (CASE WHEN sm.first_message_at > 9999999999 THEN FLOOR(sm.first_message_at / 1000) ELSE sm.first_message_at END)
+        )
+    END AS handle_after_pickup_seconds,
+    CASE
+        WHEN tm.claimed_by_user_id = sm.staff_user_id AND tm.claimed_at IS NOT NULL THEN
+            GREATEST(
+                0,
+                (CASE WHEN sm.first_message_at > 9999999999 THEN FLOOR(sm.first_message_at / 1000) ELSE sm.first_message_at END)
+                - tm.claimed_at
+            )
+        ELSE NULL
+    END AS claim_to_first_message_seconds,
+    (tm.first_staff_response_user_id = sm.staff_user_id) AS is_first_responder,
+    (tm.close_user_id = sm.staff_user_id) AS is_closer,
+    (tm.claimed_by_user_id = sm.staff_user_id) AS is_claimer,
+    (
+        tm.first_staff_response_user_id = sm.staff_user_id
+        AND tm.time_to_first_response_seconds > 14400
+    ) AS is_stale_pickup
+FROM grafana_staff_messages sm
+INNER JOIN grafana_ticket_metrics tm ON tm.ticket_id = sm.ticket_id;
 
 

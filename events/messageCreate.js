@@ -384,6 +384,19 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
             }
 
             try {
+                if (typeof db.recordStaffTicketActivity === 'function' && message.author && !message.author.bot) {
+                    await db.recordStaffTicketActivity({
+                        channelId: message.channel.id,
+                        ticketId: func.parseTicketNumberFromChannelName(message.channel.name),
+                        openerId: userId,
+                        staffId: message.author.id,
+                        staffName: message.author.username || message.author.globalName || null,
+                        at: message.createdTimestamp || Date.now()
+                    });
+                }
+            } catch (_) {}
+
+            try {
                 logger.event('StaffTicketMessage.raw', {
                     guildId: message.guild.id,
                     channelId: message.channel.id,
