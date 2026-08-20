@@ -1,46 +1,28 @@
 // Environment variables are now loaded from config.json
-const {
-	Client,
-	Collection,
-	GatewayIntentBits,
-	Partials,
-	ChannelType,
-	PermissionsBitField
-} = require("discord.js");
+const { ChannelType } = require("discord.js");
 const config = require("./config/config.json");
 const axios = require("axios");
+const bots = require("./utils/clients");
 // Debug helper toggled via config.debug
 const isDebugEnabled = !!config.debug;
 const debugLog = (...args) => { if (isDebugEnabled) console.log(...args); };
 const logger = require('./utils/logger');
 
-const client = new Client({
-	intents: [
-		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildMessageReactions,
-		GatewayIntentBits.GuildEmojisAndStickers,
-		GatewayIntentBits.GuildMessages,
-		GatewayIntentBits.DirectMessages,
-		GatewayIntentBits.MessageContent
-	],
-	partials: [
-		Partials.Message,
-		Partials.Channel,
-		Partials.Reaction,
-		Partials.GuildMember
-	]
-});
+const publicToken = config.tokens && config.tokens.bot_token;
+const staffToken = config.tokens && config.tokens.staff_bot_token;
+if (!publicToken || !staffToken) {
+	logger.error("[Startup] tokens.bot_token (public) and tokens.staff_bot_token are both required.");
+	process.exit(1);
+}
 
-client.commands = new Collection();
-client.blocked_users = new Set();
-client.cooldown = new Set();
-client.claims = new Map();
-client.replyContext = new Map();
-client.config = config;
+const { publicClient, staffClient } = bots.createClients(config);
+const handlerManager = require("./utils/handler_manager");
+handlerManager(publicClient);
+handlerManager(staffClient);
 
 // Web server is now a separate process; only start here if explicitly requested
 try {
-    if (process.env.RUN_MODE === 'all' && client.config.web && client.config.web.enabled) {
+    if (process.env.RUN_MODE === 'all' && config.web && config.web.enabled) {
         require("./web/server");
     }
 } catch (e) {
@@ -49,13 +31,16 @@ try {
 
 
 let startTime = new Date().getTime();
-client.login(config.tokens.bot_token).then(() => {
-
-	eval(require("./utils/handler_manager")(client));
+Promise.all([
+	publicClient.login(publicToken),
+	staffClient.login(staffToken)
+]).then(() => {
+	handlerManager.registerSlash(staffClient);
+	bots.warnWrongGuilds(publicClient, staffClient, config, logger);
 	let endTime = new Date().getTime();
 
 	let difference = Math.round(endTime - startTime);
-    logger.info(`[Startup] Logged in as ${client.user.username} in ${difference}ms`);
+    logger.info(`[Startup] Public bot ${publicClient.user.username} and staff bot ${staffClient.user.username} in ${difference}ms`);
 
 	// Start application interview scheduler loop
 	try {
@@ -63,6 +48,7 @@ client.login(config.tokens.bot_token).then(() => {
 		const db = createDB();
 		const applications = require('./utils/applications');
 		const cfg = require('./config/config.json');
+		const client = publicClient;
 		const guildId = cfg.channel_ids.public_guild_id; // Use public guild for interview channels
 		const adminRoleId = cfg.role_ids.application_admin_role_id || cfg.role_ids.default_admin_role_id;
 		const interviewCategory = cfg.applications && cfg.applications.interview ? cfg.applications.interview.category_id : null;
@@ -312,9 +298,12 @@ client.login(config.tokens.bot_token).then(() => {
 	} catch (e) { console.log('scheduler init error', e?.message || e); }
 });
 
-client
-    .on("debug", console.log)
-    .on("warn", console.log)
+if (isDebugEnabled) {
+	publicClient.on("debug", console.log);
+	staffClient.on("debug", console.log);
+}
+publicClient.on("warn", console.log);
+staffClient.on("warn", console.log);
 
 // Basic process-level diagnostics to surface crashes and memory spikes
 process.on('unhandledRejection', (reason, promise) => {

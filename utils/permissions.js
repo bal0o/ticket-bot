@@ -59,8 +59,9 @@ function ticketTypeAllowsMerges(ticketType) {
  */
 function buildPermissionOverwritesForTicketType({ client, guild, ticketType, userId = null, extraUserIds = [] }) {
 	const config = client?.config || {};
-	const staffGuild = guild || (client && client.guilds && client.guilds.cache.get(config.channel_ids?.staff_guild_id));
-	if (!staffGuild || !client?.user?.id) return [];
+	const staffBot = client?.bots?.staff || client;
+	const staffGuild = guild || (staffBot && staffBot.guilds && staffBot.guilds.cache.get(config.channel_ids?.staff_guild_id));
+	if (!staffGuild || !staffBot?.user?.id) return [];
 
 	const qf = getQuestionFileForType(ticketType);
 	const accessRoleIDs = Array.isArray(qf?.['access-role-id']) ? qf['access-role-id'].filter(Boolean) : [];
@@ -68,7 +69,7 @@ function buildPermissionOverwritesForTicketType({ client, guild, ticketType, use
 	const overwrites = [
 		{ id: staffGuild.id, deny: ['ViewChannel', 'AddReactions'] },
 		{
-			id: client.user.id,
+			id: staffBot.user.id,
 			allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
 		},
 	];

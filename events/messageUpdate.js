@@ -1,17 +1,22 @@
 const { createDB } = require('../utils/mysql');
 const db = createDB();
 const func = require("../utils/functions.js");
+const bots = require("../utils/clients");
 
 module.exports = async function (client, oldMessage, newMessage) {
     try {
         if (!newMessage || !newMessage.channel || newMessage.author?.bot) return;
 
+        const isDM = newMessage.channel.type === require('discord.js').ChannelType.DM;
+        if (isDM && newMessage.client.botRole === 'staff') return;
+        if (!isDM && newMessage.client.botRole === 'public') return;
+
         // User DM edits -> update staff side
-        if (newMessage.channel.type === require('discord.js').ChannelType.DM) {
+        if (isDM) {
             const map = await db.get(`ForwardMap.${newMessage.id}`);
             if (!map || !map.channelId) return;
 
-            const staffChannel = await client.channels.fetch(map.channelId).catch(() => null);
+            const staffChannel = await bots.fetchStaffChannel(client, map.channelId);
             if (!staffChannel) return;
 
         // Sanitize content for staff channel
@@ -101,13 +106,13 @@ module.exports = async function (client, oldMessage, newMessage) {
                 
                 // Try to fetch stored DM channel first
                 if (map.dmChannelId) {
-                    dmChannel = await client.channels.fetch(map.dmChannelId).catch(() => null);
+                    dmChannel = await bots.fetchPublicChannel(client, map.dmChannelId);
                 }
                 
                 // Recovery: If DM channel fetch failed (stale ID), fetch user and create new DM
                 if (!dmChannel && map.userId) {
                     try {
-                        const user = await client.users.fetch(map.userId).catch(() => null);
+                        const user = await bots.fetchDmUser(client, map.userId);
                         if (user) {
                             // Use sendDMWithRetry which will create a new DM channel
                             // For edits, we just need to send the new content (can't delete old messages)

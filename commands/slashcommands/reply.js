@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
+const bots = require('../../utils/clients');
 const responses = require('../../content/response.json');
 
 // Format category name for display
@@ -39,7 +40,7 @@ module.exports = {
         const userId = channel.topic;
         
         // Fetch the user to get their username
-        const user = await client.users.fetch(userId).catch(() => null);
+        const user = await bots.fetchDmUser(client, userId);
         if (!user) {
             return interaction.reply({ content: 'Could not find the user for this ticket.', flags: func.EPHEMERAL });
         }

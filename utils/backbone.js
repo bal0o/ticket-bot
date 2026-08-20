@@ -6,6 +6,7 @@ const logger = require('./logger');
 const lang = require("../content/handler/lang.json");
 const { createDB } = require('./mysql');
 const db = createDB();
+const bots = require("./clients");
 
 function parseApproximateTimeToUnix(input) {
 	if (!input || typeof input !== 'string') return null;
@@ -389,8 +390,19 @@ async function promptForTimezoneIfNeeded(sentMessage, user, defaultTimezone) {
 
 module.exports = async function (client, interaction, user, ticketType, validOption, questionFilesystem) {
 	try {
-		const guild = await client.guilds.cache.find(x => x.id == client.config.channel_ids.staff_guild_id);
-		const ticketChannel = await guild.channels.cache.find(x => x.id == questionFilesystem["post-channel"]);
+		const staffBot = bots.staffClient(client);
+		const guild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+		if (!guild) {
+			return func.handle_errors(null, client, `backbone.js`, `Staff guild not found`);
+		}
+		const ticketChannel = guild.channels.cache.get(questionFilesystem["post-channel"]);
+
+		const dmUser = await bots.fetchDmUser(client, user.id);
+		if (!dmUser) {
+			await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+			return;
+		}
+		user = dmUser;
 
 		let responses = ""
 
@@ -781,7 +793,7 @@ openResult = await func.openTicket(client, interaction, questionFilesystem, user
     try {
         const threadId = openResult && openResult.staffThreadId ? openResult.staffThreadId : null;
         if (threadId) {
-            try { thread = await client.channels.fetch(threadId).catch(() => null); } catch (_) { thread = null; }
+            try { thread = await bots.fetchStaffChannel(client, threadId); } catch (_) { thread = null; }
         }
         if (!thread) return;
 
@@ -846,7 +858,7 @@ openResult = await func.openTicket(client, interaction, questionFilesystem, user
     } finally {
         try {
             if (!thread && openResult && openResult.staffThreadId) {
-                thread = await client.channels.fetch(openResult.staffThreadId).catch(() => null);
+                thread = await bots.fetchStaffChannel(client, openResult.staffThreadId);
             }
             await func.sendStaffThreadInfo(client, thread, user, formattedTicketNumber, SteamID, responses, bmInfo);
         } catch (_) {}

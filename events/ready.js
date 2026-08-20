@@ -14,11 +14,13 @@ try {
 }
 const fs = require("fs");
 const func = require("../utils/functions.js");
+const bots = require("../utils/clients");
 const { createDB } = require('../utils/mysql')
 
 module.exports = async function (client, message) {
-    // Initialize the ticket status
-    await func.updateTicketStatus(client);
+    if (client.botRole === 'staff') {
+        await func.updateTicketStatus(client);
+    }
 
     const db = createDB();
 
@@ -35,6 +37,7 @@ module.exports = async function (client, message) {
     }
 
     // See if the Embed for creating tickets is available and if its not, make one.
+    if (client.botRole === 'public') {
     let buttonEmbed = undefined
     let postChannel = client.channels.cache.find(x => x.id == client.config.channel_ids.post_embed_channel_id)
     if (!postChannel) {
@@ -145,7 +148,9 @@ module.exports = async function (client, message) {
             });
             }
     }
+    }
 
+    if (client.botRole !== 'staff') return;
 
     // Keeps your "open-appeals" channel clear of unwanted messages.
     const deleteMessagesInTicketEmbedChannel = () => {
@@ -165,7 +170,7 @@ module.exports = async function (client, message) {
             TicketTypeChannel.messages.fetch({limit: 100})
                 .then(fetched => {
                     const notPinned = fetched.filter(fetchedMsg => !fetchedMsg.pinned);
-                    const notBot = notPinned.filter(fetchedMsg => fetchedMsg.author.id != client.user.id);
+                    const notBot = notPinned.filter(fetchedMsg => !bots.isOurBotId(client, fetchedMsg.author.id));
                     TicketTypeChannel.bulkDelete(notBot, true).catch(error => {
                         // If the message is deleted, the Discord API will return an unknown message error
                         if (error instanceof DiscordAPIError && error.code === 10008) return;

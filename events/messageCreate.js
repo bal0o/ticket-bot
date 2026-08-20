@@ -12,6 +12,7 @@ const logger = require("../utils/logger");
 const { createDB } = require('../utils/mysql');
 const db = createDB();
 const lang = require("../content/handler/lang.json");
+const bots = require("../utils/clients");
 
 // Track users who are in the ticket selection process
 const usersSelectingTicket = new Set();
@@ -176,6 +177,10 @@ async function logMessageToDB(message) {
 
 module.exports = async function (client, message) {
     try {
+        const isDM = message.channel.type === ChannelType.DM;
+        if (isDM && client.botRole === 'staff') return;
+        if (!isDM && client.botRole === 'public') return;
+
         // Always attempt to log the message first (including bot messages)
         await logMessageToDB(message);
 
@@ -184,7 +189,7 @@ module.exports = async function (client, message) {
 
         if (message.author.bot || client.blocked_users.has(message.author.id)) return;
         if (message.channel.type === ChannelType.DM) {
-            const guild = client.guilds.cache.get(config.channel_ids.staff_guild_id);
+            const guild = bots.staffGuild(client);
             if (!guild) return;
 
             // Fast-path: find user's ticket channels by topic
@@ -348,7 +353,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 usersSelectingTicket.delete(message.author.id);
             }
         } else {
-            const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+            const staffGuild = bots.staffGuild(client);
             if (!staffGuild || message.guild.id !== staffGuild.id) return;
 
             // Only relay messages sent in the main ticket channel.
@@ -421,7 +426,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 return;
             }
 
-            const user = await client.users.fetch(userId).catch(() => null);
+            const user = await bots.fetchDmUser(client, userId);
             if (!user) {
                 await notifyDeliveryIssue(
                     message.channel,
@@ -882,7 +887,7 @@ async function processTicketMessage(message, channel, client) {
     if (!webhook) {
         try {
             // Check if bot can manage webhooks
-            if (!webhookChannel || !webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+            if (!webhookChannel || !webhookChannel.permissionsFor(bots.staffClient(client).user).has('MANAGE_WEBHOOKS')) {
                 throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
             }
             

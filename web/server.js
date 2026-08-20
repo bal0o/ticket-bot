@@ -26,7 +26,8 @@ const DISCORD_SCOPES = config.web?.discord_oauth?.scopes || ['identify'];
 const STAFF_GUILD_ID = config.web?.staff_guild_id || config.channel_ids?.staff_guild_id;
 const STAFF_ROLE_IDS = new Set((config.web?.roles?.staff_role_ids || []).filter(Boolean));
 const ADMIN_ROLE_IDS = new Set((config.web?.roles?.admin_role_ids || []).filter(Boolean));
-const BOT_TOKEN = config.tokens?.bot_token;
+const PUBLIC_BOT_TOKEN = config.tokens?.bot_token;
+const STAFF_BOT_TOKEN = config.tokens?.staff_bot_token;
 const TRANSCRIPT_DIR = path.resolve(process.cwd(), config.transcript_settings?.save_path || './transcripts/');
 
 // Harden outbound HTTP calls
@@ -52,8 +53,11 @@ if (!WEB_ENABLED) {
 if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
     console.warn('[web] Missing Discord OAuth client ID/secret. Set in config.web.discord_oauth.');
 }
-if (!BOT_TOKEN) {
-    console.warn('[web] Missing bot_token in config.tokens. Guild role checks will fail.');
+if (!PUBLIC_BOT_TOKEN) {
+    console.warn('[web] Missing bot_token in config.tokens. Applicant DMs will fail.');
+}
+if (!STAFF_BOT_TOKEN) {
+    console.warn('[web] Missing staff_bot_token in config.tokens. Guild role checks and staff channels will fail.');
 }
 
 // --- Databases ---
@@ -82,8 +86,8 @@ passport.use(new DiscordStrategy({
 
 // --- Helpers ---
 async function fetchGuildMemberRoles(userId) {
-    if (!BOT_TOKEN) {
-        console.warn('[web] BOT_TOKEN not configured, cannot fetch roles');
+    if (!STAFF_BOT_TOKEN) {
+        console.warn('[web] STAFF_BOT_TOKEN not configured, cannot fetch roles');
         return [];
     }
     if (!STAFF_GUILD_ID) {
@@ -92,7 +96,7 @@ async function fetchGuildMemberRoles(userId) {
     }
     try {
         const res = await axios.get(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${userId}` , {
-            headers: { Authorization: `Bot ${BOT_TOKEN}` }
+            headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` }
         });
         const roles = Array.isArray(res.data?.roles) ? res.data.roles : [];
         console.log('[web] Fetched roles for user', { userId, roleCount: roles.length });
@@ -205,12 +209,12 @@ async function getUsernamesMap(ids = []) {
     return map;
 }
 async function createGuildChannel({ name, type = 0, topic = '', parentId = '', permissionOverwrites = [] }) {
-    if (!BOT_TOKEN || !STAFF_GUILD_ID) throw new Error('Missing bot token or staff guild');
+    if (!STAFF_BOT_TOKEN || !STAFF_GUILD_ID) throw new Error('Missing bot token or staff guild');
     const body = { name, type, topic };
     if (parentId) body.parent_id = parentId;
     if (permissionOverwrites && permissionOverwrites.length > 0) body.permission_overwrites = permissionOverwrites;
     const res = await axios.post(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/channels`, body, {
-        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+        headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` }
     });
     return res.data;
 }
@@ -269,9 +273,9 @@ async function getDiscordUsernamesMap(userIds = []) {
             continue;
         }
         try {
-            if (!BOT_TOKEN) { map[id] = id; continue; }
+            if (!PUBLIC_BOT_TOKEN) { map[id] = id; continue; }
             const res = await axios.get(`https://discord.com/api/v10/users/${id}`, {
-                headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` }
             });
             const data = res.data || {};
             const username = data.global_name || data.username || null;
@@ -859,7 +863,7 @@ app.get('/applications/:id', ensureAuth, ensureApplicationsAccess, async (req, r
                 try {
                     // Try to fetch the channel to see if it exists (for UI only; do not post messages on view)
                     const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${lastTicket.channelId}`, {
-                        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                        headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` }
                     });
                     channelExists = channelResponse.status === 200;
                 } catch (error) {
@@ -1016,7 +1020,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
             for (const t of commsLinks) {
                 try {
                     const channelResponse = await axios.get(`https://discord.com/api/v10/channels/${t.channelId}`, {
-                        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+                        headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` }
                     });
                     if (channelResponse.status === 200) {
                         return res.redirect(`/applications/${appId}?notification=A communication channel is already open for this application!&type=error`);
@@ -1035,7 +1039,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
                     const stillOpen = [];
                     for (const chId of list) {
                         try {
-                            const r = await axios.get(`https://discord.com/api/v10/channels/${chId}`, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                            const r = await axios.get(`https://discord.com/api/v10/channels/${chId}`, { headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` } });
                             if (r.status === 200) {
                                 // Found an existing open comms channel for this user
                                 return res.redirect(`/applications/${appId}?notification=This user already has an open communication channel. Please close it before opening another.&type=error`);
@@ -1134,7 +1138,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
                     type: 12, // private thread
                     auto_archive_duration: 10080
                 },
-                { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+                { headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` } }
             );
             const thread = threadRes.data;
             if (thread && thread.id) {
@@ -1172,7 +1176,7 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
                         content: '',
                         embeds: [embed]
                     },
-                    { headers: { Authorization: `Bot ${BOT_TOKEN}` } }
+                    { headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` } }
                 );
             }
         } catch (threadError) {
@@ -1211,18 +1215,18 @@ app.post('/applications/:id/open_ticket', ensureAuth, ensureApplicationsAccess, 
                 components: [
                     { type: 1, components: [ { type: 2, style: 4, custom_id: 'app_comm_close', label: 'Close Communication', emoji: { name: '📝' } } ] }
                 ]
-            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }, { headers: { Authorization: `Bot ${STAFF_BOT_TOKEN}` } });
             
             // Send DM notification to applicant
             try {
                 const dmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
                     recipient_id: appRec.userId
-                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
                 
                 if (dmChannel.data && dmChannel.data.id) {
                     await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
                         content: `**Application Communication Channel Opened** 📢\n\nStaff have opened a communication channel to discuss your application. You can now receive messages from staff members.\n\n**Application Type:** ${appRec.type}\n**Current Stage:** ${appRec.stage}\n\n**How to respond:**\n• Staff will send you messages here in this DM\n• You can respond directly to this DM and your responses will be sent to the staff channel\n• This allows for two-way communication about your application\n\nStaff will contact you shortly!`
-                    }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                    }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
                 }
             } catch (dmError) {
                 console.error('Failed to send DM notification:', dmError?.response?.data || dmError);
@@ -1288,12 +1292,12 @@ app.post('/applications/:id/schedule', ensureAuth, ensureApplicationsAccess, asy
         try {
             const dmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
                 recipient_id: appRec.userId
-            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             
             if (dmChannel.data && dmChannel.data.id) {
                 await axios.post(`https://discord.com/api/v10/channels/${dmChannel.data.id}/messages`, {
                     content: `**Interview Scheduled** 📅\n\nYour application interview has been scheduled!\n\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n**Staff Member:** <@${staffId}>\n\nA voice channel will be created 5 minutes before your interview time. You will be able to join the channel when it becomes available.\n\nIf you need to reschedule, please contact staff as soon as possible.`
-                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (dmError) {
             console.error('Failed to send interview DM notification:', dmError?.response?.data || dmError);
@@ -1303,12 +1307,12 @@ app.post('/applications/:id/schedule', ensureAuth, ensureApplicationsAccess, asy
         try {
             const staffDmChannel = await axios.post(`https://discord.com/api/v10/users/@me/channels`, {
                 recipient_id: staffId
-            }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             
             if (staffDmChannel.data && staffDmChannel.data.id) {
                 await axios.post(`https://discord.com/api/v10/channels/${staffDmChannel.data.id}/messages`, {
                     content: `**Interview Scheduled** 📅\n\nYou have an interview scheduled!\n\n**Applicant:** ${appRec.username} (<@${appRec.userId}>)\n**Date & Time:** <t:${interviewTimestamp}:F>\n**Type:** Voice Interview\n\nA voice channel will be created 5 minutes before the interview time.`
-                }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (staffDmError) {
             console.error('Failed to send staff DM notification:', staffDmError?.response?.data || staffDmError);
@@ -1391,17 +1395,17 @@ app.post('/applications/:id/interviews/:jobId/delete', ensureAuth, ensureApplica
 
         // DM applicant and staff about cancellation
         try {
-            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             if (applicantDm.data?.id) {
                 const ts = Math.floor(interviewAt.getTime()/1000);
-                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nYour interview scheduled for <t:${ts}:F> has been cancelled by staff. If this was a mistake, please reach out to staff to reschedule.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nYour interview scheduled for <t:${ts}:F> has been cancelled by staff. If this was a mistake, please reach out to staff to reschedule.` }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (e) { console.error('Cancel DM (applicant) failed:', e?.response?.data || e); }
         try {
-            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: job.staffId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: job.staffId }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             if (staffDm.data?.id) {
                 const ts = Math.floor(interviewAt.getTime()/1000);
-                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) scheduled for <t:${ts}:F> has been cancelled.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Cancelled** ❌\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) scheduled for <t:${ts}:F> has been cancelled.` }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (e) { console.error('Cancel DM (staff) failed:', e?.response?.data || e); }
         
@@ -1449,17 +1453,17 @@ app.post('/applications/:id/interviews/:jobId/reschedule', ensureAuth, ensureApp
 
         // DM applicant and staff about reschedule
         try {
-            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            const applicantDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: appRec.userId }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             if (applicantDm.data?.id) {
                 const ts = Math.floor(when.getTime()/1000);
-                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nYour interview has been rescheduled to <t:${ts}:F>. Please be ready at that time. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                await axios.post(`https://discord.com/api/v10/channels/${applicantDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nYour interview has been rescheduled to <t:${ts}:F>. Please be ready at that time. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (e) { console.error('Reschedule DM (applicant) failed:', e?.response?.data || e); }
         try {
-            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: staffId }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            const staffDm = await axios.post(`https://discord.com/api/v10/users/@me/channels`, { recipient_id: staffId }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             if (staffDm.data?.id) {
                 const ts = Math.floor(when.getTime()/1000);
-                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) moved to <t:${ts}:F>. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+                await axios.post(`https://discord.com/api/v10/channels/${staffDm.data.id}/messages`, { content: `**Interview Rescheduled** 🔁\n\nInterview with **${appRec.username}** (<@${appRec.userId}>) moved to <t:${ts}:F>. A voice channel will be created 5 minutes prior.` }, { headers: { Authorization: `Bot ${PUBLIC_BOT_TOKEN}` } });
             }
         } catch (e) { console.error('Reschedule DM (staff) failed:', e?.response?.data || e); }
         

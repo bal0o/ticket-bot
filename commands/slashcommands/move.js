@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const func = require('../../utils/functions.js');
+const bots = require('../../utils/clients');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
@@ -168,7 +169,7 @@ module.exports = {
         // DM the ticket owner about the move and surface failures to staff
         const topicUser = channel.topic;
         if (topicUser) {
-            const user = await client.users.fetch(topicUser).catch(() => null);
+            const user = await bots.fetchDmUser(client, topicUser);
             if (user) {
                 try {
                     await func.sendDMWithRetry(

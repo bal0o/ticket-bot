@@ -67,6 +67,7 @@
 
 "tokens": {
 	"bot_token": "your_discord_bot_token_here",
+	"staff_bot_token": "your_staff_discord_bot_token_here",
 	"Linking_System_API_Key_Or_Secret": "",
 	"cheetosToken": "",
 	"steamToken": "",

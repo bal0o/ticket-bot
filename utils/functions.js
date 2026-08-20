@@ -1,6 +1,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, MessageFlags, Collection, StringSelectMenuBuilder } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
+const bots = require("./clients");
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
 const path = require("path");
@@ -259,14 +260,15 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
                     hasFiles: !!(payload && typeof payload === 'object' && Array.isArray(payload.files) && payload.files.length > 0)
                 });
             } catch (_) {}
-            const message = await user.send(payload);
+            const dmUser = await bots.fetchDmUser(user && user.client, user && user.id) || user;
+            const message = await dmUser.send(payload);
             return { delivered: !!(message && message.id), message: message || null, error: null };
         } catch (err) {
             attempt++;
             if (!isRetryable(err) || attempt >= maxAttempts) {
                 // Surface the failure to the bot's error channel
                 try {
-                    const client = user && user.client ? user.client : null;
+                    const client = (user && user.client) || null;
                     const context = `sendDMWithRetry final failure for user ${user && user.id ? user.id : 'unknown'}`;
                     module.exports.handle_errors(err, client, 'functions.js', context);
                 } catch (_) {}
@@ -489,7 +491,7 @@ module.exports.deleteEmptyOverflowCategory = deleteEmptyOverflowCategory;
 
 module.exports.handle_errors = async (err, client, file, message) => {
 
-	let ErrorChannel = client.channels.cache.get(client.config.channel_ids.error_channel)
+	let ErrorChannel = client ? bots.findCachedChannel(client, client.config && client.config.channel_ids && client.config.channel_ids.error_channel) : null
 
     let errorEmbed = new EmbedBuilder()
     .setColor(0x990000)
@@ -691,8 +693,8 @@ async function notifyTicketCreationFailed(interaction, recepientMember) {
     if (interaction?.editReply) {
         await interaction.editReply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
-    if (recepientMember?.send) {
-        await recepientMember.send(message).catch(() => {});
+    if (recepientMember) {
+        await module.exports.sendDMWithRetry(recepientMember, message, { maxAttempts: 2, baseDelayMs: 500 });
     }
 }
 
@@ -708,10 +710,11 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
 
     let postchannel = null;
     let postchannelCategory = null;
+    const staffBot = bots.staffClient(client);
     
     // Only try to get post channel if not using open-as-ticket
     if (!questionFile["open-as-ticket"]) {
-        postchannel = client.channels.cache.get(questionFile[`post-channel`]);
+        postchannel = staffBot.channels.cache.get(questionFile[`post-channel`]);
         if (postchannel) {
             postchannelCategory = postchannel.parentId;
         }
@@ -720,7 +723,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     let ticketCategory = questionFile[`ticket-category`]
     let accessRoleIDs = questionFile[`access-role-id`]
 	let pingRoleIDs = questionFile[`ping-role-id`];
-    let staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id)
+    let staffGuild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id)
 
     if (administratorMember == null) {
         administratorMember = "Auto Ticket";
@@ -736,7 +739,7 @@ let overwrites = [
             deny: ['ViewChannel', 'AddReactions'],
         },
         {
-            id: client.user.id,
+            id: staffBot.user.id,
             allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
         },
         {
@@ -859,7 +862,7 @@ try {
 // For public tickets, DM the user with the ticket name/number
 try {
     if (!questionFile.internal) {
-        await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+        await module.exports.sendDMWithRetry(recepientMember, `Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
     }
 } catch (e) {}
 
@@ -1200,7 +1203,9 @@ try {
 // Add function to update bot status
 module.exports.updateTicketStatus = async function(client) {
     try {
-        const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+        const staffBot = bots.staffClient(client);
+        const publicBot = bots.publicClient(client);
+        const staffGuild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id);
         if (!staffGuild) {
             console.warn('[updateTicketStatus] Staff guild not found');
             return;
@@ -1286,7 +1291,10 @@ module.exports.updateTicketStatus = async function(client) {
         if (activityConfig.messages.length === 1) {
             const message = activityConfig.messages[0].replace(/{count}/g, ticketCount);
             try {
-                await client.user.setActivity(message, { type: activityType });
+                await staffBot.user.setActivity(message, { type: activityType });
+                if (publicBot && publicBot.user && publicBot !== staffBot) {
+                    await publicBot.user.setActivity(message, { type: activityType });
+                }
                 console.log(`[updateTicketStatus] Status updated: "${message}"`);
             } catch (activityError) {
                 console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
@@ -1295,29 +1303,32 @@ module.exports.updateTicketStatus = async function(client) {
         }
 
         // If there are multiple messages, cycle through them
-        if (!client.currentStatusIndex) {
-            client.currentStatusIndex = 0;
+        if (!staffBot.currentStatusIndex) {
+            staffBot.currentStatusIndex = 0;
         }
 
         // Get current message and replace {count} with actual count
-        const currentMessage = activityConfig.messages[client.currentStatusIndex].replace(/{count}/g, ticketCount);
+        const currentMessage = activityConfig.messages[staffBot.currentStatusIndex].replace(/{count}/g, ticketCount);
         try {
-            await client.user.setActivity(currentMessage, { type: activityType });
+            await staffBot.user.setActivity(currentMessage, { type: activityType });
+            if (publicBot && publicBot.user && publicBot !== staffBot) {
+                await publicBot.user.setActivity(currentMessage, { type: activityType });
+            }
             console.log(`[updateTicketStatus] Status updated: "${currentMessage}"`);
         } catch (activityError) {
             console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
         }
 
         // Move to next message
-        client.currentStatusIndex = (client.currentStatusIndex + 1) % activityConfig.messages.length;
+        staffBot.currentStatusIndex = (staffBot.currentStatusIndex + 1) % activityConfig.messages.length;
 
         // Set up periodic updates if cycleTimeinSeconds is configured and interval doesn't exist
-        if (activityConfig.cycleTimeinSeconds && !client.statusUpdateInterval) {
-            client.statusUpdateInterval = setInterval(async () => {
+        if (activityConfig.cycleTimeinSeconds && !staffBot.statusUpdateInterval) {
+            staffBot.statusUpdateInterval = setInterval(async () => {
                 // Only update if we have multiple messages to cycle through
                 if (activityConfig.messages.length > 1) {
-                    await module.exports.updateTicketStatus(client).catch(error => {
-                        func.handle_errors(error, client, 'functions.js', null);
+                    await module.exports.updateTicketStatus(staffBot).catch(error => {
+                        func.handle_errors(error, staffBot, 'functions.js', null);
                     });
                 }
             }, activityConfig.cycleTimeinSeconds * 1000);
@@ -1338,7 +1349,8 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
     try {
         // removed debug marker
         // Check if the channel still exists and is accessible
-        if (!channel || !channel.guild || !client.channels.cache.has(channel.id)) {
+        const staffBot = bots.staffClient(client);
+        if (!channel || !channel.guild || !staffBot.channels.cache.has(channel.id)) {
             // removed debug
             // Optionally log or notify that the channel is gone
             return;
@@ -1369,7 +1381,7 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
         const DiscordID = idParts[0];
         // removed debug
         // Get user
-        const user = await client.users.fetch(DiscordID).catch(() => null);
+        const user = await bots.fetchDmUser(client, DiscordID);
         if (!user) {
             // removed debug
         }
@@ -1528,7 +1540,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             for (const recipientId of closeRecipientIds) {
                 const recipient = recipientId === String(DiscordID)
                     ? user
-                    : await client.users.fetch(recipientId).catch(() => null);
+                    : await bots.fetchDmUser(client, recipientId);
                 if (!recipient) continue;
                 try {
                     const result = await module.exports.sendDMWithRetry(recipient, reply, { maxAttempts: 3, baseDelayMs: 600 });
@@ -1877,7 +1889,7 @@ module.exports.mergeTickets = async function(client, survivorChannel, sourceChan
             }
 
             const formAnswers = await getFormAnswersForTicket(sourceOwnerId, sourceNumber, sourceChannel);
-            const sourceUser = await client.users.fetch(sourceOwnerId).catch(() => null);
+            const sourceUser = await bots.fetchDmUser(client, sourceOwnerId);
             const extraParts = typeof db.getTicketParticipants === 'function'
                 ? await db.getTicketParticipants(sourceNumber).catch(() => [])
                 : [];

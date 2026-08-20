@@ -1,16 +1,21 @@
 const { createDB } = require('../utils/mysql');
 const db = createDB();
 const func = require("../utils/functions.js");
+const bots = require("../utils/clients");
 
 module.exports = async function (client, message) {
     try {
         if (!message || !message.id) return;
 
+        const isDM = message.channel && message.channel.type === require('discord.js').ChannelType.DM;
+        if (isDM && message.client.botRole === 'staff') return;
+        if (!isDM && message.guild && message.client.botRole === 'public') return;
+
         // If a user deletes a DM message, remove corresponding staff-side forwarded messages
-        if (message.channel && message.channel.type === require('discord.js').ChannelType.DM && !message.author?.bot) {
+        if (isDM && !message.author?.bot) {
             const map = await db.get(`ForwardMap.${message.id}`);
             if (map && map.channelId) {
-                const staffChannel = await client.channels.fetch(map.channelId).catch(() => null);
+                const staffChannel = await bots.fetchStaffChannel(client, map.channelId);
                 if (staffChannel) {
                     // Delete combined message if present
                     if (map.combinedMessageId) {
@@ -37,7 +42,7 @@ module.exports = async function (client, message) {
         if (message.guild && message.channel && !message.channel.isThread()) {
             const map = await db.get(`StaffForwardMap.${message.id}`);
             if (map && map.dmChannelId) {
-                const dmChannel = await client.channels.fetch(map.dmChannelId).catch(() => null);
+                const dmChannel = await bots.fetchPublicChannel(client, map.dmChannelId);
                 if (dmChannel) {
                     // Delete DM files message if present
                     if (map.filesMessageId) {

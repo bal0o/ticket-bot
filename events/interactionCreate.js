@@ -23,6 +23,7 @@ const db = createDB();
 const logger = require('../utils/logger');
 const applications = require('../utils/applications');
 const perms = require('../utils/permissions');
+const bots = require('../utils/clients');
 
 // Initialize commands collection if it doesn't exist
 if (!Collection.prototype.commands) {
@@ -36,6 +37,13 @@ module.exports = async function (client, interaction) {
         const id = interaction.isCommand() ? interaction.commandName : (interaction.customId || 'n/a');
         logger.event('Interaction', { kind, id, userId: interaction.user?.id, channelId: interaction.channelId });
     } catch (_) {}
+
+    const publicGuildId = client.config.channel_ids.public_guild_id;
+    if (client.botRole === 'staff') {
+        if (!interaction.guildId) return;
+        if (publicGuildId && interaction.guildId === publicGuildId) return;
+    }
+
     if (interaction.isButton() && ['prev_page', 'next_page'].includes(interaction.customId)) {
         return;
     }
@@ -167,7 +175,7 @@ module.exports = async function (client, interaction) {
         if (interaction.customId === "feedbackModal") {
             try { await interaction.deferReply(); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, `interactionCreate.js`, null); }
 
-            let feedbackChannel = client.channels.cache.find(x => x.id === client.config.channel_ids.feedback_channel)
+            let feedbackChannel = bots.findCachedChannel(client, client.config.channel_ids.feedback_channel)
 
             if (!feedbackChannel) {
 
@@ -279,20 +287,20 @@ module.exports = async function (client, interaction) {
                 }
                 
                 // Get the channel
-                const channel = await client.channels.fetch(channelId).catch(() => null);
+                const channel = await bots.fetchStaffChannel(client, channelId);
                 if (!channel) {
                     return interaction.editReply({ content: 'Could not find the ticket channel.', flags: MessageFlags.Ephemeral });
                 }
                 
                 // Get the user for DM
-                const user = await client.users.fetch(userId).catch(() => null);
+                const user = await bots.fetchDmUser(client, userId);
                 
                 // Get or create webhook (similar to messageCreate.js)
                 const webhookChannel = channel;
                 let webhook = null;
                 
                 try {
-                    if (!webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+                    if (!webhookChannel.permissionsFor(bots.staffClient(client).user).has('MANAGE_WEBHOOKS')) {
                         throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
                     }
                     
@@ -419,10 +427,10 @@ module.exports = async function (client, interaction) {
             }
             const uniqueTicketID = interaction.message.embeds[0].footer.text.split("|")[0].trim();
             const DiscordID = uniqueTicketID.split(`-`)[0];
-            let recepient = await client.users.fetch(DiscordID).catch(e => {
-                func.handle_errors(e, client, `interactionCreate.js`, `Could not fetch user with ID ${DiscordID}`);
-                return null;
-            });
+            let recepient = await bots.fetchDmUser(client, DiscordID);
+            if (!recepient) {
+                func.handle_errors(null, client, `interactionCreate.js`, `Could not fetch user with ID ${DiscordID}`);
+            }
             if (recepient) {
 
             const foundCustomFinal = Object.keys(handlerRawCustomFinal.options).find(x => x.toLowerCase() == ticketTypeCustomFinal.toLowerCase());
@@ -661,7 +669,7 @@ module.exports = async function (client, interaction) {
                     const nextStage = stages[Math.min(idx, stages.length - 1)] || 'Initial Review';
                     await applications.advanceStage(appId, nextStage, interaction.user.id, 'Advanced via ticket');
                     const dm = (msgs.advance_dm || 'Your application has moved to the next stage: {{STAGE}}.').replace('{{STAGE}}', nextStage);
-                    const user = await interaction.client.users.fetch(appRec.userId).catch(()=>null);
+                    const user = await bots.fetchDmUser(client, appRec.userId);
                     try { if (user) await user.send(dm); } catch(_){}
                     const chMsg = (msgs.advance_channel || 'Application advanced to {{STAGE}} by {{STAFF}}.').replace('{{STAGE}}', nextStage).replace('{{STAFF}}', interaction.user.username);
                     await interaction.channel.send(chMsg).catch(()=>{});
@@ -679,7 +687,7 @@ module.exports = async function (client, interaction) {
                 } else {
                     await applications.deny(appId, interaction.user.id, 'Denied via ticket');
                     const appRec = await applications.getApplication(appId);
-                    const user = await interaction.client.users.fetch(appRec.userId).catch(()=>null);
+                    const user = await bots.fetchDmUser(client, appRec.userId);
                     const dm = (msgs.deny_dm || 'Thank you for applying. Unfortunately your application was not successful at this time.');
                     try { if (user) await user.send(dm); } catch(_){}
                     const chMsg = (msgs.deny_channel || 'Application denied by {{STAFF}}.').replace('{{STAFF}}', interaction.user.username);
@@ -765,7 +773,7 @@ module.exports = async function (client, interaction) {
                 
                 // Send DM to user about closure
                 try {
-                    const user = await client.users.fetch(appRec.userId);
+                    const user = await bots.fetchDmUser(client, appRec.userId);
                     let reply = `Your application communication channel has been closed.\nReason: Communication session completed`;
                     if (savedTranscriptURL) {
                         const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
@@ -832,7 +840,7 @@ module.exports = async function (client, interaction) {
             }
 
             // Get the user
-            const user = await client.users.fetch(userId).catch(() => null);
+            const user = await bots.fetchDmUser(client, userId);
             if (!user) {
                 await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
@@ -877,7 +885,7 @@ module.exports = async function (client, interaction) {
             }
 
             // Get the user
-            const user = await client.users.fetch(userId).catch(() => null);
+            const user = await bots.fetchDmUser(client, userId);
             if (!user) {
                 await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
@@ -1101,7 +1109,7 @@ module.exports = async function (client, interaction) {
                     await interaction.message.delete().catch(() => {});
                     const topicUser = interaction.channel.topic;
                     if (topicUser) {
-                        const user = await client.users.fetch(topicUser).catch(() => null);
+                        const user = await bots.fetchDmUser(client, topicUser);
                         if (user) {
                             // Use sendDMWithRetry for better reliability with long-term tickets
                             try {
@@ -1137,7 +1145,7 @@ module.exports = async function (client, interaction) {
 
         if (interaction.customId === 'ticketclose') {
             try {
-                if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
+                if (!interaction.message || !interaction.message.guild || !bots.isOurBotId(client, interaction.message.author.id) || client.user.id == interaction.member.user.id) return;
                 if (interaction.message.channel?.type === ChannelType.PublicThread || interaction.message.channel?.type === ChannelType.DM || interaction.message.channel?.type === ChannelType.PrivateThread) return func.handle_errors(null, client, `interactionCreate.js`, `Message channel type is a thread for channel ${interaction.channel.name}(${interaction.channel.id}). I can not close a thread as it is not an official ticket channel.`)
                 if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
 
@@ -1202,7 +1210,7 @@ module.exports = async function (client, interaction) {
             return;
         }
 
-        if (!interaction.message || !interaction.message.guild || interaction.message.author.id != client.user.id || client.user.id == interaction.member.user.id) return;
+        if (!interaction.message || !interaction.message.guild || !bots.isOurBotId(client, interaction.message.author.id) || client.user.id == interaction.member.user.id) return;
         
         const files = readdirSync("./content/questions/");
 		let valid = [];
@@ -1236,8 +1244,7 @@ module.exports = async function (client, interaction) {
             if (member.roles.cache.find(x => x.id == client.config.role_ids.default_admin_role_id)) accepted++;
 
             if (accepted > 0) {
-                let recepient = client.users.cache.find(x => x.id == recepientId);
-                if (!recepient) recepient = await client.users.fetch(recepientId).catch(() => null);
+                let recepient = await bots.fetchDmUser(client, recepientId);
                 if (!recepient) {
                     await interaction.reply({ content: `Could not find user with ID ${recepientId}.`, flags: MessageFlags.Ephemeral });
                     return;
@@ -1380,7 +1387,7 @@ module.exports = async function (client, interaction) {
 
             // Skip post channel check if open-as-ticket is true
             if (!questionFilesystem["open-as-ticket"]) {
-            let postchannel = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id).channels.fetch(questionFilesystem["post-channel"])
+            let postchannel = await bots.staffClient(client).channels.fetch(questionFilesystem["post-channel"])
             if (!postchannel) {
                 await interaction.editReply({content: lang.misc["generic-error-message"] != "" ? lang.misc["generic-error-message"] : `Sorry we could not perform this action right now, the staff team have been made aware of the issue!`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));	
 			    return func.handle_errors(null, client, `interactionCreate.js`, `I could not find the designated ticket creation channel for the bot, please make sure the ID is set correctly in your ticket specific config(s).\nVariable: post_channel\nTicketType: ${ticketType}`)
@@ -1411,7 +1418,7 @@ module.exports = async function (client, interaction) {
 
 			if (!isStaffUser) {
 				// Get fresh channels (not just cache) to ensure accurate count
-				const staffGuild = await client.guilds.fetch(client.config.channel_ids.staff_guild_id);
+				const staffGuild = await bots.staffClient(client).guilds.fetch(client.config.channel_ids.staff_guild_id);
 				const allChannels = await staffGuild.channels.fetch();
 				
 				// Filter to only text channels with topic matching user ID
@@ -1489,7 +1496,7 @@ module.exports = async function (client, interaction) {
                 await interaction.reply({ content: 'Move context missing. Please try again.', flags: MessageFlags.Ephemeral });
                 return;
             }
-            const channel = await client.channels.fetch(ctx.channelId);
+            const channel = await bots.fetchStaffChannel(client, ctx.channelId);
             const myPins = await func.fetchPinnedSafe(channel);
             const ticketNumberFromName = (channel.name || '').split('-').pop();
             const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
@@ -1538,7 +1545,7 @@ module.exports = async function (client, interaction) {
             const deliveryWarnings = [];
             const topicUser = channel.topic;
             if (topicUser) {
-                const user = await client.users.fetch(topicUser).catch(() => null);
+                const user = await bots.fetchDmUser(client, topicUser);
                 if (user) {
                     try {
                         await func.sendDMWithRetry(
