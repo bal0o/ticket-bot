@@ -4,7 +4,7 @@ const bots = require('../../utils/clients');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -76,35 +76,30 @@ module.exports = {
             func.handle_errors(error, client, 'move.js', null);
             await channel.send("⚠️ I couldn't rename or move this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
         }
-        // Update the pinned embed's title and footer to match the new ticket type
-        const myPins = await func.fetchPinnedSafe(channel);
-        const LastPin = myPins.last();
+        const LastPin = await func.findTicketMetadataMessage(channel, ticketNumber);
         if (LastPin && LastPin.embeds[0]) {
-            const embed = LastPin.embeds[0];
-            // Update title
+            const embed = EmbedBuilder.from(LastPin.embeds[0]);
             embed.setTitle(newTitle);
-            // Update footer
-            const footerParts = embed.footer.text.split("|");
-            const idParts = footerParts[0].trim().split('-');
+            const footerText = embed.data?.footer?.text || LastPin.embeds[0].footer?.text || '';
+            const footerParts = footerText.split("|");
+            const idParts = (footerParts[0] || '').trim().split('-');
             const userId = idParts[0];
             const ticketNum = idParts[1];
-            const oldTicketType = func.parseTicketTypeFromEmbedFooter(embed.footer.text);
+            const oldTicketType = func.parseTicketTypeFromEmbedFooter(footerText);
             if (userId && ticketNum) {
                 await func.preserveTicketDmRelayOnMove(userId, ticketNum, oldTicketType);
             }
             let footerTicketType = ticketType;
-            // Always split on # and use only the part before for the footer
             if (footerTicketType.includes('#')) {
                 footerTicketType = footerTicketType.split('#')[0].trim();
             }
-            newFooter = `${userId}-${ticketNum} | ${footerTicketType} | Ticket Opened:`;
-            embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
-            await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
+            if (userId && ticketNum) {
+                newFooter = `${userId}-${ticketNum} | ${footerTicketType} | Ticket Opened:`;
+                embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
+            }
+            await func.updateTicketMetadataEmbed(LastPin, embed).catch(e => func.handle_errors(e, client, 'move.js', null));
 
-            // Update stored ticket type in MySQL tickets table for web permission consistency
             try {
-                const userId = idParts[0];
-                const ticketNum = idParts[1];
                 if (userId && ticketNum && typeof db.query === 'function') {
                     await db.query(
                         'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
@@ -113,11 +108,7 @@ module.exports = {
                 }
             } catch (e) { func.handle_errors(e, client, 'move.js', 'Failed to update MySQL ticketType on move'); }
         }
-        // Check for required fields in the new ticket type (e.g., server selection)
         if (questionFilesystem.server_selection && questionFilesystem.server_selection.enabled) {
-            // Check if the pinned embed has a field for server selection
-            const myPins = await func.fetchPinnedSafe(channel);
-            const LastPin = myPins.last();
             let hasServerField = false;
             if (LastPin && LastPin.embeds[0]) {
                 const embed = LastPin.embeds[0];

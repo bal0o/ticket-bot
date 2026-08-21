@@ -1010,20 +1010,10 @@ module.exports = async function (client, interaction) {
             const newName = serverName ? `${serverName}-${slugType}-${ticketNumber}` : `${slugType}-${ticketNumber}`;
 
             try {
-                const myPinsBeforeMove = await func.fetchPinnedSafe(interaction.channel);
-                const pinBeforeMove = myPinsBeforeMove.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
-                    || myPinsBeforeMove.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && m.embeds[0].title.includes(`#${ticketNumber}`));
-                let oldTicketType = pinBeforeMove ? func.parseTicketTypeFromEmbedFooter(pinBeforeMove.embeds[0].footer.text) : null;
                 const ownerId = interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic)
                     ? interaction.channel.topic
                     : null;
-                if (!oldTicketType && ownerId && ticketNumber && typeof db.query === 'function') {
-                    const [rows] = await db.query(
-                        'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
-                        [ownerId, ticketNumber]
-                    );
-                    if (rows && rows[0] && rows[0].ticket_type) oldTicketType = rows[0].ticket_type;
-                }
+                const oldTicketType = await func.resolveTicketTypeFromChannel(interaction.channel);
                 if (ownerId && ticketNumber) {
                     await func.preserveTicketDmRelayOnMove(ownerId, ticketNumber, oldTicketType);
                 }
@@ -1045,10 +1035,8 @@ module.exports = async function (client, interaction) {
                         await interaction.channel.send("⚠️ I couldn't rename this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
                     }
 
-                    // Update pinned embed title/footer and DB
-                    const myPins = await func.fetchPinnedSafe(interaction.channel);
-                    const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
-                        || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && m.embeds[0].title.includes(`#${ticketNumber}`));
+                    // Cosmetic only: refresh info embed title/footer if present. Move already succeeded.
+                    const LastPin = await func.findTicketMetadataMessage(interaction.channel, ticketNumber);
                     if (LastPin && LastPin.embeds[0]) {
                         const embed = EmbedBuilder.from(LastPin.embeds[0]);
                         try { embed.setTitle(`${displayType} #${ticketNumber}`); } catch (_) {}
@@ -1063,29 +1051,23 @@ module.exports = async function (client, interaction) {
                                 embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
                             }
                         }
-                        // If footer metadata is missing, recover it from channel topic + ticket number
                         if ((!idParts[0] || !idParts[1]) && interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic) && /^\d+$/.test(ticketNumber)) {
                             idParts = [interaction.channel.topic, ticketNumber];
                             embed.setFooter({ text: `${idParts[0]}-${idParts[1]} | ${displayType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL() });
                         }
-                        await LastPin.edit({ embeds: [embed] }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
-                        // Update ticket type in MySQL tickets table (PlayerStats removed)
-                        try { 
-                            if (idParts[0] && idParts[1] && typeof db.query === 'function') {
-                                await db.query(
-                                    'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
-                                    [displayType, idParts[0], idParts[1]]
-                                );
-                            }
-                        } catch (_) {}
-                    } else {
-                        func.handle_errors(
-                            null,
-                            client,
-                            'interactionCreate.js',
-                            `Could not find a pinned ticket metadata embed to update after move for channel ${interaction.channel.name}(${interaction.channel.id}).`
-                        );
+                        await func.updateTicketMetadataEmbed(LastPin, embed).catch(e => func.handle_errors(e, client, 'interactionCreate.js', null));
                     }
+                    try {
+                        const ownerId = interaction.channel.topic && /^\d{17,19}$/.test(interaction.channel.topic)
+                            ? interaction.channel.topic
+                            : null;
+                        if (ownerId && ticketNumber && typeof db.query === 'function') {
+                            await db.query(
+                                'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
+                                [displayType, ownerId, ticketNumber]
+                            );
+                        }
+                    } catch (_) {}
 
                     const deliveryWarnings = [];
 
@@ -1150,12 +1132,14 @@ module.exports = async function (client, interaction) {
                 if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
 
                 const handlerRaw = require("../content/handler/options.json");
-                const myPins = await func.fetchPinnedSafe(interaction.channel);
-                const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
-                if (!LastPin || !LastPin.embeds[0]) return func.handle_errors(null, client, `interactionCreate.js`, `Can not find the pinned embed. Please make sure the initial embed is pinned for me to grab data. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
-
-                let ticketTypeClose = LastPin.embeds[0].title.split(" #")[0]
+                const ticketTypeClose = await func.resolveTicketTypeFromChannel(interaction.channel);
+                if (!ticketTypeClose) {
+                    return func.handle_errors(null, client, `interactionCreate.js`, `Can not resolve ticket type for channel ${interaction.channel.name}(${interaction.channel.id}).`);
+                }
                 const foundClose = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase());
+                if (!foundClose) {
+                    return func.handle_errors(null, client, `interactionCreate.js`, `Unknown ticket type '${ticketTypeClose}' for channel ${interaction.channel.name}.`);
+                }
                 let typeFile = require(`../content/questions/${handlerRaw.options[foundClose].question_file}`);
                 let accessRoleIDs = typeFile["access-role-id"] || [];
                 let accepted = 0;
@@ -1497,17 +1481,12 @@ module.exports = async function (client, interaction) {
                 return;
             }
             const channel = await bots.fetchStaffChannel(client, ctx.channelId);
-            const myPins = await func.fetchPinnedSafe(channel);
             const ticketNumberFromName = (channel.name || '').split('-').pop();
-            const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text))
-                || myPins.find(m => m.embeds && m.embeds[0] && typeof m.embeds[0].title === 'string' && ticketNumberFromName && m.embeds[0].title.includes(`#${ticketNumberFromName}`));
-            let embed;
+            const LastPin = await func.findTicketMetadataMessage(channel, ticketNumberFromName);
             if (LastPin && LastPin.embeds[0]) {
-                embed = EmbedBuilder.from(LastPin.embeds[0]);
-                // Add the server field
+                const embed = EmbedBuilder.from(LastPin.embeds[0]);
                 const serverValue = interaction.fields.getTextInputValue('serverInput');
                 embed.addFields({ name: 'Server', value: serverValue });
-                // Update the footer for the new ticket type
                 const footerText = (embed.data && embed.data.footer && typeof embed.data.footer.text === 'string')
                     ? embed.data.footer.text
                     : null;
@@ -1522,15 +1501,16 @@ module.exports = async function (client, interaction) {
                 if (idParts[0] && idParts[1]) {
                     embed.setFooter({text: `${idParts[0]}-${idParts[1]} | ${ctx.ticketType} | Ticket Opened:`, iconURL: client.user.displayAvatarURL()});
                 }
-                await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
-            } else {
-                func.handle_errors(
-                    null,
-                    client,
-                    'interactionCreate.js',
-                    `Could not find a pinned ticket metadata embed to update after modal move for channel ${channel.name}(${channel.id}).`
-                );
+                await func.updateTicketMetadataEmbed(LastPin, embed).catch(e => func.handle_errors(e, client, 'move.js', null));
             }
+            try {
+                if (channel.topic && ticketNumberFromName && typeof db.query === 'function') {
+                    await db.query(
+                        'UPDATE tickets SET ticket_type = ?, server = ? WHERE user_id = ? AND ticket_id = ?',
+                        [ctx.ticketType, interaction.fields.getTextInputValue('serverInput'), channel.topic, ticketNumberFromName]
+                    );
+                }
+            } catch (_) {}
             // Move, rename, and reapply permissions for target ticket type
             let renameSucceeded = true;
             try {

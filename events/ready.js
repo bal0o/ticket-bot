@@ -39,9 +39,13 @@ module.exports = async function (client, message) {
     // See if the Embed for creating tickets is available and if its not, make one.
     if (client.botRole === 'public') {
     let buttonEmbed = undefined
-    let postChannel = client.channels.cache.find(x => x.id == client.config.channel_ids.post_embed_channel_id)
+    let postChannel = await bots.fetchGuildChannel(
+        client,
+        client.config.channel_ids.public_guild_id,
+        client.config.channel_ids.post_embed_channel_id
+    )
     if (!postChannel) {
-        func.handle_errors(null, client, `ready.js`, `Could not find the 'post_embed_channel_id' for ticket creation, please make sure it is defined in your config and the bot is in the correct discord server.`)
+        func.handle_errors(null, client, `ready.js`, `Public bot cannot see 'post_embed_channel_id' in the public guild. Check the channel ID and that the public bot has View Channel there.`)
     } else {
         buttonEmbed = await postChannel.messages.fetch(messageId.messageId).catch((e) => {
             if (e.code === 10008) return;

@@ -79,6 +79,25 @@ function findCachedChannel(client, channelId) {
 		|| null;
 }
 
+async function fetchGuildChannel(client, guildId, channelId) {
+	if (!client || !channelId) return null;
+	const id = String(channelId);
+	const cached = client.channels.cache.get(id);
+	if (cached) return cached;
+	if (guildId) {
+		let guild = client.guilds.cache.get(String(guildId));
+		if (!guild) {
+			try { guild = await client.guilds.fetch(String(guildId)); } catch (_) { guild = null; }
+		}
+		if (guild) {
+			const fromGuild = guild.channels.cache.get(id);
+			if (fromGuild) return fromGuild;
+			try { return await guild.channels.fetch(id); } catch (_) {}
+		}
+	}
+	try { return await client.channels.fetch(id); } catch (_) { return null; }
+}
+
 function createClients(config) {
 	const shared = {
 		commands: new Collection(),
@@ -155,6 +174,7 @@ module.exports = {
 	fetchStaffChannel,
 	fetchPublicChannel,
 	findCachedChannel,
+	fetchGuildChannel,
 	createClients,
 	warnWrongGuilds
 };

@@ -142,7 +142,13 @@ module.exports = {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const channelId = client.config?.channel_ids?.post_embed_channel_id;
-        const postChannel = channelId ? bots.publicClient(client).channels.cache.get(channelId) : null;
+        const postChannel = channelId
+            ? await bots.fetchGuildChannel(
+                bots.publicClient(client),
+                client.config.channel_ids.public_guild_id,
+                channelId
+            )
+            : null;
         if (!postChannel) {
             return interaction.editReply({
                 content: `Staff application button has been **${enable ? 'ENABLED' : 'DISABLED'}**, but the main embed could not be refreshed (embed channel not found).`

@@ -289,11 +289,70 @@ const lastFetchTimes = new Map(); // channelId -> timestamp of last fetch attemp
 const CACHE_TTL = 60000; // 60 seconds cache (longer to avoid rate limits)
 const MIN_REQUEST_INTERVAL = 3500; // Minimum 3.5 seconds between requests (respects 3s sublimit with margin)
 
-/**
- * Fetch pinned messages with caching and rate limit handling.
- * Prevents multiple simultaneous requests and caches results briefly.
- * Respects Discord's 3-second sublimit on pins route.
- */
+function pinEntriesToCollection(pinData) {
+    const messages = new Collection();
+    const add = (value) => {
+        const msg = value && value.message && value.message.id ? value.message : value;
+        if (msg && msg.id) messages.set(msg.id, msg);
+    };
+    if (!pinData) return messages;
+    if (typeof pinData.values === 'function') {
+        for (const value of pinData.values()) add(value);
+        return messages;
+    }
+    if (Array.isArray(pinData.items)) {
+        for (const item of pinData.items) add(item);
+        return messages;
+    }
+    if (Array.isArray(pinData)) {
+        for (const item of pinData) add(item);
+    }
+    return messages;
+}
+
+module.exports.clearPinnedCache = function(channelId) {
+    if (channelId) pinnedCache.delete(channelId);
+};
+
+function isTicketMetadataMessage(msg, ticketNumber) {
+    const embed = msg && msg.embeds && msg.embeds[0];
+    if (!embed) return false;
+    const footer = embed.footer && embed.footer.text;
+    if (typeof footer === 'string' && /\d{17,19}-\d+\s*\|/.test(footer)) return true;
+    if (ticketNumber && typeof embed.title === 'string' && embed.title.includes(`#${ticketNumber}`)) return true;
+    return false;
+}
+
+module.exports.findTicketMetadataMessage = async function(channel, ticketNumber) {
+    if (!channel || !channel.messages) return null;
+    const pins = await module.exports.fetchPinnedSafe(channel);
+    const fromPins = pins.find(msg => isTicketMetadataMessage(msg, ticketNumber));
+    if (fromPins) return fromPins;
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!recent) return null;
+    return recent.find(msg => isTicketMetadataMessage(msg, ticketNumber)) || null;
+};
+
+module.exports.updateTicketMetadataEmbed = async function(message, embed) {
+    if (!message || !embed) return null;
+    try {
+        const edited = await message.edit({ embeds: [embed] });
+        module.exports.clearPinnedCache(message.channelId);
+        return edited;
+    } catch (e) {
+        if (!e || (e.code !== 50005 && e.code !== 50013)) throw e;
+        const sent = await message.channel.send({
+            content: message.content || undefined,
+            embeds: [embed],
+            components: message.components
+        });
+        await sent.pin().catch(() => {});
+        await message.unpin().catch(() => {});
+        module.exports.clearPinnedCache(message.channelId);
+        return sent;
+    }
+};
+
 module.exports.fetchPinnedSafe = async function(channel) {
     if (!channel || !channel.messages) {
         throw new Error('Invalid channel provided');
@@ -302,9 +361,8 @@ module.exports.fetchPinnedSafe = async function(channel) {
     const channelId = channel.id;
     const now = Date.now();
     
-    // Check cache first
     const cached = pinnedCache.get(channelId);
-    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+    if (cached && cached.messages && cached.messages.size > 0 && (now - cached.timestamp) < CACHE_TTL) {
         return cached.messages;
     }
     
@@ -334,14 +392,12 @@ module.exports.fetchPinnedSafe = async function(channel) {
         while (attempt < maxAttempts) {
             try {
                 lastFetchTimes.set(channelId, Date.now());
-                const pinData = await channel.messages.fetchPins();
-                const messages = new Collection();
-                for (const item of pinData.items || []) {
-                    if (item?.message?.id) {
-                        messages.set(item.message.id, item.message);
-                    }
+                let messages = pinEntriesToCollection(await channel.messages.fetchPins());
+                if (messages.size === 0 && typeof channel.messages.fetchPinned === 'function') {
+                    try {
+                        messages = pinEntriesToCollection(await channel.messages.fetchPinned(true));
+                    } catch (_) {}
                 }
-                // Cache the result
                 pinnedCache.set(channelId, { messages, timestamp: Date.now() });
                 return messages;
             } catch (err) {
@@ -954,7 +1010,9 @@ try {
         components: [actionRow]
     });
     
-    await initialMessage.pin()?.catch(e => { });
+    await initialMessage.pin().catch(e => {
+        func.handle_errors(e, client, 'functions.js', `Failed to pin ticket metadata in ${ticketChannel.name}(${ticketChannel.id}). Staff bot needs Pin Messages.`);
+    });
 
     let replyInfo = "";
     if (questionFile["anonymous-only-replies"] === true) {
@@ -1347,101 +1405,76 @@ module.exports.updateTicketStatus = async function(client) {
  */
 module.exports.closeTicket = async (client, channel, staffMember, reason) => {
     try {
-        // removed debug marker
-        // Check if the channel still exists and is accessible
         const staffBot = bots.staffClient(client);
         if (!channel || !channel.guild || !staffBot.channels.cache.has(channel.id)) {
-            // removed debug
-            // Optionally log or notify that the channel is gone
             return;
         }
-        // Fetch pinned message for ticket info
-        let myPins;
-        try {
-            myPins = await module.exports.fetchPinnedSafe(channel);
-        } catch (err) {
-            // removed debug
+
+        const identity = await module.exports.resolveTicketIdentity(channel);
+        const DiscordID = identity.userId;
+        const globalTicketNumber = identity.ticketId;
+        const ticketType = identity.ticketType;
+        if (!DiscordID || !globalTicketNumber || !ticketType) {
+            module.exports.handle_errors(
+                null,
+                client,
+                'functions.js',
+                `closeTicket missing identity for ${channel.name}(${channel.id}): user=${DiscordID} ticket=${globalTicketNumber} type=${ticketType}`
+            );
             return;
         }
-        const LastPin = myPins.last();
-        if (!LastPin || !LastPin.embeds[0] || !LastPin.embeds[0].footer || !LastPin.embeds[0].footer.text) {
-            // removed debug
-            return;
-        }
-        // Parse ticket info
-        const rawEmbed = LastPin.embeds[0];
-        const embed = EmbedBuilder.from(rawEmbed);
-        const footerParts = rawEmbed.footer.text.split("|");
-        const idParts = footerParts[0].trim().split('-');
-        let ticketType = footerParts[1]?.trim() || 'Unknown';
-        if (ticketType.includes('#')) {
-            ticketType = ticketType.split('#')[0].trim();
-        }
-        const globalTicketNumber = idParts[1] || 'Unknown';
-        const DiscordID = idParts[0];
-        // removed debug
-        // Get user
+
         const user = await bots.fetchDmUser(client, DiscordID);
-        if (!user) {
-            // removed debug
-        }
-        // Get config for ticket type
         const handlerRaw = require("../content/handler/options.json");
         const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketType.toLowerCase());
         if (!found) {
-            // removed debug
+            module.exports.handle_errors(null, client, 'functions.js', `closeTicket unknown ticket type '${ticketType}' for ${channel.name}`);
             return;
         }
-        let typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-        if (!typeFile) {
-            // removed debug
-            return;
-        }
+        const typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+        if (!typeFile) return;
+
         const transcriptChannel = typeFile[`transcript-channel`];
-        const logs_channel = await channel.guild.channels.cache.find(x => x.id === transcriptChannel);
-        // removed debug
-        // Prepare reason
-        const reasonBlock = reason ? `\
+        const logs_channel = channel.guild.channels.cache.find(x => x.id === transcriptChannel);
+        const reasonBlock = reason || 'No Reason Provided.';
+        const openedAtMs = identity.createdAt ? identity.createdAt * 1000 : (channel.createdTimestamp || Date.now());
 
+        const embed = new EmbedBuilder()
+            .setTitle(`${ticketType} #${globalTicketNumber}`)
+            .setColor(client.config.bot_settings.main_color)
+            .setAuthor({
+                name: client.config.bot_settings.close_ticket_author_prefix
+                    ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', staffMember.username || staffMember.user?.username)
+                    : `Ticket Closed by ${staffMember.username || staffMember.user?.username}`,
+                iconURL: staffMember.displayAvatarURL ? staffMember.displayAvatarURL() : client.user.displayAvatarURL()
+            })
+            .setFooter({
+                text: `${DiscordID}-${globalTicketNumber} | ${ticketType} | Ticket Closed:`,
+                iconURL: client.user.displayAvatarURL()
+            })
+            .setTimestamp(new Date())
+            .addFields(
+                {
+                    name: typeFile["close-transcript-embed-reason-title"] || "Close Reason",
+                    value: reasonBlock,
+                    inline: true
+                },
+                {
+                    name: typeFile["close-transcript-embed-response-title"] || "Response Time",
+                    value: await module.exports.convertMsToTime(Date.now() - openedAtMs),
+                    inline: true
+                }
+            );
 
-
-
-${reason}` : 'No Reason Provided.';
-        // Prepare embed
-        embed.setAuthor({
-            name: client.config.bot_settings.close_ticket_author_prefix
-                ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', staffMember.username || staffMember.user?.username)
-                : `Ticket Closed by ${staffMember.username || staffMember.user?.username}`,
-            iconURL: staffMember.displayAvatarURL ? staffMember.displayAvatarURL() : client.user.displayAvatarURL()
-        });
-        embed.addFields({
-            name: typeFile["close-transcript-embed-reason-title"] || "Close Reason",
-            value: reasonBlock,
-            inline: true
-        });
-        embed.addFields({
-            name: typeFile["close-transcript-embed-response-title"] || "Response Time",
-            value: `\
-
-
-
-
-${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
-            inline: true
-        });
-        // Log to transcript channel
         if (logs_channel) {
-            await logs_channel.send({embeds: [embed]}).catch(e => module.exports.handle_errors(e, client, "functions.js", null));
+            await logs_channel.send({ embeds: [embed] }).catch(e => module.exports.handle_errors(e, client, "functions.js", null));
         }
 
-        // Compute transcript URL (DB-backed; no HTML generation here)
         let savedTranscriptURL = null;
         try {
             const { base_url } = client.config.transcript_settings;
-            const transcriptURL = `${base_url}${channel.name}.full.html`;
-            savedTranscriptURL = transcriptURL;
+            savedTranscriptURL = `${base_url}${channel.name}.full.html`;
 
-            // Persist close data in tickets table
             await func.closeDataAddDB(
                 DiscordID,
                 globalTicketNumber,
@@ -1453,10 +1486,8 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 savedTranscriptURL
             );
 
-            // Write ticket data to MySQL (including transcript mapping for dynamic renderer)
             try {
-                const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
-                // Get responses and server from MySQL tickets table instead of PlayerStats
+                const createdAt = identity.createdAt || Math.floor(openedAtMs / 1000);
                 let server = null;
                 if (typeof db.query === 'function') {
                     const [rows] = await db.query(
@@ -1469,7 +1500,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                         server = (serverMatch && serverMatch[1]) ? serverMatch[1] : (rows[0].server || null);
                     }
                 }
-                
+
                 const ticketRow = {
                     userId: String(DiscordID),
                     ticketId: String(globalTicketNumber),
@@ -1501,11 +1532,6 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 console.error('[closeTicket] Error writing ticket data:', err.message);
             }
 
-            try {
-                const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
-                // Staff close activity is now derived from the tickets table; Prometheus metrics removed.
-            } catch (_) {}
-
             if (logs_channel && savedTranscriptURL) {
                 logs_channel
                     .send({ content: `Transcript saved: <${savedTranscriptURL}>` })
@@ -1515,10 +1541,6 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             func.handle_errors(e, client, 'functions.js', 'Transcript DB close setup failed');
         }
 
-        // After ticket close, aggregates are now derived directly from the MySQL tickets/message tables; 
-        // legacy Prometheus aggregation has been removed.
-        // removed debug
-        // DM original owner plus any merged reporters
         const closeRecipientIds = new Set([String(DiscordID)]);
         try {
             if (typeof db.getTicketParticipants === 'function' && globalTicketNumber) {
@@ -1553,23 +1575,21 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 }
             }
         }
-        // Update ticket count
         await module.exports.updateTicketStatus(client);
 
-		try {
-			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-			if (thread) {
-				await thread.setArchived(true, 'Ticket closed.');
-			}
-		} catch (e) {
-			if (e && e.code === 10003) {
-				module.exports.handle_errors(null, client, "functions.js", `Archive skipped for staff thread #${globalTicketNumber}: Unknown Channel (10003). Likely already deleted or inaccessible.`);
-			} else {
-				module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
-			}
-		}
+        try {
+            const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+            if (thread) {
+                await thread.setArchived(true, 'Ticket closed.');
+            }
+        } catch (e) {
+            if (e && e.code === 10003) {
+                module.exports.handle_errors(null, client, "functions.js", `Archive skipped for staff thread #${globalTicketNumber}: Unknown Channel (10003). Likely already deleted or inaccessible.`);
+            } else {
+                module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
+            }
+        }
 
-        // Remove from every participant's ticket index
         for (const participantId of closeRecipientIds) {
             try {
                 const key = `UserTicketIndex.${participantId}`;
@@ -1579,17 +1599,14 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             } catch (_) {}
         }
 
-        // Delete the ticket channel after a short delay so logs/embeds finish
         try {
             const parentId = channel.parentId;
             const guild = channel.guild;
             setTimeout(async () => {
                 try {
-                    // Re-check existence to avoid throwing if already deleted
                     const liveChannel = guild.channels.cache.get(channel.id);
                     if (!liveChannel) return;
                     await liveChannel.delete('Ticket closed');
-                    // Clean up overflow category if now empty
                     await module.exports.deleteEmptyOverflowCategory(client, guild, parentId);
                 } catch (e) {
                     module.exports.handle_errors(e, client, "functions.js", `Failed to delete ticket channel ${channel.id} after close`);
@@ -1626,26 +1643,44 @@ module.exports.normalizeTicketType = function(ticketType) {
 };
 
 module.exports.resolveTicketTypeFromChannel = async function(channel) {
-    try {
-        const pins = await module.exports.fetchPinnedSafe(channel);
-        const pin = pins.find(m => m.embeds?.[0]?.footer?.text && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || pins.last();
-        if (pin?.embeds?.[0]?.footer?.text) {
-            const parsed = module.exports.parseTicketTypeFromEmbedFooter(pin.embeds[0].footer.text);
-            if (parsed) return module.exports.normalizeTicketType(parsed);
-        }
-    } catch (_) {}
     const ownerId = channel?.topic;
     const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
     if (ownerId && ticketNum && typeof db.query === 'function') {
         try {
             const [rows] = await db.query(
                 'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
-                [ownerId, ticketNum]
+                [String(ownerId), String(ticketNum)]
             );
             if (rows?.[0]?.ticket_type) return module.exports.normalizeTicketType(rows[0].ticket_type);
         } catch (_) {}
     }
+    try {
+        const handlerRaw = require('../content/handler/options.json');
+        const name = String(channel?.name || '').toLowerCase();
+        for (const key of Object.keys(handlerRaw.options || {})) {
+            if (channelNameMatchesTicketType(name, key)) {
+                return module.exports.normalizeTicketType(key);
+            }
+        }
+    } catch (_) {}
     return null;
+};
+
+module.exports.resolveTicketIdentity = async function(channel) {
+    const userId = channel?.topic && /^\d{17,19}$/.test(channel.topic) ? String(channel.topic) : null;
+    const ticketId = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    const ticketType = await module.exports.resolveTicketTypeFromChannel(channel);
+    let createdAt = null;
+    if (userId && ticketId && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT created_at, ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [userId, String(ticketId)]
+            );
+            if (rows?.[0]?.created_at) createdAt = Number(rows[0].created_at) || null;
+        } catch (_) {}
+    }
+    return { userId, ticketId, ticketType, createdAt };
 };
 
 module.exports.getExtraParticipantUserIds = async function(ticketId, ownerId) {
