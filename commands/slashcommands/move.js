@@ -1,10 +1,9 @@
-const { SlashCommandBuilder } = require('@discordjs/builders');
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
 const bots = require('../../utils/clients');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
 const handlerRaw = require('../../content/handler/options.json');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()

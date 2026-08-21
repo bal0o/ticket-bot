@@ -5,6 +5,10 @@ const bots = require("./clients");
 const func = require("./functions.js")
 const lang = require("../content/handler/lang.json");
 const path = require("path");
+const fs = require("fs");
+const applications = require('./applications');
+const perms = require('./permissions');
+const linking = require('./linking');
 let messageid = { messageId: "", internalMessageId: "" };
 try {
     messageid = require("../config/messageid.json");
@@ -17,10 +21,6 @@ try {
         fs.writeFileSync(msgPath, JSON.stringify(messageid));
     } catch (__) {}
 }
-const unirest = require("unirest");
-const fs = require("fs");
-const applications = require('./applications');
-const perms = require('./permissions');
 
 /**
  * Check if a ticket type is internal by looking up the question file
@@ -918,7 +918,7 @@ try {
 // For public tickets, DM the user with the ticket name/number
 try {
     if (!questionFile.internal) {
-        await module.exports.sendDMWithRetry(recepientMember, `Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+        await module.exports.sendDMWithRetry(recepientMember, `Your ticket has been created. Reply in this DM to continue the conversation with staff.`);
     }
 } catch (e) {}
 
@@ -1033,17 +1033,13 @@ try {
         try {
             const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
             if (!shouldCheckCheetos) return;
-            const req = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
             try { if (client.config && client.config.debug) console.log(`[Cheetos] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')}`); } catch(_) {}
-            const resp = await req.get(url).headers({
-                'Auth-Key': client.config.tokens.cheetosToken,
-                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || ''),
-                'Accept': 'text/plain',
-                'User-Agent': 'ticket-bot (Discord.js)'
-            });
-            const raw = (resp && (resp.raw_body || resp.body)) || '';
-            const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
+            const text = await linking.fetchCheetosReport(
+                recepientMember.id,
+                client.config.tokens.cheetosToken,
+                client.config?.misc?.cheetos_requestor_id || client.user?.id || ''
+            ) || '';
             let records = [];
             try {
                 if (text.trim().startsWith('[') || text.trim().startsWith('{')) {

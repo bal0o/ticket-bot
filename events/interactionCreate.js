@@ -15,7 +15,6 @@ const {
     ChannelType,
     MessageFlags
 } = require("discord.js");
-const unirest = require("unirest");
 const func = require("../utils/functions.js");
 const lang = require("../content/handler/lang.json");
 const { createDB } = require('../utils/mysql')
@@ -24,6 +23,7 @@ const logger = require('../utils/logger');
 const applications = require('../utils/applications');
 const perms = require('../utils/permissions');
 const bots = require('../utils/clients');
+const linking = require('../utils/linking');
 
 // Initialize commands collection if it doesn't exist
 if (!Collection.prototype.commands) {
@@ -1296,77 +1296,12 @@ module.exports = async function (client, interaction) {
                         func.handle_errors(null, client, `interactionCreate.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`)
                         return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     }
-                    
-                // Simple Link is 1
-                if (client.config.linking_settings.linkingSystem === 1) {
-                    let SteamIDGrab = await unirest.get(`${client.config.linking_settings.verify_link}/api.php?action=findByDiscord&id=${interaction.member.user.id}&secret=${client.config.tokens.Linking_System_API_Key_Or_Secret}`)
-                    if (SteamIDGrab.body) {
-                        if (SteamIDGrab.body?.toString) {
-                            if (SteamIDGrab?.body?.toString().startsWith("7656119")) {
-                                SteamID = SteamIDGrab.body
-                            } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                            }
-                        }
-                    } else {
-                        func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system?\n\n**Linking System:** Simple Link`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
-                    
-                    }
-    
-                // Steamcord is 2
-                } else if (client.config.linking_settings.linkingSystem === 2) {
-                    
-                    let SteamIDGrab = await unirest.get(`https://api.steamcord.io/players?discordId=${interaction.member.user.id}`).headers({'Authorization': `Bearer ${client.config.tokens.Linking_System_API_Key_Or_Secret}`, 'Content-Type': 'application/json'})
-                    if (SteamIDGrab.body) {
-                        if (SteamIDGrab.body.length > 0) {
-                        if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId) {
-                            if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId.toString().startsWith("7656119")) {
-                            } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                            }
-                        } else {
-                            return interaction.editReply({content:  lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                    
-                        }
-                    } else {
-                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                    }
-                    } else {
-                        func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system and/or is your subscription active?\n\n**Linking System:** Steamcord`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
-                    }
-                    
-                    // Platform Sync is 3
-                } else if (client.config.linking_settings.linkingSystem === 3) {
-                    
-                    let SteamIDGrab = await unirest.get(`https://link.platformsync.io/api.php?id=${interaction.member.user.id}&token=${client.config.tokens.Linking_System_API_Key_Or_Secret}`)
-                    if (SteamIDGrab.body) {
-                        if (!SteamIDGrab.body?.Error) {
-                            if (SteamIDGrab.body?.linked == true) {
-                                if (SteamIDGrab.body?.steam_id) {
-                                    if (SteamIDGrab.body?.steam_id?.toString().startsWith("7656119")) {
-                                    } else {
-                                        return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                                    }
-                                } else {
-                                    return interaction.editReply({content: lang.user_errors["no-steamid-verification-needed"] != "" ? lang.user_errors["no-steamid-verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, no SteamID found! You need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                            
-                                }
-                            } else {
-                                return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
-                            }
-                        } else {
-                            func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Is your API Key correct and is it a paid subscription?\n\n**Linking System:** Platform Sync`)
-                            return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
-                        
-                        }   
-                    } else {
-                        func.handle_errors(null, client, `interactionCreate.js`, `Could not access API! Have you selected the correct linking system?\n\n**Linking System:** Platform Sync`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
-                    }
-    
+
+                const steamId = await linking.findSteamIdByDiscord(client, interaction.member.user.id);
+                if (!steamId || !String(steamId).startsWith('7656119')) {
+                    return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
                 }
+                SteamID = steamId;
 		}
 
             // Skip post channel check if open-as-ticket is true

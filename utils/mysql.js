@@ -1,4 +1,5 @@
 const mysql = require('mysql2/promise');
+const { ensureRuntimeTables, runtimeGet, runtimeSet, runtimeDelete } = require('./runtime_store');
 let config = null;
 
 try {
@@ -97,6 +98,15 @@ function createDB() {
                         INDEX idx_user_id (user_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 `);
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS kv_store (
+                        \`key\` VARCHAR(255) NOT NULL PRIMARY KEY,
+                        value LONGTEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_updated (updated_at)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                await ensureRuntimeTables(conn);
                 if (__adapter && typeof __adapter.ensureTicketMetricsSchema === 'function') {
                     try {
                         await __adapter.ensureTicketMetricsSchema(conn);
@@ -133,74 +143,7 @@ class MySQLAdapter {
     async get(key) {
         const conn = await this.pool.getConnection();
         try {
-            // Try exact match first (for aggregated objects like Metrics.total.ticketsOpened)
-            const [exactRows] = await conn.query(
-                'SELECT value FROM kv_store WHERE `key` = ?',
-                [key]
-            );
-            
-            if (exactRows.length > 0) {
-                const value = exactRows[0].value;
-                // Parse JSON if it's a string
-                try {
-                    return JSON.parse(value);
-                } catch {
-                    return value;
-                }
-            }
-            
-            // For backwards compatibility: if no exact match and it's a metrics key,
-            // check for old individual leaf keys (from before optimization)
-            // This helps during migration period
-            if (key.startsWith('Metrics.')) {
-                const [nestedRows] = await conn.query(
-                    'SELECT `key`, value FROM kv_store WHERE `key` LIKE ? ORDER BY `key` LIMIT 1000',
-                    [`${key}.%`]
-                );
-                
-                if (nestedRows.length > 0) {
-                    // Reconstruct nested object from individual keys (legacy format)
-                    const result = {};
-                    for (const row of nestedRows) {
-                        const fullKey = row.key;
-                        const suffix = fullKey.substring(key.length + 1);
-                        const parts = suffix.split('.');
-                        
-                        let current = result;
-                        for (let i = 0; i < parts.length - 1; i++) {
-                            const part = parts[i];
-                            if (!current[part]) {
-                                current[part] = {};
-                            }
-                            current = current[part];
-                        }
-                        
-                        const finalKey = parts[parts.length - 1];
-                        let value = row.value;
-                        try {
-                            value = JSON.parse(value);
-                        } catch {
-                            // Keep as-is if not JSON
-                        }
-                        current[finalKey] = value;
-                    }
-                    
-                    // Auto-migrate: save as aggregated object and clean up individual keys
-                    if (Object.keys(result).length > 0) {
-                        const jsonValue = JSON.stringify(result);
-                        await conn.query(
-                            'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
-                            'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
-                            [key, jsonValue, jsonValue]
-                        );
-                        // Note: Don't delete old keys here - let add() handle it incrementally
-                    }
-                    
-                    return result;
-                }
-            }
-            
-            return null;
+            return await runtimeGet(conn, key);
         } catch (err) {
             console.error('[mysql] get() error:', {
                 key,
@@ -216,55 +159,7 @@ class MySQLAdapter {
     async set(key, value) {
         const conn = await this.pool.getConnection();
         try {
-            const keyParts = key.split('.');
-            
-            // For nested metrics keys (e.g., Metrics.usernames.123456789), store in parent object
-            // This keeps usernames grouped efficiently
-            if (keyParts.length === 3 && key.startsWith('Metrics.usernames.')) {
-                const parentKey = 'Metrics.usernames';
-                const userId = keyParts[2];
-                
-                // Get existing usernames object
-                const [parentRows] = await conn.query(
-                    'SELECT value FROM kv_store WHERE `key` = ?',
-                    [parentKey]
-                );
-                
-                let usernamesObj = {};
-                if (parentRows.length > 0) {
-                    try {
-                        usernamesObj = JSON.parse(parentRows[0].value);
-                        if (typeof usernamesObj !== 'object' || usernamesObj === null) {
-                            usernamesObj = {};
-                        }
-                    } catch {
-                        usernamesObj = {};
-                    }
-                }
-                
-                // Update nested value
-                usernamesObj[userId] = value;
-                
-                // Save entire object
-                const jsonValue = JSON.stringify(usernamesObj);
-                await conn.query(
-                    'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
-                    'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
-                    [parentKey, jsonValue, jsonValue]
-                );
-                
-                // Cleanup old individual key
-                await conn.query('DELETE FROM kv_store WHERE `key` = ?', [key]);
-            } else {
-                // For non-nested keys, store directly
-                const jsonValue = typeof value === 'object' ? JSON.stringify(value) : value;
-                
-                await conn.query(
-                    'INSERT INTO kv_store (`key`, value, updated_at) VALUES (?, ?, NOW()) ' +
-                    'ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()',
-                    [key, jsonValue, jsonValue]
-                );
-            }
+            await runtimeSet(conn, key, value);
         } catch (err) {
             console.error('[mysql] set() error:', {
                 key,
@@ -280,7 +175,7 @@ class MySQLAdapter {
     async delete(key) {
         const conn = await this.pool.getConnection();
         try {
-            await conn.query('DELETE FROM kv_store WHERE `key` = ?', [key]);
+            await runtimeDelete(conn, key);
         } finally {
             conn.release();
         }

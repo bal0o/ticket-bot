@@ -53,7 +53,7 @@ ticket-bot/
 ├── config/           # Configuration files (config.json)
 ├── content/          # Questions and handler files
 ├── transcripts/      # Saved ticket transcripts
-├── data/            # Database files (json.sqlite)
+├── data/            # Local data / markers
 ├── logs/            # Application logs
 ├── Dockerfile       # Docker image definition
 └── docker-compose.yml # Docker services configuration
@@ -64,15 +64,17 @@ ticket-bot/
 - **`./config:/app/config:rw`** - Configuration files
 - **`./content:/app/content:rw`** - Content and handler files
 - **`./transcripts:/app/transcripts:rw`** - Transcript storage
-- **`./data:/app/data:rw`** - Database files
+- **`./data:/app/data:rw`** - Local data
 - **`./logs:/app/logs:rw`** - Application logs
 
 ## Configuration
 
-**Note: This bot now uses config.json for all configuration. Environment variables are no longer required.**
+**Note: This bot uses config.json for all configuration. MySQL is required.**
 
 ### Required Configuration in config.json
-- `config.tokens.bot_token` - Your Discord bot token
+- `config.tokens.bot_token` - Public Discord bot token
+- `config.tokens.staff_bot_token` - Staff Discord bot token
+- `config.database.host` / `user` / `password` / `database` - MySQL connection
 - `config.web.discord_oauth.client_id` - Discord OAuth client ID  
 - `config.web.discord_oauth.client_secret` - Discord OAuth client secret
 - `config.web.session_secret` - Web session secret
@@ -119,14 +121,14 @@ docker-compose up -d
 
 ## One-time index backfill (performance)
 
-After upgrading, run the backfill to build fast indexes for staff pages and transcript lookups. This only needs to be done once per database (indexes are stored in `data/json.sqlite`).
+After upgrading, run the backfill to build fast indexes for staff pages and transcript lookups. Indexes live in MySQL (`transcript_index`).
 
 ```bash
 # If running locally
 npm run backfill:index
 
 # If running in Docker
-docker-compose run --rm ticket-bot npm run backfill:index
+docker-compose run --rm bot npm run backfill:index
 ```
 
 You can safely re-run the backfill; it is idempotent and will merge any missing entries.

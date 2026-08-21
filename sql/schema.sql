@@ -443,3 +443,44 @@ FROM grafana_staff_messages sm
 INNER JOIN grafana_ticket_metrics tm ON tm.ticket_id = sm.ticket_id;
 
 
+-- Runtime tables (auto-created on bot/web start; dual-read from kv_store for legacy keys)
+
+CREATE TABLE IF NOT EXISTS message_forwards (
+    message_id VARCHAR(32) NOT NULL,
+    kind ENUM('user','staff') NOT NULL,
+    payload JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ticket_claims (
+    channel_id VARCHAR(32) NOT NULL PRIMARY KEY,
+    payload JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS app_maps (
+    map_type ENUM('channelToApp','ticketToApp','userToChannels') NOT NULL,
+    map_key VARCHAR(64) NOT NULL,
+    payload JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (map_type, map_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS interview_cleanups (
+    channel_id VARCHAR(32) NOT NULL PRIMARY KEY,
+    payload JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+    flag_key VARCHAR(255) NOT NULL PRIMARY KEY,
+    value JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS bot_counters (
+    counter_key VARCHAR(255) NOT NULL PRIMARY KEY,
+    value BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

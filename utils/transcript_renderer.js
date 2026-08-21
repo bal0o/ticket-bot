@@ -1,265 +1,206 @@
-const { JSDOM } = require('jsdom');
 const fs = require('fs');
 
+let cachedTemplate = null;
+
+function escapeHtml(text) {
+	if (typeof text !== 'string') return '';
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
 function sanitizeHtml(text) {
-    if (typeof text !== 'string') return '';
-    return text.replace(/<(\/?)script>/gi, '&lt;$1script&gt;');
+	if (typeof text !== 'string') return '';
+	return text.replace(/<(\/?)script>/gi, '&lt;$1script&gt;');
 }
 
 function linkify(text) {
-    if (typeof text !== 'string' || !text) return text;
-    // Very simple URL matcher; safe because input is already sanitized
-    return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+	if (typeof text !== 'string' || !text) return text;
+	return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+}
+
+function getTemplate() {
+	if (!cachedTemplate) {
+		cachedTemplate = fs.readFileSync('./utils/template.html', 'utf8');
+	}
+	return cachedTemplate;
 }
 
 function normalizeRows(rows, options) {
-    const pinnedIds = new Set(rows.filter(r => r.pinned).map(r => r.message_id));
-    let list;
-    if (options.mode === 'user') {
-        list = rows.filter(msg => {
-            if (pinnedIds.has(msg.message_id)) return true;
-            // msg.embeds may be a JSON string from MySQL; parse if needed
-            let embeds = [];
-            try {
-                embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
-            } catch (_) {
-                embeds = [];
-            }
-            const firstEmbedTitle = (embeds[0] && embeds[0].title) || '';
-            const helpEmbed = firstEmbedTitle === 'How to Reply';
-            const cheetosEmbed = firstEmbedTitle === 'Cheetos Check';
-            const isThreadNotice = typeof msg.type === 'string' && /thread/i.test(msg.type);
-            const mentionsStaffChat = typeof msg.content === 'string' && /staff-chat/i.test(msg.content);
-            const content = typeof msg.content === 'string' ? msg.content : '';
-            const isInternalError =
-                !!msg.author_is_bot &&
-                /There was an error sending your message\. Please try again\./i.test(content);
-            return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat || isInternalError);
-        });
-    } else {
-        list = rows;
-    }
-    // chronological
-    return list.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+	const pinnedIds = new Set(rows.filter(r => r.pinned).map(r => r.message_id));
+	let list;
+	if (options.mode === 'user') {
+		list = rows.filter(msg => {
+			if (pinnedIds.has(msg.message_id)) return true;
+			let embeds = [];
+			try {
+				embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
+			} catch (_) {
+				embeds = [];
+			}
+			const firstEmbedTitle = (embeds[0] && embeds[0].title) || '';
+			const helpEmbed = firstEmbedTitle === 'How to Reply';
+			const cheetosEmbed = firstEmbedTitle === 'Cheetos Check';
+			const isThreadNotice = typeof msg.type === 'string' && /thread/i.test(msg.type);
+			const mentionsStaffChat = typeof msg.content === 'string' && /staff-chat/i.test(msg.content);
+			const content = typeof msg.content === 'string' ? msg.content : '';
+			const isInternalError =
+				!!msg.author_is_bot &&
+				/There was an error sending your message\. Please try again\./i.test(content);
+			return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat || isInternalError);
+		});
+	} else {
+		list = rows;
+	}
+	return list.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+}
+
+function renderEmbed(emb) {
+	let html = '<div class="EmbedBody">';
+	if (emb.title) {
+		html += `<span class="EmbedTitle">${sanitizeHtml(emb.title)}</span>`;
+	}
+	if (emb.description) {
+		html += `<span class="EmbedDesc">${sanitizeHtml(emb.description)}</span>`;
+	}
+	if (Array.isArray(emb.fields)) {
+		for (const f of emb.fields) {
+			html += '<div class="EmbedFieldBody">';
+			html += `<div class="EmbedFieldTitle">${escapeHtml(f.name || '')}</div>`;
+			html += `<div class="EmbedFieldContent">${sanitizeHtml(f.value || '')}</div>`;
+			html += '</div>';
+		}
+	}
+	html += '</div>';
+	return html;
+}
+
+function renderCloseSummary(options) {
+	if (!options.closeReason && !options.closedBy && !options.responseTime) return '';
+	let html = '<div class="EmbedBody"><span class="EmbedTitle">Close Summary</span>';
+	if (options.closedBy) {
+		html += '<div class="EmbedFieldBody">';
+		html += '<div class="EmbedFieldTitle">Closed By</div>';
+		html += `<div class="EmbedFieldContent">${escapeHtml(options.closedBy)}</div>`;
+		html += '</div>';
+	}
+	if (options.closeReason) {
+		html += '<div class="EmbedFieldBody">';
+		html += '<div class="EmbedFieldTitle">Reason</div>';
+		html += `<div class="EmbedFieldContent">${escapeHtml(options.closeReason)}</div>`;
+		html += '</div>';
+	}
+	if (options.responseTime) {
+		html += '<div class="EmbedFieldBody">';
+		html += '<div class="EmbedFieldTitle">Response Time</div>';
+		html += `<div class="EmbedFieldContent">${escapeHtml(options.responseTime)}</div>`;
+		html += '</div>';
+	}
+	html += '</div>';
+	return html;
 }
 
 function renderTranscriptFromRows(rows, options) {
-    const dom = new JSDOM();
-    const document = dom.window.document;
+	const opts = options || {};
+	const list = normalizeRows(rows || [], opts);
+	const ticketOpenerId = opts.DiscordID != null ? String(opts.DiscordID) : null;
+	let core = '';
 
-    const template = fs.readFileSync('./utils/template.html', 'utf8');
+	for (const msg of list) {
+		const isFromTicketOpener =
+			ticketOpenerId != null && msg.author_id != null && String(msg.author_id) === ticketOpenerId;
 
-    const list = normalizeRows(rows || [], options || {});
+		const contentStr =
+			typeof msg.content === 'string' ? msg.content : msg.content != null ? String(msg.content) : '';
 
-    const core = document.createElement('div');
+		const isStaffAnon =
+			opts.mode === 'user' &&
+			!msg.webhook_id &&
+			!isFromTicketOpener &&
+			opts.isAnonTicket &&
+			!/^!me\b/i.test(contentStr);
 
-    const ticketOpenerId = options.DiscordID != null ? String(options.DiscordID) : null;
+		const displayName = isStaffAnon
+			? 'Brit Support'
+			: msg.author_tag || msg.author_username || 'Unknown';
 
-    for (const msg of list) {
-        const isFromTicketOpener =
-            ticketOpenerId != null && msg.author_id != null && String(msg.author_id) === ticketOpenerId;
+		const displayAvatar = 'https://cdn.discordapp.com/embed/avatars/0.png';
+		const when =
+			opts.mode === 'user'
+				? new Date((msg.created_at || 0) * 1000).toString()
+				: `${msg.author_id || 'unknown'} | ${new Date((msg.created_at || 0) * 1000).toString()}`;
 
-        const contentStr =
-            typeof msg.content === 'string' ? msg.content : msg.content != null ? String(msg.content) : '';
+		let content = contentStr;
+		if (opts.mode === 'user' && /^!(me|r)\b/i.test(content)) {
+			content = content.replace(/^!(?:me|r)\b\s*/i, '');
+		}
 
-        const isStaffAnon =
-            options.mode === 'user' &&
-            !msg.webhook_id &&
-            !isFromTicketOpener &&
-            options.isAnonTicket &&
-            !/^!me\b/i.test(contentStr);
+		let embeds = [];
+		try {
+			embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
+		} catch (_) {
+			embeds = [];
+		}
 
-        const displayName = isStaffAnon
-            ? 'Brit Support'
-            : msg.author_tag || msg.author_username || 'Unknown';
+		let attachments = [];
+		try {
+			attachments = Array.isArray(msg.attachments)
+				? msg.attachments
+				: JSON.parse(msg.attachments || '[]');
+		} catch (_) {
+			attachments = [];
+		}
 
-        const displayAvatar =
-            'https://cdn.discordapp.com/embed/avatars/0.png';
+		const hasVisibleContent =
+			(content && content.trim().length > 0) ||
+			(embeds && embeds.length > 0) ||
+			(attachments && attachments.length > 0);
+		if (!hasVisibleContent) continue;
 
-        const parent = document.createElement('div');
-        parent.className = 'parent-container';
+		core += '<div class="parent-container">';
+		core += '<div class="avatar-container">';
+		core += `<img src="${displayAvatar}" class="avatar">`;
+		core += '</div>';
+		core += '<div class="message-container">';
+		core += '<div class="titleDiv">';
+		core += `<span class="nameElement">${escapeHtml(displayName)}</span>`;
+		core += `<span class="IDtimeElement">${escapeHtml(when)}</span>`;
+		core += '</div>';
 
-        const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'avatar-container';
-        const img = document.createElement('img');
-        img.setAttribute('src', displayAvatar);
-        img.className = 'avatar';
-        avatarDiv.appendChild(img);
-        parent.appendChild(avatarDiv);
+		if (content) {
+			core += `<div class="maincontent">${linkify(sanitizeHtml(content))}</div>`;
+		}
 
-        const messageContainer = document.createElement('div');
-        messageContainer.className = 'message-container';
+		for (const emb of embeds) {
+			core += renderEmbed(emb);
+		}
 
-        const titleDiv = document.createElement('div');
-        titleDiv.className = 'titleDiv';
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'nameElement';
-        nameSpan.appendChild(document.createTextNode(displayName));
-        titleDiv.appendChild(nameSpan);
-        const meta = document.createElement('span');
-        meta.className = 'IDtimeElement';
-        const when =
-            options.mode === 'user'
-                ? new Date((msg.created_at || 0) * 1000).toString()
-                : `${msg.author_id || 'unknown'} | ${new Date(
-                      (msg.created_at || 0) * 1000
-                  ).toString()}`;
-        meta.appendChild(document.createTextNode(when));
-        titleDiv.appendChild(meta);
-        messageContainer.appendChild(titleDiv);
+		for (const att of attachments) {
+			const url = att.url || '';
+			if (/\.(gif|png|jpe?g)$/i.test(url)) {
+				core += `<img src="${escapeHtml(url)}">`;
+			} else if (url) {
+				const safe = escapeHtml(url);
+				core += `<a class="AttachmentFile" href="${safe}" title="${safe}">${safe}</a>`;
+			}
+		}
 
-        let content = contentStr;
-        if (options.mode === 'user' && /^!(me|r)\b/i.test(content)) {
-            content = content.replace(/^!(?:me|r)\b\s*/i, '');
-        }
+		core += '</div></div>';
+	}
 
-        // Embeds
-        let embeds = [];
-        try {
-            embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
-        } catch (_) {
-            embeds = [];
-        }
+	core += renderCloseSummary(opts);
 
-        // Attachments
-        let attachments = [];
-        try {
-            attachments = Array.isArray(msg.attachments)
-                ? msg.attachments
-                : JSON.parse(msg.attachments || '[]');
-        } catch (_) {
-            attachments = [];
-        }
+	const topText =
+		'<!---- Downloadable HTML Transcript - DOWNLOAD TO VIEW ---->\n' +
+		`<!---- Total of ${list.length} messages ---->\n` +
+		(opts.mode === 'user'
+			? ''
+			: `<!---- Ticket Makers DiscordID: ${opts.DiscordID || 'unknown'} ---->\n`);
 
-        // If there is literally nothing to show (no content, no embeds, no attachments),
-        // skip rendering this message row to avoid blank lines in the transcript.
-        const hasVisibleContent =
-            (content && content.trim().length > 0) ||
-            (embeds && embeds.length > 0) ||
-            (attachments && attachments.length > 0);
-        if (!hasVisibleContent) {
-            continue;
-        }
-
-        if (content) {
-            const node = document.createElement('div');
-            node.className = 'maincontent';
-            node.innerHTML = linkify(sanitizeHtml(content));
-            messageContainer.appendChild(node);
-        }
-
-        for (const emb of embeds) {
-            const body = document.createElement('div');
-            body.className = 'EmbedBody';
-            if (emb.title) {
-                const t = document.createElement('span');
-                t.className = 'EmbedTitle';
-                t.innerHTML = sanitizeHtml(emb.title);
-                body.appendChild(t);
-            }
-            if (emb.description) {
-                const d = document.createElement('span');
-                d.className = 'EmbedDesc';
-                d.innerHTML = sanitizeHtml(emb.description);
-                body.appendChild(d);
-            }
-            if (Array.isArray(emb.fields)) {
-                for (const f of emb.fields) {
-                    const fb = document.createElement('div');
-                    fb.className = 'EmbedFieldBody';
-                    const ft = document.createElement('div');
-                    ft.className = 'EmbedFieldTitle';
-                    ft.appendChild(document.createTextNode(f.name || ''));
-                    const fc = document.createElement('div');
-                    fc.className = 'EmbedFieldContent';
-                    fc.innerHTML = sanitizeHtml(f.value || '');
-                    fb.appendChild(ft);
-                    fb.appendChild(fc);
-                    body.appendChild(fb);
-                }
-            }
-            messageContainer.appendChild(body);
-        }
-
-        for (const att of attachments) {
-            const url = att.url || '';
-            if (/\.(gif|png|jpe?g)$/i.test(url)) {
-                const pic = document.createElement('img');
-                pic.setAttribute('src', url);
-                messageContainer.appendChild(pic);
-            } else if (url) {
-                const link = document.createElement('a');
-                link.className = 'AttachmentFile';
-                link.appendChild(document.createTextNode(url));
-                link.title = url;
-                link.href = url;
-                messageContainer.appendChild(link);
-            }
-        }
-
-        parent.appendChild(messageContainer);
-        core.appendChild(parent);
-    }
-
-    // Close summary
-    if (options.closeReason || options.closedBy || options.responseTime) {
-        const closeHeader = document.createElement('div');
-        closeHeader.className = 'EmbedBody';
-        const title = document.createElement('span');
-        title.className = 'EmbedTitle';
-        title.appendChild(document.createTextNode('Close Summary'));
-        closeHeader.appendChild(title);
-        if (options.closedBy) {
-            const row = document.createElement('div');
-            row.className = 'EmbedFieldBody';
-            const k = document.createElement('div');
-            k.className = 'EmbedFieldTitle';
-            k.appendChild(document.createTextNode('Closed By'));
-            const v = document.createElement('div');
-            v.className = 'EmbedFieldContent';
-            v.appendChild(document.createTextNode(options.closedBy));
-            row.appendChild(k);
-            row.appendChild(v);
-            closeHeader.appendChild(row);
-        }
-        if (options.closeReason) {
-            const row = document.createElement('div');
-            row.className = 'EmbedFieldBody';
-            const k = document.createElement('div');
-            k.className = 'EmbedFieldTitle';
-            k.appendChild(document.createTextNode('Reason'));
-            const v = document.createElement('div');
-            v.className = 'EmbedFieldContent';
-            v.appendChild(document.createTextNode(options.closeReason));
-            row.appendChild(k);
-            row.appendChild(v);
-            closeHeader.appendChild(row);
-        }
-        if (options.responseTime) {
-            const row = document.createElement('div');
-            row.className = 'EmbedFieldBody';
-            const k = document.createElement('div');
-            k.className = 'EmbedFieldTitle';
-            k.appendChild(document.createTextNode('Response Time'));
-            const v = document.createElement('div');
-            v.className = 'EmbedFieldContent';
-            v.appendChild(document.createTextNode(options.responseTime));
-            row.appendChild(k);
-            row.appendChild(v);
-            closeHeader.appendChild(row);
-        }
-        core.appendChild(closeHeader);
-    }
-
-    const topText =
-        '<!---- Downloadable HTML Transcript - DOWNLOAD TO VIEW ---->\n' +
-        `<!---- Total of ${list.length} messages ---->\n` +
-        (options.mode === 'user'
-            ? ''
-            : `<!---- Ticket Makers DiscordID: ${options.DiscordID || 'unknown'} ---->\n`);
-
-    return Buffer.from(topText + template + core.innerHTML);
+	return Buffer.from(topText + getTemplate() + core);
 }
 
 module.exports = { renderTranscriptFromRows };
-

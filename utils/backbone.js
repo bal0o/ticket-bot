@@ -1,12 +1,13 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
 const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
-let unirest = require('unirest');
 const func = require("./functions.js")
 const logger = require('./logger');
 const lang = require("../content/handler/lang.json");
 const { createDB } = require('./mysql');
 const db = createDB();
 const bots = require("./clients");
+const linking = require('./linking');
+const http = require('./http');
 
 function parseApproximateTimeToUnix(input) {
 	if (!input || typeof input !== 'string') return null;
@@ -412,11 +413,9 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 				return func.handle_errors(null, client, `backbone.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`);
 			}
 
-			// Simple Link is 1
 			if (client.config.linking_settings.linkingSystem === 1) {
-				let SteamIDGrab = await unirest.get(`${client.config.linking_settings.verify_link}/api.php?action=findByDiscord&id=${user.id}&secret=${client.config.tokens.Linking_System_API_Key_Or_Secret}`);
-
-				if (!SteamIDGrab.body || !SteamIDGrab.body?.toString || !SteamIDGrab?.body?.toString().startsWith("7656119")) {
+				const steamId = await linking.findSteamIdByDiscord(client, user.id);
+				if (!steamId || !String(steamId).startsWith("7656119")) {
 					return interaction.editReply({
 						content: lang.user_errors["verification-needed"] != "" 
 							? lang.user_errors["verification-needed"]
@@ -682,50 +681,12 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 
 			if (!client.config.tokens.Linking_System_API_Key_Or_Secret || client.config.tokens.Linking_System_API_Key_Or_Secret == "") return func.handle_errors(null, client, `backbone.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`)
 
-			// Simple Link is 1
-			if (client.config.linking_settings.linkingSystem === 1) {
-
-				let SteamIDGrab = await unirest.get(`${client.config.linking_settings.verify_link}/api.php?action=findByDiscord&id=${user.id}&secret=${client.config.tokens.Linking_System_API_Key_Or_Secret}`)
-
-				if (SteamIDGrab.body) {
-
-					if (SteamIDGrab.body?.toString) {
-						if (SteamIDGrab?.body?.toString().startsWith("7656119")) SteamID = SteamIDGrab.body
-
-					}
-				} else {
-					func.handle_errors(null, client, `backbone.js`, `Could not access API! Have you selected the correct linking system?`)
-					
-				}
-
-			// Steamcord is 2
-			} else if (client.config.linking_settings.linkingSystem === 2) {
-
-				let SteamIDGrab = await unirest.get(`https://api.steamcord.io/players?discordId=${user.id}`).headers({'Authorization': `Bearer ${client.config.tokens.Linking_System_API_Key_Or_Secret}`, 'Content-Type': 'application/json'})
-				if (SteamIDGrab.body) {
-					if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId) {
-						if (SteamIDGrab.body[0]?.steamAccounts[0]?.steamId.toString().startsWith("7656119")) SteamID = SteamIDGrab.body[0]?.steamAccounts[0]?.steamId
-					}
-				} else {
-					func.handle_errors(null, client, `backbone.js`, `Could not access API! Have you selected the correct linking system?`)
-				}
-			
-			// Platform Sync is 3
-			} else if (client.config.linking_settings.linkingSystem === 3) {
-
-				let SteamIDGrab = await unirest.get(`https://link.platformsync.io/api.php?id=${user.id}&token=${client.config.tokens.Linking_System_API_Key_Or_Secret}`)
-				if (SteamIDGrab.body) {
-						if (SteamIDGrab.body?.linked == true) {
-							if (SteamIDGrab.body?.steam_id) {
-								if (SteamIDGrab?.body?.steam_id?.startsWith("7656119")) SteamID = SteamIDGrab.body.steam_id
-							}
-						}
-				} else {
-					func.handle_errors(null, client, `backbone.js`, `Could not access API! Have you selected the correct linking system?`)
-				}
-
+			const found = await linking.findSteamIdByDiscord(client, user.id);
+			if (found && String(found).startsWith("7656119")) {
+				SteamID = found;
+			} else if (client.config.linking_settings.linkingSystem) {
+				func.handle_errors(null, client, `backbone.js`, `Could not access API! Have you selected the correct linking system?`)
 			}
-
 		}
 
 	// BM lookup now done asynchronously after ticket creation
@@ -800,11 +761,10 @@ openResult = await func.openTicket(client, interaction, questionFilesystem, user
         const bmToken = client.config.tokens.battlemetricsToken;
         if (!bmToken) return;
 
-        const axios = require('axios');
         const bmHeaders = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
         const bmPlayerUrl = `https://api.battlemetrics.com/players?filter[search]=${SteamID}&include=identifier,server`;
-        const bmResponse = await axios.get(bmPlayerUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
-        if (!(bmResponse && bmResponse.status >= 200 && bmResponse.status < 300 && bmResponse.data && bmResponse.data.data && bmResponse.data.data.length > 0)) return;
+        const bmResponse = await http.get(bmPlayerUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
+        if (!(bmResponse && bmResponse.ok && bmResponse.data && bmResponse.data.data && bmResponse.data.data.length > 0)) return;
 
         const playerData = bmResponse.data.data[0];
         const playerId = playerData.id;
@@ -829,9 +789,9 @@ openResult = await func.openTicket(client, interaction, questionFilesystem, user
             }
         }
         const bansUrl = `https://api.battlemetrics.com/bans?filter[player]=${playerId}&include=server`;
-        const bansResponse = await axios.get(bansUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
+        const bansResponse = await http.get(bansUrl, { headers: bmHeaders, timeout: 10000 }).catch(e => e);
         const banInfo = [];
-        if (bansResponse && bansResponse.status >= 200 && bansResponse.status < 300 && bansResponse.data && bansResponse.data.data && bansResponse.data.data.length > 0) {
+        if (bansResponse && bansResponse.ok && bansResponse.data && bansResponse.data.data && bansResponse.data.data.length > 0) {
             for (const ban of bansResponse.data.data) {
                 const reason = ban.attributes.reason || 'No reason provided';
                 let serverName = ban.relationships?.server?.data?.id || '';

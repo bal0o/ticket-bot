@@ -15,22 +15,10 @@
   "author": "Metzey",
   "license": "GPL-3.0-or-later",
   "dependencies": {
-    "@discordjs/rest": "^2.4.2",
-    "axios": "^1.9.0",
     "discord.js": "^14.16.1",
-    "dotenv": "^8.2.0",
     "ejs": "^3.1.10",
     "express": "^4.19.2",
     "express-session": "^1.17.3",
-    "fs": "^0.0.1-security",
-    "jsdom": "^18.0.1",
-    "moment": "^2.29.1",
-    "mongoose": "^8.17.0",
-    "mysql2": "^3.15.3",
-    "passport": "^0.7.0",
-    "passport-discord": "^0.1.4",
-    "prom-client": "^15.1.2",
-    "reconlx": "^2.5.6",
-    "unirest": "^0.6.0"
+    "mysql2": "^3.15.3"
   }
 }
