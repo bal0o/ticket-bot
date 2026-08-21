@@ -632,10 +632,52 @@ class MySQLAdapter {
             await this._addIndexIfMissing(conn, 'tickets', 'idx_first_staff_response_user_id', '(first_staff_response_user_id)');
             await this._addIndexIfMissing(conn, 'tickets', 'idx_claimed_by_user_id', '(claimed_by_user_id)');
             try {
+                await this.ensureFeedbackSchema(conn);
+            } catch (feedbackErr) {
+                console.error('[mysql] Feedback schema failed:', feedbackErr.message);
+            }
+            try {
                 await this.ensureGrafanaViews(conn);
             } catch (viewErr) {
                 console.error('[mysql] Could not create Grafana views:', viewErr.message);
             }
+        } finally {
+            if (!existingConn) conn.release();
+        }
+    }
+
+    async ensureFeedbackSchema(existingConn = null) {
+        const conn = existingConn || await this.pool.getConnection();
+        try {
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS ticket_feedback (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    ticket_id VARCHAR(255) NOT NULL,
+                    user_id VARCHAR(255) NOT NULL,
+                    ticket_type VARCHAR(100) NULL,
+                    server VARCHAR(255) NULL,
+                    overall_score TINYINT NULL,
+                    speed_rating VARCHAR(32) NULL,
+                    resolved VARCHAR(32) NULL,
+                    would_return VARCHAR(32) NULL,
+                    comment TEXT NULL,
+                    closer_user_id VARCHAR(255) NULL,
+                    closer_user VARCHAR(255) NULL,
+                    claimer_user_id VARCHAR(255) NULL,
+                    claimer_user VARCHAR(255) NULL,
+                    first_responder_user_id VARCHAR(255) NULL,
+                    first_responder_user VARCHAR(255) NULL,
+                    answers_json JSON NULL,
+                    created_at BIGINT NOT NULL,
+                    UNIQUE KEY unique_ticket_user_feedback (ticket_id, user_id),
+                    INDEX idx_feedback_created (created_at),
+                    INDEX idx_feedback_type (ticket_type),
+                    INDEX idx_feedback_overall (overall_score),
+                    INDEX idx_feedback_closer (closer_user_id),
+                    INDEX idx_feedback_claimer (claimer_user_id),
+                    INDEX idx_feedback_first (first_responder_user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
         } finally {
             if (!existingConn) conn.release();
         }
@@ -872,6 +914,88 @@ class MySQLAdapter {
                 ) AS is_stale_pickup
             FROM grafana_staff_messages sm
             INNER JOIN grafana_ticket_metrics tm ON tm.ticket_id = sm.ticket_id
+        `);
+        await conn.query(`
+            CREATE OR REPLACE VIEW grafana_ticket_feedback AS
+            SELECT
+                f.id AS feedback_id,
+                f.ticket_id,
+                f.user_id AS opener_id,
+                f.ticket_type,
+                f.server,
+                f.overall_score,
+                f.speed_rating,
+                f.resolved,
+                f.would_return,
+                f.comment,
+                f.closer_user_id,
+                f.closer_user,
+                f.claimer_user_id,
+                f.claimer_user,
+                f.first_responder_user_id,
+                f.first_responder_user,
+                CASE
+                    WHEN f.created_at IS NULL THEN NULL
+                    WHEN f.created_at > 9999999999 THEN FLOOR(f.created_at / 1000)
+                    ELSE f.created_at
+                END AS created_at
+            FROM ticket_feedback f
+        `);
+        await conn.query(`
+            CREATE OR REPLACE VIEW grafana_ticket_feedback_staff AS
+            SELECT
+                m.feedback_id,
+                m.ticket_id,
+                m.opener_id,
+                m.ticket_type,
+                m.server,
+                m.overall_score,
+                m.speed_rating,
+                m.resolved,
+                m.would_return,
+                m.comment,
+                m.created_at,
+                'closer' AS staff_role,
+                m.closer_user_id AS staff_user_id,
+                m.closer_user AS staff_name
+            FROM grafana_ticket_feedback m
+            WHERE m.closer_user_id IS NOT NULL AND m.closer_user_id != ''
+            UNION ALL
+            SELECT
+                m.feedback_id,
+                m.ticket_id,
+                m.opener_id,
+                m.ticket_type,
+                m.server,
+                m.overall_score,
+                m.speed_rating,
+                m.resolved,
+                m.would_return,
+                m.comment,
+                m.created_at,
+                'claimer' AS staff_role,
+                m.claimer_user_id AS staff_user_id,
+                m.claimer_user AS staff_name
+            FROM grafana_ticket_feedback m
+            WHERE m.claimer_user_id IS NOT NULL AND m.claimer_user_id != ''
+            UNION ALL
+            SELECT
+                m.feedback_id,
+                m.ticket_id,
+                m.opener_id,
+                m.ticket_type,
+                m.server,
+                m.overall_score,
+                m.speed_rating,
+                m.resolved,
+                m.would_return,
+                m.comment,
+                m.created_at,
+                'first_responder' AS staff_role,
+                m.first_responder_user_id AS staff_user_id,
+                m.first_responder_user AS staff_name
+            FROM grafana_ticket_feedback m
+            WHERE m.first_responder_user_id IS NOT NULL AND m.first_responder_user_id != ''
         `);
     }
 

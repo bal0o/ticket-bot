@@ -24,6 +24,7 @@ const applications = require('../utils/applications');
 const perms = require('../utils/permissions');
 const bots = require('../utils/clients');
 const linking = require('../utils/linking');
+const feedback = require('../utils/feedback');
 
 // Initialize commands collection if it doesn't exist
 if (!Collection.prototype.commands) {
@@ -172,59 +173,21 @@ module.exports = async function (client, interaction) {
             return;
         }
         
-        if (interaction.customId === "feedbackModal") {
-            try { await interaction.deferReply(); } catch (e) { if (e && e.code !== 10062 && e.code !== 40060) func.handle_errors(e, client, `interactionCreate.js`, null); }
-
-            let feedbackChannel = bots.findCachedChannel(client, client.config.channel_ids.feedback_channel)
-
-            if (!feedbackChannel) {
-
-                func.handle_errors(null, client, `interactionCreate.js`, `The Feedback channel could not be found, please assign it in the configs. Canceling feedback report.`)
-                return interaction.editReply(lang.feedback_messages["feedback-error-no-channel"] != "" ? lang.feedback_messages["feedback-error-no-channel"] : "Thanks for your feedback, sadly our systems aren't working properly and it did not get saved. Please let a member of staff know!").catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})
-
-            }
-
-            const handlerRaw = require("../content/handler/options.json");
-            let ticketType = interaction.message.embeds[0].footer.text.split("|")[1].substring(1);
-
-            let validOption = ""
-            for (let options of Object.keys(handlerRaw.options)) {
-
-                if (options == ticketType) {
-                    validOption = handlerRaw.options[`${options}`] 
+        if (interaction.isButton() || interaction.isModalSubmit()) {
+            if (feedback.parseCsatId(interaction.customId)) {
+                try {
+                    const handled = await feedback.handleInteraction(client, interaction);
+                    if (handled) return;
+                } catch (e) {
+                    func.handle_errors(e, client, 'interactionCreate.js', 'CSAT feedback interaction failed');
+                    try {
+                        if (!interaction.replied && !interaction.deferred) {
+                            await interaction.reply({ content: 'Could not save feedback right now.', flags: MessageFlags.Ephemeral });
+                        }
+                    } catch (_) {}
+                    return;
                 }
-        }
-
-        const questionFilesystem = require(`../content/questions/${validOption.question_file}`);
-        if (!questionFilesystem) return func.handle_errors(null, client, `interactionCreate.js`, `There is a missing question file for ${ticketType}, have you changed the name or file directory recently?`)
-
-            let feedbackModalResponse = new EmbedBuilder()
-            .setTitle(`Ticket Feedback`)
-            .setDescription(`Feedback from: *${interaction.user.username} (${interaction.user.id})*`)
-            .setColor(client.config.bot_settings.main_color)
-            .setTimestamp()
-            .setFooter({text: client.user.username, iconURL: client.user.displayAvatarURL()})
-
-            for (let i = 0; i < interaction.components.length; i++) {
-                feedbackModalResponse.addFields({ name: `${questionFilesystem.feedback_questions[i]}`, value: `${interaction.components[i].components[0].value == "" ? "No response" : interaction.components[i].components[0].value}` });
             }
-
-            await interaction.editReply(questionFilesystem.successful_feedback_message == "" ? "Thanks for your feedback!" : questionFilesystem.successful_feedback_message)
-           
-            const feedbackRowDone = new ActionRowBuilder()
-            feedbackRowDone.addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`feedbackbutton`)
-                    .setLabel(`Feedback Sent!`)
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji("📋")
-                    .setDisabled(true),
-            );
-
-           await interaction.message.edit({embeds: [interaction.message.embeds[0]], components: [feedbackRowDone]})
-           
-           
-            return feedbackChannel.send({embeds: [feedbackModalResponse]}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
         }
 
         if (interaction.customId === 'closeTicketModal') {
@@ -475,32 +438,25 @@ module.exports = async function (client, interaction) {
                 .setColor(client.config.bot_settings.main_color)
                 .setFooter({text: client.user.username + ` | ` + ticketTypeCustomFinal, iconURL: client.user.displayAvatarURL()})
 
-                if (typeFile.allow_feedback == true) {
-
-                    const feedbackRow = new ActionRowBuilder()
-                    feedbackRow.addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`feedbackbutton`)
-                            .setLabel(lang.feedback_messages["ticket-feedback-button-title"] != "" ? lang.feedback_messages["ticket-feedback-button-title"] : "Send Ticket Feedback")
-                            .setStyle(ButtonStyle.Secondary)
-                            .setEmoji("📋"),
-                    );
-
-                    recepient.send({embeds: [response], components: [feedbackRow]}).catch(async (err) => {
+                recepient.send({embeds: [response]}).catch(async (err) => {
 
                         if (err.message === `Cannot send messages to this user`) {
                             func.handle_errors(null, client, `interactionCreate.js`, `I can not send the user a DM as their DMs are turned off. Channel: ${interaction.channel.name}(${interaction.channel.id}).`);
                         } else {func.handle_errors(err, client, `interactionCreate.js`, null)}
                     })
 
-                } else {
-
-                    recepient.send({embeds: [response]}).catch(async (err) => {
-
-                        if (err.message === `Cannot send messages to this user`) {
-                            func.handle_errors(null, client, `interactionCreate.js`, `I can not send the user a DM as their DMs are turned off. Channel: ${interaction.channel.name}(${interaction.channel.id}).`);
-                        } else {func.handle_errors(err, client, `interactionCreate.js`, null)}
-                    })
+                if (feedback.shouldOfferFeedback(typeFile, ticketTypeCustomFinal)) {
+                    try {
+                        const ticketNum = interaction.message.embeds[0].title.split('#')[1];
+                        await feedback.offerFeedback(client, {
+                            user: recepient,
+                            ticketId: String(ticketNum),
+                            ticketType: ticketTypeCustomFinal,
+                            typeFile,
+                        });
+                    } catch (e) {
+                        func.handle_errors(e, client, 'interactionCreate.js', 'Failed to offer CSAT after custom close');
+                    }
                 }
             } else {
                 await interaction.message.delete().catch(e => {func.handle_errors(e, client, `interactionCreate.js`, null)})

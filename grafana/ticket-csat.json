@@ -1,0 +1,196 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_MYSQL",
+      "label": "MySQL",
+      "description": "Ticket bot MySQL database",
+      "type": "datasource",
+      "pluginId": "mysql",
+      "pluginName": "MySQL"
+    }
+  ],
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": { "decimals": 2, "max": 5, "min": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(AVG(overall_score), 2) AS \"Avg CSAT\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "refId": "A"
+        }
+      ],
+      "title": "Average overall score",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"Responses\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "refId": "A"
+        }
+      ],
+      "title": "Feedback responses",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Resolved %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "refId": "A"
+        }
+      ],
+      "title": "Resolved (yes)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN would_return = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Would return %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "refId": "A"
+        }
+      ],
+      "title": "Would contact again",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": { "decimals": 2 }, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COALESCE(NULLIF(staff_name, ''), staff_user_id) AS staff,\n  staff_role,\n  COUNT(*) AS responses,\n  ROUND(AVG(overall_score), 2) AS avg_score,\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS resolved_rate,\n  ROUND(SUM(CASE WHEN speed_rating = 'fast' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS fast_rate\nFROM grafana_ticket_feedback_staff\nWHERE $__unixEpochFilter(created_at)\n  AND staff_role IN ($staff_role)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nGROUP BY staff_user_id, staff_name, staff_role\nORDER BY avg_score DESC, responses DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "CSAT by staff",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  $__timeGroup(FROM_UNIXTIME(created_at), $__interval) AS time,\n  ROUND(AVG(overall_score), 2) AS avg_score\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nGROUP BY 1\nORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "CSAT trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 15 },
+      "id": 7,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  FROM_UNIXTIME(created_at) AS submitted_at,\n  ticket_id,\n  ticket_type,\n  server,\n  overall_score,\n  speed_rating,\n  resolved,\n  would_return,\n  closer_user,\n  claimer_user,\n  first_responder_user,\n  LEFT(IFNULL(comment, ''), 200) AS comment\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nORDER BY created_at DESC\nLIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent feedback",
+      "type": "table"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["ticket-bot", "csat", "feedback"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+        "definition": "SELECT DISTINCT ticket_type FROM ticket_feedback WHERE ticket_type IS NOT NULL UNION SELECT 'none'",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "name": "ticket_type",
+        "query": "SELECT DISTINCT ticket_type FROM ticket_feedback WHERE ticket_type IS NOT NULL UNION SELECT 'none'",
+        "refresh": 2,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+        "definition": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM ticket_feedback",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "name": "server",
+        "query": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM ticket_feedback",
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "current": { "text": "All", "value": ["$__all"] },
+        "includeAll": true,
+        "allValue": "closer|claimer|first_responder",
+        "multi": true,
+        "name": "staff_role",
+        "options": [
+          { "text": "closer", "value": "closer" },
+          { "text": "claimer", "value": "claimer" },
+          { "text": "first_responder", "value": "first_responder" }
+        ],
+        "query": "closer,claimer,first_responder",
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "Ticket CSAT",
+  "uid": "ticket-csat",
+  "version": 1
+}

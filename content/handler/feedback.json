@@ -1,0 +1,58 @@
+{
+	"opt_in_prompt": "Your ticket is closed. Would you like to rate your support experience? It takes under a minute.",
+	"opt_in_yes_label": "Yes, I'll rate it",
+	"opt_in_no_label": "No thanks",
+	"thanks_decline": "No problem — thanks for contacting support.",
+	"thanks_complete": "Thanks for your feedback. It helps us improve.",
+	"already_submitted": "You've already sent feedback for this ticket. Thank you!",
+	"session_expired": "This feedback session expired. Thanks anyway!",
+	"session_ttl_hours": 24,
+	"comment_modal_title": "Optional comment",
+	"comment_modal_label": "Anything else? (optional)",
+	"comment_skip_label": "Skip",
+	"comment_add_label": "Add comment",
+	"questions": [
+		{
+			"id": "overall",
+			"prompt": "How would you rate your overall experience?",
+			"type": "scale",
+			"min": 1,
+			"max": 5
+		},
+		{
+			"id": "speed",
+			"prompt": "How fast was the first reply?",
+			"type": "choice",
+			"options": [
+				{ "value": "slow", "label": "Too slow" },
+				{ "value": "ok", "label": "OK" },
+				{ "value": "fast", "label": "Fast" }
+			]
+		},
+		{
+			"id": "resolved",
+			"prompt": "Was your issue resolved?",
+			"type": "choice",
+			"options": [
+				{ "value": "yes", "label": "Yes" },
+				{ "value": "partly", "label": "Partly" },
+				{ "value": "no", "label": "No" }
+			]
+		},
+		{
+			"id": "would_return",
+			"prompt": "Would you contact support again if you needed help?",
+			"type": "choice",
+			"options": [
+				{ "value": "yes", "label": "Yes" },
+				{ "value": "maybe", "label": "Maybe" },
+				{ "value": "no", "label": "No" }
+			]
+		},
+		{
+			"id": "comment",
+			"prompt": "Anything else to add? (optional)",
+			"type": "comment"
+		}
+	]
+}

@@ -1571,6 +1571,21 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
                 }
             }
         }
+
+        try {
+            const feedback = require('./feedback');
+            if (feedback.shouldOfferFeedback(typeFile, ticketType) && user) {
+                await feedback.offerFeedback(client, {
+                    user,
+                    ticketId: String(globalTicketNumber),
+                    ticketType,
+                    typeFile,
+                });
+            }
+        } catch (e) {
+            func.handle_errors(e, client, 'functions.js', 'Failed to offer CSAT feedback');
+        }
+
         await module.exports.updateTicketStatus(client);
 
         try {

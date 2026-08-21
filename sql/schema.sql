@@ -484,3 +484,31 @@ CREATE TABLE IF NOT EXISTS bot_counters (
     value BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ticket_feedback (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    ticket_type VARCHAR(100) NULL,
+    server VARCHAR(255) NULL,
+    overall_score TINYINT NULL,
+    speed_rating VARCHAR(32) NULL,
+    resolved VARCHAR(32) NULL,
+    would_return VARCHAR(32) NULL,
+    comment TEXT NULL,
+    closer_user_id VARCHAR(255) NULL,
+    closer_user VARCHAR(255) NULL,
+    claimer_user_id VARCHAR(255) NULL,
+    claimer_user VARCHAR(255) NULL,
+    first_responder_user_id VARCHAR(255) NULL,
+    first_responder_user VARCHAR(255) NULL,
+    answers_json JSON NULL,
+    created_at BIGINT NOT NULL,
+    UNIQUE KEY unique_ticket_user_feedback (ticket_id, user_id),
+    INDEX idx_feedback_created (created_at),
+    INDEX idx_feedback_type (ticket_type),
+    INDEX idx_feedback_overall (overall_score),
+    INDEX idx_feedback_closer (closer_user_id),
+    INDEX idx_feedback_claimer (claimer_user_id),
+    INDEX idx_feedback_first (first_responder_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
