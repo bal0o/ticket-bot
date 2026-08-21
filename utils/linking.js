@@ -2,7 +2,7 @@ const http = require('./http');
 
 async function findSteamIdByDiscord(client, discordId) {
 	const secret = client?.config?.tokens?.Linking_System_API_Key_Or_Secret;
-	const linkingSystem = client?.config?.linking_settings?.linkingSystem;
+	const linkingSystem = Number(client?.config?.linking_settings?.linkingSystem);
 	if (!secret || !linkingSystem) return null;
 
 	try {
@@ -11,10 +11,19 @@ async function findSteamIdByDiscord(client, discordId) {
 			if (!base) return null;
 			const res = await http.get(
 				`${base}/api.php?action=findByDiscord&id=${discordId}&secret=${secret}`,
-				{ timeout: 10000, json: false }
+				{ timeout: 10000, json: true }
 			);
-			const body = typeof res.data === 'string' ? res.data : String(res.data || '');
-			if (body && body.startsWith('7656119')) return body.trim();
+			let body = res.data;
+			if (typeof body === 'string') {
+				const trimmed = body.trim();
+				if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+					try { body = JSON.parse(trimmed); } catch (_) { body = trimmed.slice(1, -1); }
+				} else {
+					body = trimmed;
+				}
+			}
+			const steamId = body == null ? '' : String(body).trim();
+			if (steamId.startsWith('7656119')) return steamId;
 			return null;
 		}
 
