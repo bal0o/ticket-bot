@@ -205,7 +205,10 @@ module.exports = async function (client, interaction) {
                 let closed = false;
                 try {
                     const result = await Promise.race([
-                        (async () => { await func.closeTicket(client, channel, interaction.member, reason); return 'done'; })(),
+                        (async () => {
+                            const ok = await func.closeTicket(client, channel, interaction.member, reason);
+                            return ok ? 'done' : 'failed';
+                        })(),
                         new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))
                     ]);
                     closed = result === 'done';
@@ -213,7 +216,12 @@ module.exports = async function (client, interaction) {
                     func.handle_errors(e, client, 'interactionCreate.js', 'Error running closeTicket');
                 }
                 try {
-                    const payload = { content: closed ? 'Your ticket has been closed.' : 'Closing ticket... this may take a few seconds. You can dismiss this.', flags: MessageFlags.Ephemeral };
+                    const payload = {
+                        content: closed
+                            ? 'Your ticket has been closed.'
+                            : 'Could not finish closing this ticket. Check bot logs or try /close.',
+                        flags: MessageFlags.Ephemeral
+                    };
                     if (interaction.deferred || interaction.replied) {
                         await interaction.editReply(payload);
                     } else {
@@ -1089,15 +1097,27 @@ module.exports = async function (client, interaction) {
                 if (!interaction.message.channel.topic) return func.handle_errors(null, client, `interactionCreate.js`, `The description for the channel has been changed and I can not recognise who to send responses to anymore. Channel: ${interaction.channel.name}(${interaction.channel.id}).`)
 
                 const handlerRaw = require("../content/handler/options.json");
-                const ticketTypeClose = await func.resolveTicketTypeFromChannel(interaction.channel);
-                if (!ticketTypeClose) {
-                    return func.handle_errors(null, client, `interactionCreate.js`, `Can not resolve ticket type for channel ${interaction.channel.name}(${interaction.channel.id}).`);
+                const identityClose = await func.resolveTicketIdentity(interaction.channel);
+                const ticketTypeClose = identityClose.ticketType;
+                if (!identityClose.userId || !identityClose.ticketId) {
+                    return func.handle_errors(null, client, `interactionCreate.js`, `Can not resolve ticket identity for channel ${interaction.channel.name}(${interaction.channel.id}).`);
                 }
-                const foundClose = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase());
-                if (!foundClose) {
-                    return func.handle_errors(null, client, `interactionCreate.js`, `Unknown ticket type '${ticketTypeClose}' for channel ${interaction.channel.name}.`);
+                const foundClose = ticketTypeClose
+                    ? Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketTypeClose.toLowerCase())
+                    : null;
+                let typeFile = foundClose
+                    ? require(`../content/questions/${handlerRaw.options[foundClose].question_file}`)
+                    : null;
+                if (!typeFile) {
+                    const fallbackKey = Object.keys(handlerRaw.options || {}).find(k => k.toLowerCase() === 'general support')
+                        || Object.keys(handlerRaw.options || {})[0];
+                    if (fallbackKey) {
+                        typeFile = require(`../content/questions/${handlerRaw.options[fallbackKey].question_file}`);
+                    }
                 }
-                let typeFile = require(`../content/questions/${handlerRaw.options[foundClose].question_file}`);
+                if (!typeFile) {
+                    return func.handle_errors(null, client, `interactionCreate.js`, `No ticket type config available to close ${interaction.channel.name}(${interaction.channel.id}).`);
+                }
                 let accessRoleIDs = typeFile["access-role-id"] || [];
                 let accepted = 0;
                 for (let role of accessRoleIDs) {

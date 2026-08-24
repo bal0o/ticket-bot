@@ -1400,32 +1400,40 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
     try {
         const staffBot = bots.staffClient(client);
         if (!channel || !channel.guild || !staffBot.channels.cache.has(channel.id)) {
-            return;
+            return false;
         }
 
         const identity = await module.exports.resolveTicketIdentity(channel);
         const DiscordID = identity.userId;
         const globalTicketNumber = identity.ticketId;
-        const ticketType = identity.ticketType;
-        if (!DiscordID || !globalTicketNumber || !ticketType) {
-            module.exports.handle_errors(
-                null,
-                client,
-                'functions.js',
-                `closeTicket missing identity for ${channel.name}(${channel.id}): user=${DiscordID} ticket=${globalTicketNumber} type=${ticketType}`
+        let ticketType = identity.ticketType;
+        if (!DiscordID || !globalTicketNumber) {
+            console.warn(
+                `[closeTicket] missing identity for ${channel.name}(${channel.id}): user=${DiscordID} ticket=${globalTicketNumber} type=${ticketType}`
             );
-            return;
+            return false;
         }
 
         const user = await bots.fetchDmUser(client, DiscordID);
         const handlerRaw = require("../content/handler/options.json");
-        const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketType.toLowerCase());
+        let found = ticketType
+            ? Object.keys(handlerRaw.options || {}).find(x => x.toLowerCase() == String(ticketType).toLowerCase())
+            : null;
         if (!found) {
-            module.exports.handle_errors(null, client, 'functions.js', `closeTicket unknown ticket type '${ticketType}' for ${channel.name}`);
-            return;
+            found = Object.keys(handlerRaw.options || {}).find(k => k.toLowerCase() === 'general support')
+                || Object.keys(handlerRaw.options || {})[0]
+                || null;
+            console.warn(
+                `[closeTicket] type '${ticketType || 'null'}' not in options for ${channel.name}; using '${found}'`
+            );
+        }
+        if (!found) {
+            console.warn(`[closeTicket] no ticket types configured; cannot close ${channel.name}`);
+            return false;
         }
         const typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-        if (!typeFile) return;
+        if (!typeFile) return false;
+        ticketType = ticketType || found;
 
         const transcriptChannel = typeFile[`transcript-channel`];
         const logs_channel = channel.guild.channels.cache.find(x => x.id === transcriptChannel);
@@ -1623,8 +1631,10 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
         } catch (e) {
             module.exports.handle_errors(e, client, "functions.js", `Error scheduling delete for ticket channel ${channel.id}`);
         }
+        return true;
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
+        return false;
     }
 };
 
@@ -1650,18 +1660,7 @@ module.exports.normalizeTicketType = function(ticketType) {
     return found || ticketType;
 };
 
-module.exports.resolveTicketTypeFromChannel = async function(channel) {
-    const ownerId = channel?.topic;
-    const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
-    if (ownerId && ticketNum && typeof db.query === 'function') {
-        try {
-            const [rows] = await db.query(
-                'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
-                [String(ownerId), String(ticketNum)]
-            );
-            if (rows?.[0]?.ticket_type) return module.exports.normalizeTicketType(rows[0].ticket_type);
-        } catch (_) {}
-    }
+function resolveTicketTypeFromChannelName(channel) {
     try {
         const handlerRaw = require('../content/handler/options.json');
         const name = String(channel?.name || '').toLowerCase();
@@ -1672,23 +1671,58 @@ module.exports.resolveTicketTypeFromChannel = async function(channel) {
         }
     } catch (_) {}
     return null;
-};
+}
+
+async function queryTicketRow(sql, params) {
+    if (typeof db.query !== 'function') return null;
+    try {
+        const [rows] = await db.query(sql, params);
+        return rows?.[0] || null;
+    } catch (_) {
+        return null;
+    }
+}
 
 module.exports.resolveTicketIdentity = async function(channel) {
-    const userId = channel?.topic && /^\d{17,19}$/.test(channel.topic) ? String(channel.topic) : null;
-    const ticketId = module.exports.parseTicketNumberFromChannelName(channel?.name);
-    const ticketType = await module.exports.resolveTicketTypeFromChannel(channel);
+    let userId = channel?.topic && /^\d{17,19}$/.test(channel.topic) ? String(channel.topic) : null;
+    let ticketId = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    let ticketType = null;
     let createdAt = null;
-    if (userId && ticketId && typeof db.query === 'function') {
-        try {
-            const [rows] = await db.query(
-                'SELECT created_at, ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
-                [userId, String(ticketId)]
-            );
-            if (rows?.[0]?.created_at) createdAt = Number(rows[0].created_at) || null;
-        } catch (_) {}
+
+    let row = null;
+    if (userId && ticketId) {
+        row = await queryTicketRow(
+            'SELECT user_id, ticket_id, ticket_type, created_at FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+            [userId, String(ticketId)]
+        );
     }
+    if (!row?.ticket_type && ticketId) {
+        row = await queryTicketRow(
+            'SELECT user_id, ticket_id, ticket_type, created_at FROM tickets WHERE ticket_id = ? ORDER BY id DESC LIMIT 1',
+            [String(ticketId)]
+        );
+    }
+    if (!row?.ticket_type && channel?.id) {
+        row = await queryTicketRow(
+            'SELECT user_id, ticket_id, ticket_type, created_at FROM tickets WHERE channel_id = ? ORDER BY id DESC LIMIT 1',
+            [String(channel.id)]
+        );
+    }
+    if (row) {
+        if (!userId && row.user_id) userId = String(row.user_id);
+        if (!ticketId && row.ticket_id) ticketId = String(row.ticket_id);
+        if (row.ticket_type) ticketType = module.exports.normalizeTicketType(row.ticket_type);
+        if (row.created_at) createdAt = Number(row.created_at) || null;
+    }
+
+    if (!ticketType) ticketType = resolveTicketTypeFromChannelName(channel);
+
     return { userId, ticketId, ticketType, createdAt };
+};
+
+module.exports.resolveTicketTypeFromChannel = async function(channel) {
+    const identity = await module.exports.resolveTicketIdentity(channel);
+    return identity.ticketType || null;
 };
 
 module.exports.getExtraParticipantUserIds = async function(ticketId, ownerId) {
