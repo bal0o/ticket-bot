@@ -915,7 +915,7 @@ try {
 // For public tickets, DM the user with the ticket name/number
 try {
     if (!questionFile.internal) {
-        await module.exports.sendDMWithRetry(recepientMember, `Your ticket has been created. Reply in this DM to continue the conversation with staff.`);
+        await module.exports.sendDMWithRetry(recepientMember, `Your ticket #${formattedTicketNumber} has been created. Reply in this DM to continue the conversation with staff.`);
     }
 } catch (e) {}
 
