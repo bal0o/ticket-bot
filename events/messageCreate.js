@@ -1,4 +1,5 @@
-const config = require("../config/config.json");
+const { loadJson } = require("../utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const {
     EmbedBuilder,
     ActionRowBuilder,
@@ -11,7 +12,7 @@ const func = require("../utils/functions.js");
 const logger = require("../utils/logger");
 const { createDB } = require('../utils/mysql');
 const db = createDB();
-const lang = require("../content/handler/lang.json");
+const lang = loadJson("content/handler/lang.json", {});
 const bots = require("../utils/clients");
 
 // Track users who are in the ticket selection process

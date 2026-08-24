@@ -9,8 +9,9 @@ const discordApi = require('../utils/discordApi');
 const http = require('../utils/http');
 const { createAuth } = require('./auth');
 
-const config = require('../config/config.json');
-const handlerOptions = require('../content/handler/options.json');
+const { loadJson } = require('../utils/jsonConfig');
+const config = loadJson('config/config.json', {});
+const handlerOptions = loadJson('content/handler/options.json', { options: {} });
 const applications = require('../utils/applications');
 
 // --- Config ---

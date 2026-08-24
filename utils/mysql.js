@@ -1,13 +1,7 @@
 const mysql = require('mysql2/promise');
 const { ensureRuntimeTables, runtimeGet, runtimeSet, runtimeDelete } = require('./runtime_store');
-let config = null;
-
-try {
-    config = require('../config/config.json');
-} catch (e) {
-    console.warn('[mysql] Config not found, using defaults');
-    config = {};
-}
+const { loadJson } = require('./jsonConfig');
+const config = loadJson('config/config.json', {});
 
 // Maintain a singleton connection pool
 let __pool = null;

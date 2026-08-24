@@ -1,5 +1,6 @@
 // Environment variables are now loaded from config.json
-const config = require("./config/config.json");
+const { loadJson } = require("./utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const bots = require("./utils/clients");
 const isDebugEnabled = !!config.debug;
 const debugLog = (...args) => { if (isDebugEnabled) console.log(...args); };

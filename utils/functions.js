@@ -3,24 +3,21 @@ const { createDB } = require('./mysql')
 const db = createDB();
 const bots = require("./clients");
 const func = require("./functions.js")
-const lang = require("../content/handler/lang.json");
+const { loadJson } = require('./jsonConfig');
+const lang = loadJson('content/handler/lang.json', {});
 const path = require("path");
 const fs = require("fs");
 const applications = require('./applications');
 const perms = require('./permissions');
 const linking = require('./linking');
-let messageid = { messageId: "", internalMessageId: "" };
+let messageid = loadJson('config/messageid.json', { messageId: "", internalMessageId: "" });
+if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
+if (messageid.messageId === undefined) messageid.messageId = "";
+if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
 try {
-    messageid = require("../config/messageid.json");
-    if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
-    if (messageid.messageId === undefined) messageid.messageId = "";
-    if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
-} catch (_) {
-    try {
-        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
-        fs.writeFileSync(msgPath, JSON.stringify(messageid));
-    } catch (__) {}
-}
+    const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+    if (!fs.existsSync(msgPath)) fs.writeFileSync(msgPath, JSON.stringify(messageid));
+} catch (_) {}
 
 /**
  * Check if a ticket type is internal by looking up the question file
@@ -30,20 +27,20 @@ try {
 module.exports.isTicketTypeInternal = function(ticketType) {
     try {
         if (!ticketType) return false;
-        const handlerRaw = require("../content/handler/options.json");
+        const handlerRaw = loadJson("content/handler/options.json", { options: {} });
         
         // Normalize the input: convert to lowercase and replace hyphens/spaces with a common separator
         const normalizedInput = ticketType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         
         // Try to find a match by normalizing both the input and the option keys
-        const found = Object.keys(handlerRaw.options).find(optionKey => {
+        const found = Object.keys(handlerRaw.options || {}).find(optionKey => {
             const normalizedKey = optionKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
             return normalizedKey === normalizedInput || optionKey.toLowerCase() === ticketType.toLowerCase();
         });
         
         if (!found) return false;
-        const questionFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-        return !!questionFile.internal;
+        const questionFile = loadJson(`content/questions/${handlerRaw.options[found].question_file}`, null);
+        return !!(questionFile && questionFile.internal);
     } catch (_) {
         return false;
     }

@@ -1,11 +1,8 @@
 const path = require('path');
+const { loadJson } = require('./jsonConfig');
 
 function loadHandlerOptions() {
-	try {
-		return require('../content/handler/options.json');
-	} catch (_) {
-		return { options: {} };
-	}
+	return loadJson('content/handler/options.json', { options: {} });
 }
 
 function getQuestionFileForType(ticketType) {
@@ -15,11 +12,7 @@ function getQuestionFileForType(ticketType) {
 	if (!key) return null;
 	const file = handlerOptions.options[key]?.question_file;
 	if (!file) return null;
-	try {
-		return require(path.join('..', 'content', 'questions', file));
-	} catch (_) {
-		return null;
-	}
+	return loadJson(path.join('content', 'questions', file), null);
 }
 
 function getAccessRolesForTicketType(ticketType, config) {

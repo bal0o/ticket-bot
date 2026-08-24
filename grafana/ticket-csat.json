@@ -27,7 +27,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(AVG(overall_score), 2) AS \"Avg CSAT\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "rawSql": "SELECT ROUND(AVG(overall_score), 2) AS \"Avg CSAT\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )",
           "refId": "A"
         }
       ],
@@ -45,7 +45,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"Responses\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "rawSql": "SELECT COUNT(*) AS \"Responses\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )",
           "refId": "A"
         }
       ],
@@ -63,7 +63,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Resolved %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Resolved %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )",
           "refId": "A"
         }
       ],
@@ -81,7 +81,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN would_return = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Would return %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)",
+          "rawSql": "SELECT\n  ROUND(SUM(CASE WHEN would_return = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 3) AS \"Would return %\"\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )",
           "refId": "A"
         }
       ],
@@ -99,7 +99,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  COALESCE(NULLIF(staff_name, ''), staff_user_id) AS staff,\n  staff_role,\n  COUNT(*) AS responses,\n  ROUND(AVG(overall_score), 2) AS avg_score,\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS resolved_rate,\n  ROUND(SUM(CASE WHEN speed_rating = 'fast' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS fast_rate\nFROM grafana_ticket_feedback_staff\nWHERE $__unixEpochFilter(created_at)\n  AND staff_role IN ($staff_role)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nGROUP BY staff_user_id, staff_name, staff_role\nORDER BY avg_score DESC, responses DESC",
+          "rawSql": "SELECT\n  COALESCE(NULLIF(MAX(staff_name), ''), staff_user_id) AS staff,\n  COUNT(DISTINCT feedback_id) AS responses,\n  ROUND(AVG(overall_score), 2) AS avg_score,\n  ROUND(SUM(CASE WHEN resolved = 'yes' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS resolved_rate,\n  ROUND(SUM(CASE WHEN speed_rating = 'fast' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS fast_rate\nFROM (\n  SELECT DISTINCT\n    feedback_id,\n    staff_user_id,\n    staff_name,\n    overall_score,\n    speed_rating,\n    resolved,\n    would_return,\n    created_at,\n    ticket_type,\n    server\n  FROM grafana_ticket_feedback_staff\n) s\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND staff_user_id IN ($staff)\nGROUP BY staff_user_id\nORDER BY avg_score DESC, responses DESC",
           "refId": "A"
         }
       ],
@@ -117,7 +117,7 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  $__timeGroup(FROM_UNIXTIME(created_at), $__interval) AS time,\n  ROUND(AVG(overall_score), 2) AS avg_score\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nGROUP BY 1\nORDER BY 1",
+          "rawSql": "SELECT\n  $__unixEpochGroupAlias(created_at, $__interval),\n  ROUND(AVG(overall_score), 2) AS avg_score\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND overall_score IS NOT NULL\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )\nGROUP BY 1\nORDER BY 1",
           "refId": "A"
         }
       ],
@@ -135,11 +135,29 @@
           "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  FROM_UNIXTIME(created_at) AS submitted_at,\n  ticket_id,\n  ticket_type,\n  server,\n  overall_score,\n  speed_rating,\n  resolved,\n  would_return,\n  closer_user,\n  claimer_user,\n  first_responder_user,\n  LEFT(IFNULL(comment, ''), 200) AS comment\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND IFNULL(ticket_type, 'none') IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\nORDER BY created_at DESC\nLIMIT 200",
+          "rawSql": "SELECT\n  FROM_UNIXTIME(created_at) AS submitted_at,\n  ticket_id,\n  ticket_type,\n  server,\n  overall_score,\n  speed_rating,\n  resolved,\n  would_return,\n  closer_user,\n  claimer_user,\n  first_responder_user\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )\nORDER BY created_at DESC\nLIMIT 200",
           "refId": "A"
         }
       ],
       "title": "Recent feedback",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 25 },
+      "id": 8,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  FROM_UNIXTIME(created_at) AS submitted_at,\n  ticket_id,\n  ticket_type,\n  server,\n  overall_score,\n  closer_user,\n  claimer_user,\n  first_responder_user,\n  comment\nFROM grafana_ticket_feedback\nWHERE $__unixEpochFilter(created_at)\n  AND comment IS NOT NULL\n  AND TRIM(comment) != ''\n  AND ticket_type IN ($ticket_type)\n  AND IFNULL(server, 'none') IN ($server)\n  AND (\n    closer_user_id IN ($staff)\n    OR claimer_user_id IN ($staff)\n    OR first_responder_user_id IN ($staff)\n  )\nORDER BY created_at DESC\nLIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Free-text comments",
       "type": "table"
     }
   ],
@@ -150,47 +168,69 @@
     "list": [
       {
         "current": {},
-        "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
-        "definition": "SELECT DISTINCT ticket_type FROM ticket_feedback WHERE ticket_type IS NOT NULL UNION SELECT 'none'",
-        "includeAll": true,
-        "allValue": ".+",
-        "multi": true,
-        "name": "ticket_type",
-        "query": "SELECT DISTINCT ticket_type FROM ticket_feedback WHERE ticket_type IS NOT NULL UNION SELECT 'none'",
-        "refresh": 2,
+        "hide": 0,
+        "includeAll": false,
+        "label": "MySQL",
+        "name": "DS_MYSQL",
+        "options": [],
+        "query": "mysql",
+        "refresh": 1,
         "regex": "",
-        "type": "query"
+        "type": "datasource"
       },
       {
+        "allValue": null,
         "current": {},
         "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
-        "definition": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM ticket_feedback",
+        "definition": "SELECT staff_name AS __text, staff_user_id AS __value FROM grafana_ticket_feedback_staff WHERE staff_user_id IS NOT NULL GROUP BY staff_user_id, staff_name ORDER BY staff_name",
+        "hide": 0,
         "includeAll": true,
-        "allValue": ".+",
+        "label": "Staff",
         "multi": true,
-        "name": "server",
-        "query": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM ticket_feedback",
+        "name": "staff",
+        "options": [],
+        "query": "SELECT staff_name AS __text, staff_user_id AS __value FROM grafana_ticket_feedback_staff WHERE staff_user_id IS NOT NULL GROUP BY staff_user_id, staff_name ORDER BY staff_name",
         "refresh": 2,
+        "regex": "",
+        "sort": 1,
         "type": "query"
       },
       {
-        "current": { "text": "All", "value": ["$__all"] },
+        "allValue": null,
+        "current": {},
+        "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+        "definition": "SELECT DISTINCT ticket_type FROM grafana_ticket_feedback WHERE ticket_type IS NOT NULL ORDER BY ticket_type",
+        "hide": 0,
         "includeAll": true,
-        "allValue": "closer|claimer|first_responder",
+        "label": "Ticket type",
         "multi": true,
-        "name": "staff_role",
-        "options": [
-          { "text": "closer", "value": "closer" },
-          { "text": "claimer", "value": "claimer" },
-          { "text": "first_responder", "value": "first_responder" }
-        ],
-        "query": "closer,claimer,first_responder",
-        "type": "custom"
+        "name": "ticket_type",
+        "options": [],
+        "query": "SELECT DISTINCT ticket_type FROM grafana_ticket_feedback WHERE ticket_type IS NOT NULL ORDER BY ticket_type",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": null,
+        "current": {},
+        "datasource": { "type": "mysql", "uid": "${DS_MYSQL}" },
+        "definition": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM grafana_ticket_feedback ORDER BY 1",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Server",
+        "multi": true,
+        "name": "server",
+        "options": [],
+        "query": "SELECT DISTINCT IFNULL(server, 'none') AS server FROM grafana_ticket_feedback ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
   "time": { "from": "now-30d", "to": "now" },
   "title": "Ticket CSAT",
   "uid": "ticket-csat",
-  "version": 1
+  "version": 3
 }

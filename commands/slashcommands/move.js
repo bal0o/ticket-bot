@@ -3,17 +3,22 @@ const func = require('../../utils/functions.js');
 const bots = require('../../utils/clients');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
-const handlerRaw = require('../../content/handler/options.json');
+const { loadJson } = require('../../utils/jsonConfig');
+const handlerRaw = loadJson('content/handler/options.json', { options: {} });
+const moveTypeChoices = Object.keys(handlerRaw.options || {}).slice(0, 25).map(type => ({ name: type, value: type }));
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('move')
         .setDescription('Move this ticket to a different ticket type/category.')
-        .addStringOption(option =>
-            option.setName('ticket_type')
+        .addStringOption(option => {
+            option
+                .setName('ticket_type')
                 .setDescription('The ticket type to move this ticket to')
-                .setRequired(true)
-                .addChoices(...Object.keys(handlerRaw.options).map(type => ({ name: type, value: type })))),
+                .setRequired(true);
+            if (moveTypeChoices.length) option.addChoices(...moveTypeChoices);
+            return option;
+        }),
     async execute(interaction, client) {
         await interaction.deferReply({ flags: func.EPHEMERAL });
         const channel = interaction.channel;

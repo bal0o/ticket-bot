@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
 const bots = require('../../utils/clients');
-const responses = require('../../content/response.json');
+const { loadJson } = require('../../utils/jsonConfig');
+const responses = loadJson('content/response.json', {});
 
 // Format category name for display
 function formatCategoryName(category) {

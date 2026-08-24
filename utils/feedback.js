@@ -10,14 +10,29 @@ const {
 } = require('discord.js');
 const { createDB } = require('./mysql');
 const func = require('./functions');
+const { loadJson } = require('./jsonConfig');
 
 const db = createDB();
-const feedbackConfig = require('../content/handler/feedback.json');
+const DEFAULT_FEEDBACK = {
+	opt_in_prompt: 'Your ticket is closed. Would you like to rate your support experience?',
+	opt_in_yes_label: 'Yes, I\'ll rate it',
+	opt_in_no_label: 'No thanks',
+	thanks_decline: 'No problem — thanks for contacting support.',
+	thanks_complete: 'Thanks for your feedback. It helps us improve.',
+	already_submitted: 'You\'ve already sent feedback for this ticket. Thank you!',
+	session_expired: 'This feedback session expired. Thanks anyway!',
+	session_ttl_hours: 24,
+	comment_modal_title: 'Optional comment',
+	comment_modal_label: 'Anything else? (optional)',
+	comment_skip_label: 'Skip',
+	comment_add_label: 'Add comment',
+	questions: [],
+};
 
 const sessions = new Map();
 
 function loadConfig() {
-	return feedbackConfig;
+	return loadJson('content/handler/feedback.json', DEFAULT_FEEDBACK);
 }
 
 function sessionKey(userId, ticketId) {
@@ -125,11 +140,34 @@ function buildQuestionComponents(ticketId, question) {
 	return rows;
 }
 
-function buildQuestionEmbed(client, question, ticketMeta, step, total) {
+function staffUserIds(staff) {
+	if (!staff) return [];
+	return [
+		staff.close_user_id,
+		staff.claimed_by_user_id,
+		staff.first_staff_response_user_id,
+	].filter(Boolean).map(String);
+}
+
+function feedbackAffectsBrit(staff, cfg = loadConfig()) {
+	const britId = String(cfg.brit_user_id || '');
+	if (!britId) return false;
+	return staffUserIds(staff).includes(britId);
+}
+
+function questionDescription(question, staff, cfg = loadConfig()) {
+	const prompt = question.prompt || '';
+	if (question.id !== 'overall' || !feedbackAffectsBrit(staff, cfg)) return prompt;
+	const joke = cfg.brit_rating_joke;
+	if (!joke) return prompt;
+	return `${prompt}\n\n${joke}`;
+}
+
+function buildQuestionEmbed(client, question, ticketMeta, step, total, staff, cfg = loadConfig()) {
 	return new EmbedBuilder()
 		.setColor(client.config?.bot_settings?.main_color || 0x208cdd)
 		.setTitle(`Feedback (${step}/${total})`)
-		.setDescription(question.prompt || '')
+		.setDescription(questionDescription(question, staff, cfg))
 		.setFooter({
 			text: `${ticketMeta.ticketType || 'ticket'} #${ticketMeta.ticketId}`,
 		});
@@ -221,6 +259,8 @@ function shouldOfferFeedback(typeFile, ticketType) {
 	if (!typeFile || typeFile.allow_feedback !== true) return false;
 	if (typeFile.internal) return false;
 	if (func.isTicketTypeInternal(ticketType)) return false;
+	const questions = loadConfig().questions;
+	if (!Array.isArray(questions) || questions.length === 0) return false;
 	return true;
 }
 
@@ -252,11 +292,19 @@ async function startQuestionFlow(interaction, ticketId, ticketMeta) {
 		answers: {},
 		ticketType: ticketMeta.ticketType || null,
 		server: ticketMeta.server || null,
+		staff: ticketMeta.staff || {},
 		startedAt: Date.now(),
 	});
 
 	const q = questions[0];
-	const embed = buildQuestionEmbed(clientFrom(interaction), q, { ticketId, ticketType: ticketMeta.ticketType }, 1, questions.length);
+	const embed = buildQuestionEmbed(
+		clientFrom(interaction),
+		q,
+		{ ticketId, ticketType: ticketMeta.ticketType },
+		1,
+		questions.length,
+		ticketMeta.staff
+	);
 	await interaction.update({
 		embeds: [embed],
 		components: buildQuestionComponents(ticketId, q),
@@ -323,7 +371,8 @@ async function advanceOrFinish(interaction, ticketId, session) {
 		q,
 		{ ticketId, ticketType: session.ticketType },
 		session.index + 1,
-		questions.length
+		questions.length,
+		session.staff
 	);
 	await replySessionMessage(interaction, {
 		embeds: [embed],
@@ -382,6 +431,7 @@ async function handleInteraction(client, interaction) {
 		await startQuestionFlow(interaction, ticketId, {
 			ticketType: staff.ticket_type || null,
 			server: staff.server || null,
+			staff,
 		});
 		return true;
 	}

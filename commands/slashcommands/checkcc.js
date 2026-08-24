@@ -1,5 +1,6 @@
 const { EmbedBuilder, AttachmentBuilder, SlashCommandBuilder } = require("discord.js");
-const config = require("../../config/config.json");
+const { loadJson } = require("../../utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const func = require("../../utils/functions.js");
 const linking = require("../../utils/linking");
 

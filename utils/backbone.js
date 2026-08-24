@@ -2,7 +2,8 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelect
 const { writeFileSync, existsSync, mkdirSync, unlinkSync } = require("fs");
 const func = require("./functions.js")
 const logger = require('./logger');
-const lang = require("../content/handler/lang.json");
+const { loadJson } = require('./jsonConfig');
+const lang = loadJson('content/handler/lang.json', {});
 const { createDB } = require('./mysql');
 const db = createDB();
 const bots = require("./clients");

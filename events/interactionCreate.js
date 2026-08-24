@@ -1,5 +1,6 @@
 // Environment variables are now loaded from config.json
-const config = require("../config/config.json");
+const { loadJson } = require("../utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const { readdirSync } = require("fs");
 const {
     Collection,
@@ -16,7 +17,7 @@ const {
     MessageFlags
 } = require("discord.js");
 const func = require("../utils/functions.js");
-const lang = require("../content/handler/lang.json");
+const lang = loadJson("content/handler/lang.json", {});
 const { createDB } = require('../utils/mysql')
 const db = createDB();
 const logger = require('../utils/logger');

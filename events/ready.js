@@ -1,18 +1,15 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, DiscordAPIError } = require("discord.js");
 const path = require("path");
-let messageId = { messageId: "", internalMessageId: "" };
-try {
-    messageId = require("../config/messageid.json");
-    if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
-    if (messageId.messageId === undefined) messageId.messageId = "";
-    if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
-} catch (_) {
-    try {
-        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
-        fs.writeFileSync(msgPath, JSON.stringify(messageId));
-    } catch (__) {}
-}
 const fs = require("fs");
+const { loadJson } = require("../utils/jsonConfig");
+let messageId = loadJson("config/messageid.json", { messageId: "", internalMessageId: "" });
+if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
+if (messageId.messageId === undefined) messageId.messageId = "";
+if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
+try {
+    const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+    if (!fs.existsSync(msgPath)) fs.writeFileSync(msgPath, JSON.stringify(messageId));
+} catch (_) {}
 const func = require("../utils/functions.js");
 const bots = require("../utils/clients");
 const { createDB } = require('../utils/mysql')
