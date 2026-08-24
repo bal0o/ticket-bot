@@ -1,54 +1,22 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, DiscordAPIError } = require("discord.js");
 const path = require("path");
-let messageId = { messageId: "", internalMessageId: "" };
-try {
-    messageId = require("../config/messageid.json");
-    if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
-    if (messageId.messageId === undefined) messageId.messageId = "";
-    if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
-} catch (_) {
-    try {
-        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
-        fs.writeFileSync(msgPath, JSON.stringify(messageId));
-    } catch (__) {}
-}
 const fs = require("fs");
+const { loadJson } = require("../utils/jsonConfig");
+let messageId = loadJson("config/messageid.json", { messageId: "", internalMessageId: "" });
+if (typeof messageId !== 'object' || messageId === null) messageId = { messageId: "", internalMessageId: "" };
+if (messageId.messageId === undefined) messageId.messageId = "";
+if (messageId.internalMessageId === undefined) messageId.internalMessageId = "";
+try {
+    const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+    if (!fs.existsSync(msgPath)) fs.writeFileSync(msgPath, JSON.stringify(messageId));
+} catch (_) {}
 const func = require("../utils/functions.js");
+const bots = require("../utils/clients");
 const { createDB } = require('../utils/mysql')
 
-const presenceMonitor = require('../utils/presenceMonitor');
-
 module.exports = async function (client, message) {
-    presenceMonitor.init(client);
-
-    // Initialize the ticket status
-    await func.updateTicketStatus(client);
-    
-    // Remove startup delay; proceed immediately
-    
-    // Warm the member cache for the staff guild so role membership is accurate
-    try {
-        const staffGuildId = client.config?.channel_ids?.staff_guild_id;
-        if (staffGuildId) {
-            const staffGuild = client.guilds.cache.get(staffGuildId);
-            if (staffGuild) {
-                console.log('[Ready] Fetching staff guild members to warm cache...');
-                await staffGuild.members.fetch();
-                console.log(`[Ready] Fetched ${staffGuild.members.cache.size} members in staff guild`);
-            } else {
-                console.log('[Ready] Staff guild not found in cache; skipping member fetch');
-            }
-        } else {
-            console.log('[Ready] No staff guild configured; skipping member fetch');
-        }
-    } catch (e) {
-        console.error('[Ready] Failed to fetch staff guild members:', e);
-    }
-
-    try {
-        await presenceMonitor.restoreOpenTickets(client);
-    } catch (e) {
-        console.error('[Ready] Failed to restore presence monitors:', e);
+    if (client.botRole === 'staff') {
+        await func.updateTicketStatus(client);
     }
 
     const db = createDB();
@@ -66,10 +34,15 @@ module.exports = async function (client, message) {
     }
 
     // See if the Embed for creating tickets is available and if its not, make one.
+    if (client.botRole === 'public') {
     let buttonEmbed = undefined
-    let postChannel = client.channels.cache.find(x => x.id == client.config.channel_ids.post_embed_channel_id)
+    let postChannel = await bots.fetchGuildChannel(
+        client,
+        client.config.channel_ids.public_guild_id,
+        client.config.channel_ids.post_embed_channel_id
+    )
     if (!postChannel) {
-        func.handle_errors(null, client, `ready.js`, `Could not find the 'post_embed_channel_id' for ticket creation, please make sure it is defined in your config and the bot is in the correct discord server.`)
+        func.handle_errors(null, client, `ready.js`, `Public bot cannot see 'post_embed_channel_id' in the public guild. Check the channel ID and that the public bot has View Channel there.`)
     } else {
         buttonEmbed = await postChannel.messages.fetch(messageId.messageId).catch((e) => {
             if (e.code === 10008) return;
@@ -176,7 +149,9 @@ module.exports = async function (client, message) {
             });
             }
     }
+    }
 
+    if (client.botRole !== 'staff') return;
 
     // Keeps your "open-appeals" channel clear of unwanted messages.
     const deleteMessagesInTicketEmbedChannel = () => {
@@ -196,7 +171,7 @@ module.exports = async function (client, message) {
             TicketTypeChannel.messages.fetch({limit: 100})
                 .then(fetched => {
                     const notPinned = fetched.filter(fetchedMsg => !fetchedMsg.pinned);
-                    const notBot = notPinned.filter(fetchedMsg => fetchedMsg.author.id != client.user.id);
+                    const notBot = notPinned.filter(fetchedMsg => !bots.isOurBotId(client, fetchedMsg.author.id));
                     TicketTypeChannel.bulkDelete(notBot, true).catch(error => {
                         // If the message is deleted, the Discord API will return an unknown message error
                         if (error instanceof DiscordAPIError && error.code === 10008) return;

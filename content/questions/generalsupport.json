@@ -59,13 +59,5 @@
             "enabled": true
         }
     },
-    "feedback_questions": [
-        "How was your experience with our support team?",
-        "Was the response time satisfactory?",
-        "How would you rate your experience out of 5?",
-        "Would you recommend our support system to others?",
-        "Do you have any suggestions for improving our support process?"
-    ],
-    "successful_feedback_message": "Thank you for your feedback! Your input helps us improve our support system for everyone.",
     "send_close_dm": true
 }

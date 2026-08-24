@@ -1,22 +1,26 @@
-const { SlashCommandBuilder } = require('@discordjs/builders');
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
-const perms = require('../../utils/permissions.js');
+const bots = require('../../utils/clients');
 const { createDB } = require('../../utils/mysql');
 const db = createDB();
-const handlerRaw = require('../../content/handler/options.json');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType } = require('discord.js');
+const { loadJson } = require('../../utils/jsonConfig');
+const handlerRaw = loadJson('content/handler/options.json', { options: {} });
+const moveTypeChoices = Object.keys(handlerRaw.options || {}).slice(0, 25).map(type => ({ name: type, value: type }));
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('move')
         .setDescription('Move this ticket to a different ticket type/category.')
-        .addStringOption(option =>
-            option.setName('ticket_type')
+        .addStringOption(option => {
+            option
+                .setName('ticket_type')
                 .setDescription('The ticket type to move this ticket to')
-                .setRequired(true)
-                .addChoices(...Object.keys(handlerRaw.options).map(type => ({ name: type, value: type })))),
+                .setRequired(true);
+            if (moveTypeChoices.length) option.addChoices(...moveTypeChoices);
+            return option;
+        }),
     async execute(interaction, client) {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: func.EPHEMERAL });
         const channel = interaction.channel;
         if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) {
             return interaction.editReply('This is not a valid ticket channel.');
@@ -70,49 +74,36 @@ module.exports = {
             await channel.setParent(categoryId, { lockPermissions: true });
             await channel.setName(newChannelName);
             // Rebuild permission overwrites based on new ticket type
-            const overwrites = perms.buildPermissionOverwritesForTicketType({
-                client,
-                guild: channel.guild,
-                ticketType,
-                userId: channel.topic,
-            });
-            if (Array.isArray(overwrites) && overwrites.length > 0) {
-                await channel.permissionOverwrites.set(overwrites);
-            }
+            await func.applyTicketTypeOverwrites(client, channel, ticketType, channel.topic);
         } catch (error) {
             renameSucceeded = false;
             func.handle_errors(error, client, 'move.js', null);
             await channel.send("⚠️ I couldn't rename or move this ticket channel. Please check permissions or try again later. Ticket actions will still work, but the name may be wrong.").catch(() => {});
         }
-        // Update the pinned embed's title and footer to match the new ticket type
-        const myPins = await func.fetchPinnedSafe(channel);
-        const LastPin = myPins.last();
+        const LastPin = await func.findTicketMetadataMessage(channel, ticketNumber);
         if (LastPin && LastPin.embeds[0]) {
-            const embed = LastPin.embeds[0];
-            // Update title
+            const embed = EmbedBuilder.from(LastPin.embeds[0]);
             embed.setTitle(newTitle);
-            // Update footer
-            const footerParts = embed.footer.text.split("|");
-            const idParts = footerParts[0].trim().split('-');
+            const footerText = embed.data?.footer?.text || LastPin.embeds[0].footer?.text || '';
+            const footerParts = footerText.split("|");
+            const idParts = (footerParts[0] || '').trim().split('-');
             const userId = idParts[0];
             const ticketNum = idParts[1];
-            const oldTicketType = func.parseTicketTypeFromEmbedFooter(embed.footer.text);
+            const oldTicketType = func.parseTicketTypeFromEmbedFooter(footerText);
             if (userId && ticketNum) {
                 await func.preserveTicketDmRelayOnMove(userId, ticketNum, oldTicketType);
             }
             let footerTicketType = ticketType;
-            // Always split on # and use only the part before for the footer
             if (footerTicketType.includes('#')) {
                 footerTicketType = footerTicketType.split('#')[0].trim();
             }
-            newFooter = `${userId}-${ticketNum} | ${footerTicketType} | Ticket Opened:`;
-            embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
-            await LastPin.edit({embeds: [embed]}).catch(e => func.handle_errors(e, client, 'move.js', null));
+            if (userId && ticketNum) {
+                newFooter = `${userId}-${ticketNum} | ${footerTicketType} | Ticket Opened:`;
+                embed.setFooter({text: newFooter, iconURL: client.user.displayAvatarURL()});
+            }
+            await func.updateTicketMetadataEmbed(LastPin, embed).catch(e => func.handle_errors(e, client, 'move.js', null));
 
-            // Update stored ticket type in MySQL tickets table for web permission consistency
             try {
-                const userId = idParts[0];
-                const ticketNum = idParts[1];
                 if (userId && ticketNum && typeof db.query === 'function') {
                     await db.query(
                         'UPDATE tickets SET ticket_type = ? WHERE user_id = ? AND ticket_id = ?',
@@ -121,11 +112,7 @@ module.exports = {
                 }
             } catch (e) { func.handle_errors(e, client, 'move.js', 'Failed to update MySQL ticketType on move'); }
         }
-        // Check for required fields in the new ticket type (e.g., server selection)
         if (questionFilesystem.server_selection && questionFilesystem.server_selection.enabled) {
-            // Check if the pinned embed has a field for server selection
-            const myPins = await func.fetchPinnedSafe(channel);
-            const LastPin = myPins.last();
             let hasServerField = false;
             if (LastPin && LastPin.embeds[0]) {
                 const embed = LastPin.embeds[0];
@@ -177,7 +164,7 @@ module.exports = {
         // DM the ticket owner about the move and surface failures to staff
         const topicUser = channel.topic;
         if (topicUser) {
-            const user = await client.users.fetch(topicUser).catch(() => null);
+            const user = await bots.fetchDmUser(client, topicUser);
             if (user) {
                 try {
                     await func.sendDMWithRetry(

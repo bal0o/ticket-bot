@@ -55,7 +55,7 @@ async function main() {
         intents: [GatewayIntentBits.Guilds],
     });
 
-    await client.login(config.tokens?.bot_token);
+    await client.login(config.tokens?.staff_bot_token || config.tokens?.bot_token);
     if (!client.user) {
         console.error("[fix_internal] Failed to login.");
         process.exit(1);

@@ -50,12 +50,6 @@
 
     },
 
-    "feedback_messages": {
-        "feedback-error-no-channel": "Thanks for your feedback, sadly our systems aren't working properly and it did not get saved. Please let a member of staff know!",
-        "ticket-feedback-button-title": "Send Ticket Feedback",
-        "ticket-feedback-modal-title": "Ticket Feedback"
-    },
-
     "cheetos": {
         "cheetos-links": "{{COUNT}} links from Cheetos",
         "ticket-cheetos-links-empty" : "{{USER}} has 0 links via Cheetos!",

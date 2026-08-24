@@ -1,11 +1,8 @@
 const path = require('path');
+const { loadJson } = require('./jsonConfig');
 
 function loadHandlerOptions() {
-	try {
-		return require('../content/handler/options.json');
-	} catch (_) {
-		return { options: {} };
-	}
+	return loadJson('content/handler/options.json', { options: {} });
 }
 
 function getQuestionFileForType(ticketType) {
@@ -15,11 +12,7 @@ function getQuestionFileForType(ticketType) {
 	if (!key) return null;
 	const file = handlerOptions.options[key]?.question_file;
 	if (!file) return null;
-	try {
-		return require(path.join('..', 'content', 'questions', file));
-	} catch (_) {
-		return null;
-	}
+	return loadJson(path.join('content', 'questions', file), null);
 }
 
 function getAccessRolesForTicketType(ticketType, config) {
@@ -46,14 +39,22 @@ function userHasAccessToTicketType({ userRoleIds, ticketType, config, adminRoleI
 	return false;
 }
 
+function ticketTypeAllowsMerges(ticketType) {
+	const handlerOptions = loadHandlerOptions();
+	const key = Object.keys(handlerOptions.options || {}).find(k => k.toLowerCase() === String(ticketType || '').toLowerCase());
+	if (!key) return false;
+	return handlerOptions.options[key].allow_merges === true;
+}
+
 /**
  * Channel overwrites for a ticket — matches openTicket in functions.js (config roles only,
  * not category inheritance). Replaces all overwrites on move so old type roles lose access.
  */
-function buildPermissionOverwritesForTicketType({ client, guild, ticketType, userId = null }) {
+function buildPermissionOverwritesForTicketType({ client, guild, ticketType, userId = null, extraUserIds = [] }) {
 	const config = client?.config || {};
-	const staffGuild = guild || (client && client.guilds && client.guilds.cache.get(config.channel_ids?.staff_guild_id));
-	if (!staffGuild || !client?.user?.id) return [];
+	const staffBot = client?.bots?.staff || client;
+	const staffGuild = guild || (staffBot && staffBot.guilds && staffBot.guilds.cache.get(config.channel_ids?.staff_guild_id));
+	if (!staffGuild || !staffBot?.user?.id) return [];
 
 	const qf = getQuestionFileForType(ticketType);
 	const accessRoleIDs = Array.isArray(qf?.['access-role-id']) ? qf['access-role-id'].filter(Boolean) : [];
@@ -61,7 +62,7 @@ function buildPermissionOverwritesForTicketType({ client, guild, ticketType, use
 	const overwrites = [
 		{ id: staffGuild.id, deny: ['ViewChannel', 'AddReactions'] },
 		{
-			id: client.user.id,
+			id: staffBot.user.id,
 			allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
 		},
 	];
@@ -80,9 +81,18 @@ function buildPermissionOverwritesForTicketType({ client, guild, ticketType, use
 		overwrites.push({ id: roleId, allow: ['ViewChannel', 'SendMessages'] });
 	}
 
-	if (qf?.internal && userId && /^\d{17,19}$/.test(String(userId)) && !seen.has(String(userId))) {
+	const userIdsToAdd = [];
+	if (qf?.internal && userId && /^\d{17,19}$/.test(String(userId))) {
+		userIdsToAdd.push(String(userId));
+	}
+	for (const extraId of Array.isArray(extraUserIds) ? extraUserIds : []) {
+		if (extraId && /^\d{17,19}$/.test(String(extraId))) userIdsToAdd.push(String(extraId));
+	}
+	for (const uid of userIdsToAdd) {
+		if (seen.has(uid)) continue;
+		seen.add(uid);
 		overwrites.push({
-			id: String(userId),
+			id: uid,
 			allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
 		});
 	}
@@ -94,6 +104,7 @@ module.exports = {
 	getQuestionFileForType,
 	getAccessRolesForTicketType,
 	userHasAccessToTicketType,
+	ticketTypeAllowsMerges,
 	buildPermissionOverwritesForTicketType
 };
 

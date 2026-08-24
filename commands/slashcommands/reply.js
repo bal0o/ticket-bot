@@ -1,7 +1,8 @@
-const { SlashCommandBuilder } = require('@discordjs/builders');
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const func = require('../../utils/functions.js');
-const responses = require('../../content/response.json');
+const bots = require('../../utils/clients');
+const { loadJson } = require('../../utils/jsonConfig');
+const responses = loadJson('content/response.json', {});
 
 // Format category name for display
 function formatCategoryName(category) {
@@ -32,16 +33,16 @@ module.exports = {
         
         // Check if this is a valid ticket channel
         if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) {
-            return interaction.reply({ content: 'This is not a valid ticket channel.', ephemeral: true });
+            return interaction.reply({ content: 'This is not a valid ticket channel.', flags: func.EPHEMERAL });
         }
         
         // Get the user ID from channel topic
         const userId = channel.topic;
         
         // Fetch the user to get their username
-        const user = await client.users.fetch(userId).catch(() => null);
+        const user = await bots.fetchDmUser(client, userId);
         if (!user) {
-            return interaction.reply({ content: 'Could not find the user for this ticket.', ephemeral: true });
+            return interaction.reply({ content: 'Could not find the user for this ticket.', flags: func.EPHEMERAL });
         }
         
         // Get greeting and ack from config, with defaults
@@ -53,13 +54,13 @@ module.exports = {
         const responseKey = interaction.options.getString('response');
         
         if (!category || !responseKey) {
-            return interaction.reply({ content: 'Please select both category and response.', ephemeral: true });
+            return interaction.reply({ content: 'Please select both category and response.', flags: func.EPHEMERAL });
         }
         
         const responseText = responses[category]?.[responseKey];
         
         if (!responseText) {
-            return interaction.reply({ content: 'Response not found.', ephemeral: true });
+            return interaction.reply({ content: 'Response not found.', flags: func.EPHEMERAL });
         }
         
         // Replace placeholders

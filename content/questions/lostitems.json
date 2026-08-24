@@ -65,14 +65,5 @@
             "emoji": "📦",
             "enabled": true
         }
-    },
-
-    "feedback_questions": [
-        "How was your experience with the lost items process?",
-        "Was the response time satisfactory?",
-        "How would you rate your experience out of 5?",
-        "Would you recommend our lost items system to others?",
-        "Do you have any suggestions for improving the lost items process?"
-    ],
-    "successful_feedback_message": "Thank you for your feedback! Your input helps us improve our lost items system for everyone."
+    }
 }

@@ -1,8 +1,8 @@
-const { EmbedBuilder, AttachmentBuilder } = require("discord.js");
-const { SlashCommandBuilder } = require("@discordjs/builders");
-const config = require("../../config/config.json");
+const { EmbedBuilder, AttachmentBuilder, SlashCommandBuilder } = require("discord.js");
+const { loadJson } = require("../../utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const func = require("../../utils/functions.js");
-const axios = require('axios');
+const linking = require("../../utils/linking");
 
 function parseCheetosResponse(text) {
     const raw = String(text || "").trim();
@@ -82,38 +82,17 @@ function summarizeRecords(records) {
 }
 
 async function resolveSteamId(client, discordId) {
-    try {
-        const linking = client.config?.linking_settings?.linkingSystem;
-        const secret = client.config?.tokens?.Linking_System_API_Key_Or_Secret;
-        if (!linking) return null;
-        const unirest = require('unirest');
-        if (linking === 1) {
-            const base = client.config?.linking_settings?.verify_link;
-            if (!base || !secret) return null;
-            const r = await unirest.get(`${base}/api.php?action=findByDiscord&id=${discordId}&secret=${secret}`);
-            const b = r && r.body ? (r.body.toString ? r.body.toString() : String(r.body)) : '';
-            if (b && /^7656119/.test(b)) return b.trim();
-        } else if (linking === 2) {
-            if (!secret) return null;
-            const r = await unirest.get(`https://api.steamcord.io/players?discordId=${discordId}`).headers({ 'Authorization': `Bearer ${secret}`, 'Content-Type': 'application/json' });
-            const id = r?.body?.[0]?.steamAccounts?.[0]?.steamId;
-            if (id && String(id).startsWith('7656119')) return String(id);
-        } else if (linking === 3) {
-            if (!secret) return null;
-            const r = await unirest.get(`https://link.platformsync.io/api.php?id=${discordId}&token=${secret}`);
-            if (r?.body?.linked === true && r?.body?.steam_id && String(r.body.steam_id).startsWith('7656119')) return String(r.body.steam_id);
-        }
-    } catch (_) {}
-    return null;
+    return linking.findSteamIdByDiscord(client, discordId);
 }
 
 async function fetchBattlemetricsInfo(client, steamId) {
     try {
         const bmToken = client.config?.tokens?.battlemetricsToken;
         if (!bmToken || !steamId) return null;
+        const http = require('../../utils/http');
         const headers = { 'Authorization': `Bearer ${bmToken}`, 'Accept': 'application/json' };
         const playerUrl = `https://api.battlemetrics.com/players?filter[search]=${steamId}&include=identifier,server`;
-        const res = await axios.get(playerUrl, { headers, timeout: 10000 });
+        const res = await http.get(playerUrl, { headers, timeout: 10000 });
         if (!res?.data?.data?.length) return null;
         const player = res.data.data[0];
         const playerId = player.id;
@@ -136,11 +115,10 @@ async function fetchBattlemetricsInfo(client, steamId) {
                 lastSeen = recent?.meta?.lastSeen || null;
             }
         }
-        // Fetch bans
         let banInfo = [];
         try {
             const bansUrl = `https://api.battlemetrics.com/bans?filter[player]=${playerId}&include=server`;
-            const bansResponse = await axios.get(bansUrl, { headers, timeout: 10000 });
+            const bansResponse = await http.get(bansUrl, { headers, timeout: 10000 });
             if (bansResponse?.data?.data?.length) {
                 for (const ban of bansResponse.data.data) {
                     const reason = ban?.attributes?.reason || 'No reason provided';
@@ -200,24 +178,17 @@ module.exports = {
                 return;
             }
 
-            const unirest = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(targetId)}`;
             if (client.config && client.config.debug) {
                 console.log(`[Cheetos:/checkcc] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || interaction.user.id)}`);
             }
-            const resp = await unirest.get(url).headers({
-                'Auth-Key': client.config.tokens.cheetosToken,
-                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || interaction.user.id),
-                'Accept': 'text/plain',
-                'User-Agent': 'ticket-bot (Discord.js)'
-            });
-            const raw = (resp && (resp.raw_body || resp.body)) || '';
-            let text = '';
-            if (typeof raw === 'string') text = raw;
-            else if (Buffer.isBuffer(raw)) text = raw.toString('utf8');
-            else if (raw && raw.toString) text = raw.toString();
+            const text = await linking.fetchCheetosReport(
+                targetId,
+                client.config.tokens.cheetosToken,
+                client.config?.misc?.cheetos_requestor_id || interaction.user.id
+            ) || '';
             if (client.config && client.config.debug) {
-                console.log(`[Cheetos:/checkcc] Response status=${resp?.status || resp?.code || 'n/a'} length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`);
+                console.log(`[Cheetos:/checkcc] Response length=${(text||'').length} preview=\n${String(text).slice(0, 300)}`);
             }
             const records = parseCheetosResponse(text);
             const { count, ltsStr, wr } = summarizeRecords(records);

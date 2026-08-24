@@ -1,7 +1,8 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
 const { createDB } = require('../../utils/mysql');
+const bots = require('../../utils/clients');
 
 const db = createDB();
 
@@ -88,12 +89,13 @@ async function rebuildMainEmbed(client) {
 
     if (rows.length === 0) return null;
 
-    const guildName = client.guilds?.cache.get(client.config.channel_ids.public_guild_id)?.name || 'Server';
+    const pub = bots.publicClient(client);
+    const guildName = pub.guilds?.cache.get(client.config.channel_ids.public_guild_id)?.name || 'Server';
     const embed = new EmbedBuilder()
         .setTitle((handlerRaw.title || '').replace('{{SERVER}}', guildName))
         .setColor(client.config.bot_settings?.main_color ?? 0)
         .setDescription(handlerRaw.description || '')
-        .setFooter({ text: client.user.username, iconURL: client.user.displayAvatarURL() });
+        .setFooter({ text: pub.user.username, iconURL: pub.user.displayAvatarURL() });
 
     return { embeds: [embed], components: rows };
 }
@@ -128,7 +130,7 @@ module.exports = {
             );
             return interaction.reply({
                 content: `Staff applications are currently **${enabled ? 'ENABLED' : 'DISABLED'}**.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -137,10 +139,16 @@ module.exports = {
             await db.set(key, enable);
         } catch (_) {}
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const channelId = client.config?.channel_ids?.post_embed_channel_id;
-        const postChannel = channelId ? client.channels.cache.get(channelId) : null;
+        const postChannel = channelId
+            ? await bots.fetchGuildChannel(
+                bots.publicClient(client),
+                client.config.channel_ids.public_guild_id,
+                channelId
+            )
+            : null;
         if (!postChannel) {
             return interaction.editReply({
                 content: `Staff application button has been **${enable ? 'ENABLED' : 'DISABLED'}**, but the main embed could not be refreshed (embed channel not found).`

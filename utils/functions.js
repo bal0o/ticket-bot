@@ -1,24 +1,23 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, MessageFlags, Collection, StringSelectMenuBuilder } = require("discord.js");
 const { createDB } = require('./mysql')
 const db = createDB();
+const bots = require("./clients");
 const func = require("./functions.js")
-const lang = require("../content/handler/lang.json");
+const { loadJson } = require('./jsonConfig');
+const lang = loadJson('content/handler/lang.json', {});
 const path = require("path");
-let messageid = { messageId: "", internalMessageId: "" };
-try {
-    messageid = require("../config/messageid.json");
-    if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
-    if (messageid.messageId === undefined) messageid.messageId = "";
-    if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
-} catch (_) {
-    try {
-        const msgPath = path.join(__dirname, "..", "config", "messageid.json");
-        fs.writeFileSync(msgPath, JSON.stringify(messageid));
-    } catch (__) {}
-}
-const unirest = require("unirest");
 const fs = require("fs");
 const applications = require('./applications');
+const perms = require('./permissions');
+const linking = require('./linking');
+let messageid = loadJson('config/messageid.json', { messageId: "", internalMessageId: "" });
+if (typeof messageid !== 'object' || messageid === null) messageid = { messageId: "", internalMessageId: "" };
+if (messageid.messageId === undefined) messageid.messageId = "";
+if (messageid.internalMessageId === undefined) messageid.internalMessageId = "";
+try {
+    const msgPath = path.join(__dirname, "..", "config", "messageid.json");
+    if (!fs.existsSync(msgPath)) fs.writeFileSync(msgPath, JSON.stringify(messageid));
+} catch (_) {}
 
 /**
  * Check if a ticket type is internal by looking up the question file
@@ -28,20 +27,20 @@ const applications = require('./applications');
 module.exports.isTicketTypeInternal = function(ticketType) {
     try {
         if (!ticketType) return false;
-        const handlerRaw = require("../content/handler/options.json");
+        const handlerRaw = loadJson("content/handler/options.json", { options: {} });
         
         // Normalize the input: convert to lowercase and replace hyphens/spaces with a common separator
         const normalizedInput = ticketType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         
         // Try to find a match by normalizing both the input and the option keys
-        const found = Object.keys(handlerRaw.options).find(optionKey => {
+        const found = Object.keys(handlerRaw.options || {}).find(optionKey => {
             const normalizedKey = optionKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
             return normalizedKey === normalizedInput || optionKey.toLowerCase() === ticketType.toLowerCase();
         });
         
         if (!found) return false;
-        const questionFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-        return !!questionFile.internal;
+        const questionFile = loadJson(`content/questions/${handlerRaw.options[found].question_file}`, null);
+        return !!(questionFile && questionFile.internal);
     } catch (_) {
         return false;
     }
@@ -85,7 +84,7 @@ module.exports.parseTicketTypeFromEmbedFooter = function(footerText) {
 
 /** Parse numeric ticket id from channel name (e.g. appeal-1234 → 1234). */
 module.exports.parseTicketNumberFromChannelName = function(channelName) {
-    const parts = (channelName || '').split('-');
+    const parts = String(channelName || '').replace(/-claimed$/i, '').split('-');
     const last = parts[parts.length - 1];
     return /^\d+$/.test(last) ? last : null;
 };
@@ -113,6 +112,64 @@ module.exports.preserveTicketDmRelayOnMove = async function(userId, ticketId, ol
     }
 };
 
+module.exports.EPHEMERAL = MessageFlags.Ephemeral;
+
+/** Fetch a specific guild member by ID (REST; does not require Guild Members intent). */
+module.exports.resolveGuildMember = async function(guild, userId, { force = false } = {}) {
+    if (!guild || !userId) return null;
+    try {
+        if (force) {
+            return await guild.members.fetch({ user: userId, force: true });
+        }
+        const cached = guild.members.cache.get(String(userId));
+        if (cached) return cached;
+        return await guild.members.fetch({ user: userId });
+    } catch (_) {
+        return null;
+    }
+};
+
+/** Resolve the guild member who sent a message, fetching by ID when needed. */
+module.exports.resolveMessageMember = async function(message, { force = false } = {}) {
+    if (message?.member) return message.member;
+    if (!message?.guild || !message?.author?.id) return null;
+    return module.exports.resolveGuildMember(message.guild, message.author.id, { force });
+};
+
+/** Build staff author details for relay embeds. */
+module.exports.getStaffReplyAuthorInfo = function(member, author) {
+    const authorName = author?.globalName || author?.username || 'Staff';
+    if (!member) {
+        return {
+            displayName: authorName,
+            roleName: 'Staff',
+            avatarURL: typeof author?.displayAvatarURL === 'function' ? author.displayAvatarURL() : null
+        };
+    }
+
+    let roleName = 'Staff';
+    try {
+        const roles = member.roles.cache
+            .filter(role => role.id !== member.guild.id)
+            .sort((a, b) => b.position - a.position);
+        const highestRole = roles.first();
+        if (highestRole) roleName = highestRole.name;
+    } catch (_) {}
+
+    const displayName = member.displayName || authorName;
+    const avatarURL = (typeof member.displayAvatarURL === 'function' && member.displayAvatarURL())
+        || (typeof author?.displayAvatarURL === 'function' && author.displayAvatarURL())
+        || null;
+
+    return { displayName, roleName, avatarURL };
+};
+
+/** Check whether a member has any of the given role IDs. */
+module.exports.memberHasAnyRole = function(member, roleIds) {
+    if (!member || !Array.isArray(roleIds) || roleIds.length === 0) return false;
+    return member.roles.cache.some(role => roleIds.includes(role.id));
+};
+
 /**
  * Whether staff messages in the ticket channel should be forwarded to the owner's DMs.
  * Public tickets always relay; moved public→internal tickets keep relay via stored flag.
@@ -130,7 +187,7 @@ module.exports.shouldRelayStaffToTicketOwner = async function(client, channel, u
     if (!channel || !channel.guild || !userId) return false;
 
     try {
-        const member = await channel.guild.members.fetch(userId).catch(() => null);
+        const member = await module.exports.resolveGuildMember(channel.guild, userId, { force: true });
         if (!member) return true;
         const perms = channel.permissionsFor(member);
         return !perms || !perms.has(PermissionsBitField.Flags.ViewChannel);
@@ -200,14 +257,15 @@ module.exports.sendDMWithRetry = async function(user, payload, opts = {}) {
                     hasFiles: !!(payload && typeof payload === 'object' && Array.isArray(payload.files) && payload.files.length > 0)
                 });
             } catch (_) {}
-            const message = await user.send(payload);
+            const dmUser = await bots.fetchDmUser(user && user.client, user && user.id) || user;
+            const message = await dmUser.send(payload);
             return { delivered: !!(message && message.id), message: message || null, error: null };
         } catch (err) {
             attempt++;
             if (!isRetryable(err) || attempt >= maxAttempts) {
                 // Surface the failure to the bot's error channel
                 try {
-                    const client = user && user.client ? user.client : null;
+                    const client = (user && user.client) || null;
                     const context = `sendDMWithRetry final failure for user ${user && user.id ? user.id : 'unknown'}`;
                     module.exports.handle_errors(err, client, 'functions.js', context);
                 } catch (_) {}
@@ -228,11 +286,70 @@ const lastFetchTimes = new Map(); // channelId -> timestamp of last fetch attemp
 const CACHE_TTL = 60000; // 60 seconds cache (longer to avoid rate limits)
 const MIN_REQUEST_INTERVAL = 3500; // Minimum 3.5 seconds between requests (respects 3s sublimit with margin)
 
-/**
- * Fetch pinned messages with caching and rate limit handling.
- * Prevents multiple simultaneous requests and caches results briefly.
- * Respects Discord's 3-second sublimit on pins route.
- */
+function pinEntriesToCollection(pinData) {
+    const messages = new Collection();
+    const add = (value) => {
+        const msg = value && value.message && value.message.id ? value.message : value;
+        if (msg && msg.id) messages.set(msg.id, msg);
+    };
+    if (!pinData) return messages;
+    if (typeof pinData.values === 'function') {
+        for (const value of pinData.values()) add(value);
+        return messages;
+    }
+    if (Array.isArray(pinData.items)) {
+        for (const item of pinData.items) add(item);
+        return messages;
+    }
+    if (Array.isArray(pinData)) {
+        for (const item of pinData) add(item);
+    }
+    return messages;
+}
+
+module.exports.clearPinnedCache = function(channelId) {
+    if (channelId) pinnedCache.delete(channelId);
+};
+
+function isTicketMetadataMessage(msg, ticketNumber) {
+    const embed = msg && msg.embeds && msg.embeds[0];
+    if (!embed) return false;
+    const footer = embed.footer && embed.footer.text;
+    if (typeof footer === 'string' && /\d{17,19}-\d+\s*\|/.test(footer)) return true;
+    if (ticketNumber && typeof embed.title === 'string' && embed.title.includes(`#${ticketNumber}`)) return true;
+    return false;
+}
+
+module.exports.findTicketMetadataMessage = async function(channel, ticketNumber) {
+    if (!channel || !channel.messages) return null;
+    const pins = await module.exports.fetchPinnedSafe(channel);
+    const fromPins = pins.find(msg => isTicketMetadataMessage(msg, ticketNumber));
+    if (fromPins) return fromPins;
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!recent) return null;
+    return recent.find(msg => isTicketMetadataMessage(msg, ticketNumber)) || null;
+};
+
+module.exports.updateTicketMetadataEmbed = async function(message, embed) {
+    if (!message || !embed) return null;
+    try {
+        const edited = await message.edit({ embeds: [embed] });
+        module.exports.clearPinnedCache(message.channelId);
+        return edited;
+    } catch (e) {
+        if (!e || (e.code !== 50005 && e.code !== 50013)) throw e;
+        const sent = await message.channel.send({
+            content: message.content || undefined,
+            embeds: [embed],
+            components: message.components
+        });
+        await sent.pin().catch(() => {});
+        await message.unpin().catch(() => {});
+        module.exports.clearPinnedCache(message.channelId);
+        return sent;
+    }
+};
+
 module.exports.fetchPinnedSafe = async function(channel) {
     if (!channel || !channel.messages) {
         throw new Error('Invalid channel provided');
@@ -241,9 +358,8 @@ module.exports.fetchPinnedSafe = async function(channel) {
     const channelId = channel.id;
     const now = Date.now();
     
-    // Check cache first
     const cached = pinnedCache.get(channelId);
-    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+    if (cached && cached.messages && cached.messages.size > 0 && (now - cached.timestamp) < CACHE_TTL) {
         return cached.messages;
     }
     
@@ -273,8 +389,12 @@ module.exports.fetchPinnedSafe = async function(channel) {
         while (attempt < maxAttempts) {
             try {
                 lastFetchTimes.set(channelId, Date.now());
-                const messages = await channel.messages.fetchPinned();
-                // Cache the result
+                let messages = pinEntriesToCollection(await channel.messages.fetchPins());
+                if (messages.size === 0 && typeof channel.messages.fetchPinned === 'function') {
+                    try {
+                        messages = pinEntriesToCollection(await channel.messages.fetchPinned(true));
+                    } catch (_) {}
+                }
                 pinnedCache.set(channelId, { messages, timestamp: Date.now() });
                 return messages;
             } catch (err) {
@@ -424,7 +544,7 @@ module.exports.deleteEmptyOverflowCategory = deleteEmptyOverflowCategory;
 
 module.exports.handle_errors = async (err, client, file, message) => {
 
-	let ErrorChannel = client.channels.cache.get(client.config.channel_ids.error_channel)
+	let ErrorChannel = client ? bots.findCachedChannel(client, client.config && client.config.channel_ids && client.config.channel_ids.error_channel) : null
 
     let errorEmbed = new EmbedBuilder()
     .setColor(0x990000)
@@ -457,26 +577,6 @@ module.exports.handle_errors = async (err, client, file, message) => {
     })
 }
 
-module.exports.updateResponseTimes = async (openTime, closeTime, ticketType, ButtonType) => {
-
-    let newTicketType = ticketType.replace(/ /g,`_`)
-    let ServerResponseTimes = await db.get(`ServerStats.ResponseTimes`)
-
-
-    let ticketDifference = closeTime - openTime
-    if (ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent == null || ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent == undefined) {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTimeSpent`, ticketDifference)
-    } else {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTimeSpent`, ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTimeSpent + ticketDifference)
-    }
-
-    if ( ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTicketsHandled == null ||  ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`]?.totalTicketsHandled == undefined) {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTicketsHandled`, 1)
-    } else {
-        await db.set(`ServerStats.ResponseTimes.${newTicketType}.${ButtonType}.totalTicketsHandled`, ServerResponseTimes?.[`${newTicketType}`]?.[`${ButtonType}`].totalTicketsHandled + 1)
-    }
-}
-
 module.exports.padTo2Digits = async (num) => {
     return num.toString().padStart(2, '0');
 }
@@ -497,71 +597,13 @@ module.exports.convertMsToTime = async (milliseconds) => {
     )} seconds`;
 }
 
-module.exports.staffStats = async (ticketType, directory, userid) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`)
-
-	if (userStats?.[`${ticketType}`]?.[`${directory}`] == null || userStats?.[`${ticketType}`]?.[`${directory}`] == undefined) {
-		await db.set(`StaffStats.${userid}.${ticketType}.${directory}`, 1);
-	} else {
-		await db.set(`StaffStats.${userid}.${ticketType}.${directory}`, userStats?.[`${ticketType}`]?.[`${directory}`] + 1);
-	}
-
-    if (userStats?.totalActions == null || userStats?.totalActions == undefined) {
-        await db.set(`StaffStats.${userid}.totalActions`, 1);
-    } else {
-        await db.set(`StaffStats.${userid}.totalActions`, userStats?.totalActions + 1);
-    }
-
-    if (userStats?.[`${ticketType}`]?.[`total`] == null || userStats?.[`${ticketType}`]?.[`total`] == undefined) {
-		await db.set(`StaffStats.${userid}.${ticketType}.total`, 1);
-	} else {
-		await db.set(`StaffStats.${userid}.${ticketType}.total`, userStats?.[`${ticketType}`]?.[`total`] + 1);
-	}
-
-    await db.set(`StaffStats.${userid}.lastAction`, Date.now());
-
-}
-
-
-module.exports.GrabUserStaffStats = async (userid, TicketType) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`);
-
-    let soloUserStats = {
-        totalActions: ``,
-        acceptedActions: userStats?.[TicketType]?.accepted ? userStats?.[TicketType]?.accepted : 0,
-        deniedActions: userStats?.[TicketType]?.denied ? userStats?.[TicketType]?.denied : 0,
-        customCloseActions: userStats?.[TicketType]?.customclose ? userStats?.[TicketType]?.customclose : 0,
-        openTicketActions: userStats?.[TicketType]?.openticket ? userStats?.[TicketType]?.openticket : 0,
-        closeTicketActions: userStats?.[TicketType]?.closeticket ? userStats?.[TicketType]?.closeticket : 0,
-        ticketMessagesHiddenActions: userStats?.[TicketType]?.ticketmessageshidden ? userStats?.[TicketType]?.ticketmessageshidden : 0,
-        ticketMessagesVisibleActions: userStats?.[TicketType]?.ticketmessages ? userStats?.[TicketType]?.ticketmessages : 0
-        
-    }
-    soloUserStats.totalActions = soloUserStats.acceptedActions + soloUserStats.deniedActions + soloUserStats.customCloseActions + soloUserStats.openTicketActions + soloUserStats.closeTicketActions + soloUserStats.ticketMessagesHiddenActions + soloUserStats.ticketMessagesVisibleActions
-    return soloUserStats;
-}
-
-module.exports.CombineActionCountsUser = async (userid, actiontype) => {
-
-    let userStats = await db.get(`StaffStats.${userid}`);
-    let UserActionStats = 0
-    const handlerRaw = require("../content/handler/options.json");
-	const handlerKeys = Object.keys(handlerRaw.options);	
-
-    for (let TicketType of handlerKeys) {
-        if (userStats?.[`${TicketType}`]?.[`${actiontype}`] == null) continue;
-        UserActionStats = UserActionStats + userStats?.[`${TicketType}`]?.[`${actiontype}`]
-    }
-
-    return UserActionStats;
-}
-
 module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL = null) => {
-	// Update MySQL tickets table instead of PlayerStats (PlayerStats removed)
 	try {
 		if (typeof db.query === 'function') {
+			let closeTimeSeconds = Number(closeTime);
+			if (!Number.isFinite(closeTimeSeconds)) closeTimeSeconds = Math.floor(Date.now() / 1000);
+			if (closeTimeSeconds > 9999999999) closeTimeSeconds = Math.floor(closeTimeSeconds / 1000);
+			else closeTimeSeconds = Math.floor(closeTimeSeconds);
 			await db.query(
 				`UPDATE tickets SET 
 					close_type = ?, 
@@ -571,7 +613,7 @@ module.exports.closeDataAddDB = async (userid, ticketUniqueID, closeType, closeU
 					close_reason = ?,
 					transcript_url = COALESCE(?, transcript_url)
 				WHERE user_id = ? AND ticket_id = ?`,
-				[closeType, closeUser, closeUserID, closeTime, closeReason, transcriptURL, String(userid), String(ticketUniqueID)]
+				[closeType, closeUser, closeUserID, closeTimeSeconds, closeReason, transcriptURL, String(userid), String(ticketUniqueID)]
 			);
 		}
 	} catch (err) {
@@ -702,10 +744,10 @@ module.exports.sendStaffThreadInfo = async function (client, thread, recepientMe
 async function notifyTicketCreationFailed(interaction, recepientMember) {
     const message = 'Your ticket could not be created. Please try again or contact staff.';
     if (interaction?.editReply) {
-        await interaction.editReply({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.editReply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
-    if (recepientMember?.send) {
-        await recepientMember.send(message).catch(() => {});
+    if (recepientMember) {
+        await module.exports.sendDMWithRetry(recepientMember, message, { maxAttempts: 2, baseDelayMs: 500 });
     }
 }
 
@@ -714,17 +756,18 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     if (!recepientMember) {
         func.handle_errors(null, client, 'functions.js', 'openTicket called with null recepientMember');
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.', ephemeral: true });
+            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.', flags: MessageFlags.Ephemeral });
         }
         return;
     }
 
     let postchannel = null;
     let postchannelCategory = null;
+    const staffBot = bots.staffClient(client);
     
     // Only try to get post channel if not using open-as-ticket
     if (!questionFile["open-as-ticket"]) {
-        postchannel = client.channels.cache.get(questionFile[`post-channel`]);
+        postchannel = staffBot.channels.cache.get(questionFile[`post-channel`]);
         if (postchannel) {
             postchannelCategory = postchannel.parentId;
         }
@@ -733,7 +776,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     let ticketCategory = questionFile[`ticket-category`]
     let accessRoleIDs = questionFile[`access-role-id`]
 	let pingRoleIDs = questionFile[`ping-role-id`];
-    let staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id)
+    let staffGuild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id)
 
     if (administratorMember == null) {
         administratorMember = "Auto Ticket";
@@ -749,7 +792,7 @@ let overwrites = [
             deny: ['ViewChannel', 'AddReactions'],
         },
         {
-            id: client.user.id,
+            id: staffBot.user.id,
             allow: ['ViewChannel', 'SendMessages', 'AddReactions', 'ManageThreads'],
         },
         {
@@ -794,7 +837,7 @@ if (questionFilesystem.server_selection?.enabled) {
     } else if (typesRequireServer.includes(ticketType.toLowerCase())) {
         // If required and missing, notify and do not create ticket
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.`, ephemeral: true });
+            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.`, flags: MessageFlags.Ephemeral });
         }
         return;
     }
@@ -872,7 +915,7 @@ try {
 // For public tickets, DM the user with the ticket name/number
 try {
     if (!questionFile.internal) {
-        await recepientMember.send(`Your ticket (${serverPrefix ? serverPrefix + '-' : ''}${ticketType.toLowerCase()}-${formattedTicketNumber}) has been created. Please use this number for any follow-up.`);
+        await module.exports.sendDMWithRetry(recepientMember, `Your ticket #${formattedTicketNumber} has been created. Reply in this DM to continue the conversation with staff.`);
     }
 } catch (e) {}
 
@@ -964,7 +1007,9 @@ try {
         components: [actionRow]
     });
     
-    await initialMessage.pin()?.catch(e => { });
+    await initialMessage.pin().catch(e => {
+        func.handle_errors(e, client, 'functions.js', `Failed to pin ticket metadata in ${ticketChannel.name}(${ticketChannel.id}). Staff bot needs Pin Messages.`);
+    });
 
     let replyInfo = "";
     if (questionFile["anonymous-only-replies"] === true) {
@@ -985,17 +1030,13 @@ try {
         try {
             const shouldCheckCheetos = !!questionFile["check-cheetos"] && !!client.config?.tokens?.cheetosToken;
             if (!shouldCheckCheetos) return;
-            const req = require('unirest');
             const url = `https://Cheetos.gg/api.php?action=search&id=${encodeURIComponent(recepientMember.id)}`;
             try { if (client.config && client.config.debug) console.log(`[Cheetos] Requesting: ${url} with DiscordID=${String(client.config?.misc?.cheetos_requestor_id || client.user?.id || '')}`); } catch(_) {}
-            const resp = await req.get(url).headers({
-                'Auth-Key': client.config.tokens.cheetosToken,
-                'DiscordID': String(client.config?.misc?.cheetos_requestor_id || client.user?.id || ''),
-                'Accept': 'text/plain',
-                'User-Agent': 'ticket-bot (Discord.js)'
-            });
-            const raw = (resp && (resp.raw_body || resp.body)) || '';
-            const text = typeof raw === 'string' ? raw : (Buffer.isBuffer(raw) ? raw.toString('utf8') : (raw && raw.toString ? raw.toString() : ''));
+            const text = await linking.fetchCheetosReport(
+                recepientMember.id,
+                client.config.tokens.cheetosToken,
+                client.config?.misc?.cheetos_requestor_id || client.user?.id || ''
+            ) || '';
             let records = [];
             try {
                 if (text.trim().startsWith('[') || text.trim().startsWith('{')) {
@@ -1190,10 +1231,6 @@ try {
         }
     } catch (_) {}
     
-    if (administratorMember) {
-        await func.staffStats(ticketType, `openticket`, administratorMember.id);
-    }
-
     // If application, create application record and link mapping
     try {
         if (ticketType && ticketType.toLowerCase().includes('application')) {
@@ -1207,19 +1244,6 @@ try {
         }
     } catch(_){}
 
-    try {
-        const presenceMonitor = require('./presenceMonitor');
-        if (thread?.id && recepientMember?.id && ticketChannel?.id) {
-            await presenceMonitor.registerTicket(client, {
-                userId: recepientMember.id,
-                username: recepientMember.username,
-                staffThreadId: thread.id,
-                ticketNumber: formattedTicketNumber,
-                ticketChannelId: ticketChannel.id
-            });
-        }
-    } catch (_) {}
-
     // Update the bot's status to reflect the new ticket
     await module.exports.updateTicketStatus(client);
 
@@ -1230,7 +1254,9 @@ try {
 // Add function to update bot status
 module.exports.updateTicketStatus = async function(client) {
     try {
-        const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+        const staffBot = bots.staffClient(client);
+        const publicBot = bots.publicClient(client);
+        const staffGuild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id);
         if (!staffGuild) {
             console.warn('[updateTicketStatus] Staff guild not found');
             return;
@@ -1316,7 +1342,10 @@ module.exports.updateTicketStatus = async function(client) {
         if (activityConfig.messages.length === 1) {
             const message = activityConfig.messages[0].replace(/{count}/g, ticketCount);
             try {
-                await client.user.setActivity(message, { type: activityType });
+                await staffBot.user.setActivity(message, { type: activityType });
+                if (publicBot && publicBot.user && publicBot !== staffBot) {
+                    await publicBot.user.setActivity(message, { type: activityType });
+                }
                 console.log(`[updateTicketStatus] Status updated: "${message}"`);
             } catch (activityError) {
                 console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
@@ -1325,29 +1354,32 @@ module.exports.updateTicketStatus = async function(client) {
         }
 
         // If there are multiple messages, cycle through them
-        if (!client.currentStatusIndex) {
-            client.currentStatusIndex = 0;
+        if (!staffBot.currentStatusIndex) {
+            staffBot.currentStatusIndex = 0;
         }
 
         // Get current message and replace {count} with actual count
-        const currentMessage = activityConfig.messages[client.currentStatusIndex].replace(/{count}/g, ticketCount);
+        const currentMessage = activityConfig.messages[staffBot.currentStatusIndex].replace(/{count}/g, ticketCount);
         try {
-            await client.user.setActivity(currentMessage, { type: activityType });
+            await staffBot.user.setActivity(currentMessage, { type: activityType });
+            if (publicBot && publicBot.user && publicBot !== staffBot) {
+                await publicBot.user.setActivity(currentMessage, { type: activityType });
+            }
             console.log(`[updateTicketStatus] Status updated: "${currentMessage}"`);
         } catch (activityError) {
             console.error('[updateTicketStatus] Failed to set activity:', activityError.message);
         }
 
         // Move to next message
-        client.currentStatusIndex = (client.currentStatusIndex + 1) % activityConfig.messages.length;
+        staffBot.currentStatusIndex = (staffBot.currentStatusIndex + 1) % activityConfig.messages.length;
 
         // Set up periodic updates if cycleTimeinSeconds is configured and interval doesn't exist
-        if (activityConfig.cycleTimeinSeconds && !client.statusUpdateInterval) {
-            client.statusUpdateInterval = setInterval(async () => {
+        if (activityConfig.cycleTimeinSeconds && !staffBot.statusUpdateInterval) {
+            staffBot.statusUpdateInterval = setInterval(async () => {
                 // Only update if we have multiple messages to cycle through
                 if (activityConfig.messages.length > 1) {
-                    await module.exports.updateTicketStatus(client).catch(error => {
-                        func.handle_errors(error, client, 'functions.js', null);
+                    await module.exports.updateTicketStatus(staffBot).catch(error => {
+                        func.handle_errors(error, staffBot, 'functions.js', null);
                     });
                 }
             }, activityConfig.cycleTimeinSeconds * 1000);
@@ -1366,115 +1398,89 @@ module.exports.updateTicketStatus = async function(client) {
  */
 module.exports.closeTicket = async (client, channel, staffMember, reason) => {
     try {
-        // removed debug marker
-        // Check if the channel still exists and is accessible
-        if (!channel || !channel.guild || !client.channels.cache.has(channel.id)) {
-            // removed debug
-            // Optionally log or notify that the channel is gone
+        const staffBot = bots.staffClient(client);
+        if (!channel || !channel.guild || !staffBot.channels.cache.has(channel.id)) {
             return;
         }
-        // Fetch pinned message for ticket info
-        let myPins;
-        try {
-            myPins = await module.exports.fetchPinnedSafe(channel);
-        } catch (err) {
-            // removed debug
+
+        const identity = await module.exports.resolveTicketIdentity(channel);
+        const DiscordID = identity.userId;
+        const globalTicketNumber = identity.ticketId;
+        const ticketType = identity.ticketType;
+        if (!DiscordID || !globalTicketNumber || !ticketType) {
+            module.exports.handle_errors(
+                null,
+                client,
+                'functions.js',
+                `closeTicket missing identity for ${channel.name}(${channel.id}): user=${DiscordID} ticket=${globalTicketNumber} type=${ticketType}`
+            );
             return;
         }
-        const LastPin = myPins.last();
-        if (!LastPin || !LastPin.embeds[0] || !LastPin.embeds[0].footer || !LastPin.embeds[0].footer.text) {
-            // removed debug
-            return;
-        }
-        // Parse ticket info
-        const rawEmbed = LastPin.embeds[0];
-        const embed = EmbedBuilder.from(rawEmbed);
-        const footerParts = rawEmbed.footer.text.split("|");
-        const idParts = footerParts[0].trim().split('-');
-        let ticketType = footerParts[1]?.trim() || 'Unknown';
-        if (ticketType.includes('#')) {
-            ticketType = ticketType.split('#')[0].trim();
-        }
-        const globalTicketNumber = idParts[1] || 'Unknown';
-        const DiscordID = idParts[0];
-        // removed debug
-        // Get user
-        const user = await client.users.fetch(DiscordID).catch(() => null);
-        if (!user) {
-            // removed debug
-        }
-        // Get config for ticket type
+
+        const user = await bots.fetchDmUser(client, DiscordID);
         const handlerRaw = require("../content/handler/options.json");
         const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == ticketType.toLowerCase());
         if (!found) {
-            // removed debug
+            module.exports.handle_errors(null, client, 'functions.js', `closeTicket unknown ticket type '${ticketType}' for ${channel.name}`);
             return;
         }
-        let typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
-        if (!typeFile) {
-            // removed debug
-            return;
-        }
+        const typeFile = require(`../content/questions/${handlerRaw.options[found].question_file}`);
+        if (!typeFile) return;
+
         const transcriptChannel = typeFile[`transcript-channel`];
-        const logs_channel = await channel.guild.channels.cache.find(x => x.id === transcriptChannel);
-        // removed debug
-        // Prepare reason
-        const reasonBlock = reason ? `\
+        const logs_channel = channel.guild.channels.cache.find(x => x.id === transcriptChannel);
+        const reasonBlock = reason || 'No Reason Provided.';
+        const openedAtMs = identity.createdAt ? identity.createdAt * 1000 : (channel.createdTimestamp || Date.now());
 
+        const embed = new EmbedBuilder()
+            .setTitle(`${ticketType} #${globalTicketNumber}`)
+            .setColor(client.config.bot_settings.main_color)
+            .setAuthor({
+                name: client.config.bot_settings.close_ticket_author_prefix
+                    ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', staffMember.username || staffMember.user?.username)
+                    : `Ticket Closed by ${staffMember.username || staffMember.user?.username}`,
+                iconURL: staffMember.displayAvatarURL ? staffMember.displayAvatarURL() : client.user.displayAvatarURL()
+            })
+            .setFooter({
+                text: `${DiscordID}-${globalTicketNumber} | ${ticketType} | Ticket Closed:`,
+                iconURL: client.user.displayAvatarURL()
+            })
+            .setTimestamp(new Date())
+            .addFields(
+                {
+                    name: typeFile["close-transcript-embed-reason-title"] || "Close Reason",
+                    value: reasonBlock,
+                    inline: true
+                },
+                {
+                    name: typeFile["close-transcript-embed-response-title"] || "Response Time",
+                    value: await module.exports.convertMsToTime(Date.now() - openedAtMs),
+                    inline: true
+                }
+            );
 
-
-
-${reason}` : 'No Reason Provided.';
-        // Prepare embed
-        embed.setAuthor({
-            name: client.config.bot_settings.close_ticket_author_prefix
-                ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', staffMember.username || staffMember.user?.username)
-                : `Ticket Closed by ${staffMember.username || staffMember.user?.username}`,
-            iconURL: staffMember.displayAvatarURL ? staffMember.displayAvatarURL() : client.user.displayAvatarURL()
-        });
-        embed.addFields({
-            name: typeFile["close-transcript-embed-reason-title"] || "Close Reason",
-            value: reasonBlock,
-            inline: true
-        });
-        embed.addFields({
-            name: typeFile["close-transcript-embed-response-title"] || "Response Time",
-            value: `\
-
-
-
-
-${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
-            inline: true
-        });
-        // Log to transcript channel
         if (logs_channel) {
-            await logs_channel.send({embeds: [embed]}).catch(e => module.exports.handle_errors(e, client, "functions.js", null));
+            await logs_channel.send({ embeds: [embed] }).catch(e => module.exports.handle_errors(e, client, "functions.js", null));
         }
 
-        // Compute transcript URL (DB-backed; no HTML generation here)
         let savedTranscriptURL = null;
         try {
             const { base_url } = client.config.transcript_settings;
-            const transcriptURL = `${base_url}${channel.name}.full.html`;
-            savedTranscriptURL = transcriptURL;
+            savedTranscriptURL = `${base_url}${channel.name}.full.html`;
 
-            // Persist close data in tickets table
             await func.closeDataAddDB(
                 DiscordID,
                 globalTicketNumber,
                 'closed',
                 staffMember.user.username,
                 staffMember.id,
-                Date.now(),
+                Math.floor(Date.now() / 1000),
                 reason,
                 savedTranscriptURL
             );
 
-            // Write ticket data to MySQL (including transcript mapping for dynamic renderer)
             try {
-                const createdAt = embed.timestamp ? Math.floor(new Date(embed.timestamp).getTime() / 1000) : null;
-                // Get responses and server from MySQL tickets table instead of PlayerStats
+                const createdAt = identity.createdAt || Math.floor(openedAtMs / 1000);
                 let server = null;
                 if (typeof db.query === 'function') {
                     const [rows] = await db.query(
@@ -1487,7 +1493,7 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                         server = (serverMatch && serverMatch[1]) ? serverMatch[1] : (rows[0].server || null);
                     }
                 }
-                
+
                 const ticketRow = {
                     userId: String(DiscordID),
                     ticketId: String(globalTicketNumber),
@@ -1499,7 +1505,8 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                     closeUser: String(staffMember.user?.username || staffMember.username || ''),
                     closeReason: String(reason || ''),
                     transcriptFilename: `${channel.name}.html`,
-                    transcriptURL: savedTranscriptURL || null
+                    transcriptURL: savedTranscriptURL || null,
+                    channelId: channel.id || null
                 };
 
                 if (typeof db.writeTicket === 'function') {
@@ -1507,14 +1514,16 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
                 } else {
                     throw new Error('MySQL writeTicket method not available');
                 }
+                if (typeof db.finalizeTicketMetrics === 'function') {
+                    await db.finalizeTicketMetrics({
+                        channelId: channel.id,
+                        ticketId: String(globalTicketNumber),
+                        openerId: String(DiscordID)
+                    });
+                }
             } catch (err) {
                 console.error('[closeTicket] Error writing ticket data:', err.message);
             }
-
-            try {
-                const staffUsername = staffMember.user?.username || staffMember.username || 'unknown';
-                // Staff close activity is now derived from the tickets table; Prometheus metrics removed.
-            } catch (_) {}
 
             if (logs_channel && savedTranscriptURL) {
                 logs_channel
@@ -1525,69 +1534,87 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
             func.handle_errors(e, client, 'functions.js', 'Transcript DB close setup failed');
         }
 
-        // After ticket close, aggregates are now derived directly from the MySQL tickets/message tables; 
-        // legacy Prometheus aggregation has been removed.
-        // removed debug
-        // DM user
+        const closeRecipientIds = new Set([String(DiscordID)]);
+        try {
+            if (typeof db.getTicketParticipants === 'function' && globalTicketNumber) {
+                const extras = await db.getTicketParticipants(globalTicketNumber);
+                for (const row of extras || []) {
+                    if (row && row.userId) closeRecipientIds.add(String(row.userId));
+                }
+            }
+        } catch (e) {
+            func.handle_errors(e, client, 'functions.js', 'Failed to load ticket participants for close DMs');
+        }
+
         if (typeFile.send_close_dm !== false) {
             let reply = `Your ticket (#${globalTicketNumber}) has been closed.\nReason: ${reason}`;
             if (client.config.transcript_settings?.base_url) {
                 const userUrl = `${client.config.transcript_settings.base_url}${channel.name}.html`;
                 reply += `\n\nView your transcript: <${userUrl}>`;
             }
-            // Use sendDMWithRetry for better reliability with long-term tickets (handles stale DM channels)
-            try {
-                const result = await module.exports.sendDMWithRetry(user, reply, { maxAttempts: 3, baseDelayMs: 600 });
-                const sentMsg = result && result.message ? result.message : null;
-                // Extra safety: try suppressing embeds in case Discord still attempts a preview
-                if (sentMsg && sentMsg.suppressEmbeds) {
-                    try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+            for (const recipientId of closeRecipientIds) {
+                const recipient = recipientId === String(DiscordID)
+                    ? user
+                    : await bots.fetchDmUser(client, recipientId);
+                if (!recipient) continue;
+                try {
+                    const result = await module.exports.sendDMWithRetry(recipient, reply, { maxAttempts: 3, baseDelayMs: 600 });
+                    const sentMsg = result && result.message ? result.message : null;
+                    if (sentMsg && sentMsg.suppressEmbeds) {
+                        try { await sentMsg.suppressEmbeds(true); } catch (_) {}
+                    }
+                } catch (e) {
+                    func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${recipientId}`);
                 }
-            } catch (e) {
-                // Log error but don't fail ticket closure
-                func.handle_errors(e, client, 'functions.js', `Failed to send closure DM to user ${DiscordID}`);
             }
         }
-        // Update ticket count
+
+        try {
+            const feedback = require('./feedback');
+            if (feedback.shouldOfferFeedback(typeFile, ticketType) && user) {
+                await feedback.offerFeedback(client, {
+                    user,
+                    ticketId: String(globalTicketNumber),
+                    ticketType,
+                    typeFile,
+                });
+            }
+        } catch (e) {
+            func.handle_errors(e, client, 'functions.js', 'Failed to offer CSAT feedback');
+        }
+
         await module.exports.updateTicketStatus(client);
 
         try {
-            const presenceMonitor = require('./presenceMonitor');
-            presenceMonitor.unregisterTicketChannel(client, channel.id);
-        } catch (_) {}
-        
-		try {
-			const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
-			if (thread) {
-				await thread.setArchived(true, 'Ticket closed.');
-			}
-		} catch (e) {
-			if (e && e.code === 10003) {
-				module.exports.handle_errors(null, client, "functions.js", `Archive skipped for staff thread #${globalTicketNumber}: Unknown Channel (10003). Likely already deleted or inaccessible.`);
-			} else {
-				module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
-			}
-		}
+            const thread = channel.threads.cache.find(t => t.name === `staff-chat-${globalTicketNumber}`);
+            if (thread) {
+                await thread.setArchived(true, 'Ticket closed.');
+            }
+        } catch (e) {
+            if (e && e.code === 10003) {
+                module.exports.handle_errors(null, client, "functions.js", `Archive skipped for staff thread #${globalTicketNumber}: Unknown Channel (10003). Likely already deleted or inaccessible.`);
+            } else {
+                module.exports.handle_errors(e, client, "functions.js", `Failed to archive staff thread for #${globalTicketNumber}`);
+            }
+        }
 
-        // Remove from user's ticket index
-        try {
-            const key = `UserTicketIndex.${DiscordID}`;
-            const list = (await db.get(key)) || [];
-            const updated = list.filter(id => id !== channel.id);
-            await db.set(key, updated);
-        } catch (_) {}
+        for (const participantId of closeRecipientIds) {
+            try {
+                const key = `UserTicketIndex.${participantId}`;
+                const list = (await db.get(key)) || [];
+                const updated = list.filter(id => id !== channel.id);
+                await db.set(key, updated);
+            } catch (_) {}
+        }
 
-        // Delete the ticket channel after a short delay so logs/embeds finish
         try {
             const parentId = channel.parentId;
             const guild = channel.guild;
             setTimeout(async () => {
                 try {
-                    // Re-check existence to avoid throwing if already deleted
                     const liveChannel = guild.channels.cache.get(channel.id);
                     if (!liveChannel) return;
                     await liveChannel.delete('Ticket closed');
-                    // Clean up overflow category if now empty
                     await module.exports.deleteEmptyOverflowCategory(client, guild, parentId);
                 } catch (e) {
                     module.exports.handle_errors(e, client, "functions.js", `Failed to delete ticket channel ${channel.id} after close`);
@@ -1599,4 +1626,367 @@ ${await module.exports.convertMsToTime(Date.now() - embed.timestamp)}`,
     } catch (err) {
         module.exports.handle_errors(err, client, "functions.js", `Error in closeTicket for channel ${channel.name}(${channel.id})`);
     }
+};
+
+const MERGE_PAGE_SIZE = 25;
+
+function ticketTypeSlug(ticketType) {
+    return String(ticketType || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function channelNameMatchesTicketType(channelName, ticketType) {
+    const slug = ticketTypeSlug(ticketType);
+    if (!slug) return false;
+    const name = String(channelName || '').toLowerCase();
+    return name.includes(`-${slug}-`) || name.startsWith(`${slug}-`);
+}
+
+module.exports.MERGE_PAGE_SIZE = MERGE_PAGE_SIZE;
+
+module.exports.normalizeTicketType = function(ticketType) {
+    if (!ticketType) return null;
+    const handlerRaw = require('../content/handler/options.json');
+    const found = Object.keys(handlerRaw.options || {}).find(x => x.toLowerCase() === String(ticketType).toLowerCase());
+    return found || ticketType;
+};
+
+module.exports.resolveTicketTypeFromChannel = async function(channel) {
+    const ownerId = channel?.topic;
+    const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    if (ownerId && ticketNum && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [String(ownerId), String(ticketNum)]
+            );
+            if (rows?.[0]?.ticket_type) return module.exports.normalizeTicketType(rows[0].ticket_type);
+        } catch (_) {}
+    }
+    try {
+        const handlerRaw = require('../content/handler/options.json');
+        const name = String(channel?.name || '').toLowerCase();
+        for (const key of Object.keys(handlerRaw.options || {})) {
+            if (channelNameMatchesTicketType(name, key)) {
+                return module.exports.normalizeTicketType(key);
+            }
+        }
+    } catch (_) {}
+    return null;
+};
+
+module.exports.resolveTicketIdentity = async function(channel) {
+    const userId = channel?.topic && /^\d{17,19}$/.test(channel.topic) ? String(channel.topic) : null;
+    const ticketId = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    const ticketType = await module.exports.resolveTicketTypeFromChannel(channel);
+    let createdAt = null;
+    if (userId && ticketId && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT created_at, ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [userId, String(ticketId)]
+            );
+            if (rows?.[0]?.created_at) createdAt = Number(rows[0].created_at) || null;
+        } catch (_) {}
+    }
+    return { userId, ticketId, ticketType, createdAt };
+};
+
+module.exports.getExtraParticipantUserIds = async function(ticketId, ownerId) {
+    if (!ticketId || typeof db.getTicketParticipants !== 'function') return [];
+    try {
+        const rows = await db.getTicketParticipants(ticketId);
+        return (rows || []).map(r => String(r.userId || '')).filter(id => id && id !== String(ownerId || ''));
+    } catch (_) {
+        return [];
+    }
+};
+
+module.exports.applyTicketTypeOverwrites = async function(client, channel, ticketType, ownerId) {
+    const ticketNum = module.exports.parseTicketNumberFromChannelName(channel?.name);
+    const extraUserIds = await module.exports.getExtraParticipantUserIds(ticketNum, ownerId);
+    const overwrites = perms.buildPermissionOverwritesForTicketType({
+        client,
+        guild: channel.guild,
+        ticketType,
+        userId: ownerId,
+        extraUserIds,
+    });
+    if (!Array.isArray(overwrites) || overwrites.length === 0) return;
+    try {
+        await channel.permissionOverwrites.set(overwrites);
+    } catch (err) {
+        const baseOverwrites = perms.buildPermissionOverwritesForTicketType({
+            client,
+            guild: channel.guild,
+            ticketType,
+            userId: ownerId,
+            extraUserIds: [],
+        });
+        if (baseOverwrites.length > 0) {
+            await channel.permissionOverwrites.set(baseOverwrites);
+        }
+        for (const uid of extraUserIds) {
+            try {
+                await channel.permissionOverwrites.edit(uid, {
+                    ViewChannel: true,
+                    SendMessages: true,
+                    ReadMessageHistory: true,
+                });
+            } catch (extraErr) {
+                module.exports.handle_errors(extraErr, client, 'functions.js', `Failed to restore merged participant overwrite for ${uid}`);
+            }
+        }
+        module.exports.handle_errors(err, client, 'functions.js', 'Failed to set ticket overwrites in one pass; restored extras individually');
+    }
+};
+
+async function addChannelToUserTicketIndex(userId, channelId) {
+    if (!userId || !channelId) return;
+    try {
+        const key = `UserTicketIndex.${userId}`;
+        const list = (await db.get(key)) || [];
+        if (!list.includes(channelId)) {
+            list.push(channelId);
+            await db.set(key, list);
+        }
+    } catch (_) {}
+}
+
+async function getFormAnswersForTicket(userId, ticketId, sourceChannel) {
+    if (userId && ticketId && typeof db.query === 'function') {
+        try {
+            const [rows] = await db.query(
+                'SELECT responses FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                [String(userId), String(ticketId)]
+            );
+            if (rows?.[0]?.responses) return String(rows[0].responses);
+        } catch (_) {}
+    }
+    try {
+        const pins = await module.exports.fetchPinnedSafe(sourceChannel);
+        const pin = pins.find(m => m.embeds?.[0]?.footer?.text && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || pins.last();
+        if (pin?.embeds?.[0]?.description) return String(pin.embeds[0].description);
+        if (Array.isArray(pin?.embeds?.[0]?.fields) && pin.embeds[0].fields.length) {
+            return pin.embeds[0].fields.map(f => `**${f.name}**\n${f.value}`).join('\n\n');
+        }
+    } catch (_) {}
+    return '';
+}
+
+module.exports.listOpenTicketsOfType = async function(guild, ticketType, excludeChannelId) {
+    const results = [];
+    const seen = new Set();
+    if (!guild) return results;
+    try { await guild.channels.fetch(); } catch (_) {}
+
+    try {
+        if (typeof db.query === 'function') {
+            const [rows] = await db.query(
+                `SELECT user_id, ticket_id, username, responses
+                 FROM tickets
+                 WHERE LOWER(ticket_type) = LOWER(?)
+                   AND (close_time IS NULL AND close_type IS NULL AND transcript_url IS NULL)`,
+                [ticketType]
+            );
+            for (const row of rows || []) {
+                const userId = String(row.user_id || '');
+                const ticketId = String(row.ticket_id || '');
+                const channel = guild.channels.cache.find(c =>
+                    c.type === ChannelType.GuildText &&
+                    String(c.topic || '') === userId &&
+                    (c.name.endsWith(`-${ticketId}`) || c.name.endsWith(ticketId)) &&
+                    c.id !== excludeChannelId
+                );
+                if (!channel || seen.has(channel.id)) continue;
+                seen.add(channel.id);
+                results.push({
+                    channelId: channel.id,
+                    name: channel.name,
+                    ownerId: userId,
+                    ownerName: row.username || userId,
+                    ticketNumber: ticketId,
+                    responses: row.responses || null,
+                });
+            }
+        }
+    } catch (_) {}
+
+    for (const channel of guild.channels.cache.values()) {
+        if (channel.type !== ChannelType.GuildText) continue;
+        if (channel.id === excludeChannelId) continue;
+        if (seen.has(channel.id)) continue;
+        if (!channel.topic || !/^\d{17,19}$/.test(channel.topic)) continue;
+        if (!channelNameMatchesTicketType(channel.name, ticketType)) continue;
+        const ticketNumber = module.exports.parseTicketNumberFromChannelName(channel.name);
+        if (!ticketNumber) continue;
+        seen.add(channel.id);
+        results.push({
+            channelId: channel.id,
+            name: channel.name,
+            ownerId: channel.topic,
+            ownerName: channel.topic,
+            ticketNumber,
+            responses: null,
+        });
+    }
+
+    results.sort((a, b) => String(a.ticketNumber).localeCompare(String(b.ticketNumber), undefined, { numeric: true }));
+    return results;
+};
+
+module.exports.buildMergeSelectComponents = function(candidates, page) {
+    const total = candidates.length;
+    const pageCount = Math.max(1, Math.ceil(total / MERGE_PAGE_SIZE));
+    const safePage = Math.min(Math.max(0, page), pageCount - 1);
+    const start = safePage * MERGE_PAGE_SIZE;
+    const pageItems = candidates.slice(start, start + MERGE_PAGE_SIZE);
+    const rows = [];
+
+    if (pageItems.length > 0) {
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('merge_select')
+            .setPlaceholder('Select one or more tickets to merge into this one')
+            .setMinValues(1)
+            .setMaxValues(pageItems.length)
+            .addOptions(pageItems.map(item => {
+                const label = `#${item.ticketNumber} · ${item.ownerName || item.ownerId}`.slice(0, 100);
+                return {
+                    label,
+                    value: item.channelId,
+                    description: String(item.name || 'Ticket').slice(0, 100) || 'Ticket',
+                };
+            }));
+        rows.push(new ActionRowBuilder().addComponents(select));
+    }
+
+    if (pageCount > 1) {
+        rows.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`merge_page:${safePage - 1}`)
+                .setLabel('Previous')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(safePage <= 0),
+            new ButtonBuilder()
+                .setCustomId(`merge_page:${safePage + 1}`)
+                .setLabel('Next')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(safePage >= pageCount - 1)
+        ));
+    }
+
+    const end = Math.min(start + pageItems.length, total);
+    const content = pageCount > 1
+        ? `Select tickets to merge into this one. Showing ${start + 1}–${end} of ${total}.`
+        : `Select tickets to merge into this one (${total} open).`;
+    return { content, components: rows, page: safePage };
+};
+
+module.exports.mergeTickets = async function(client, survivorChannel, sourceChannelIds, staffMember) {
+    const succeeded = [];
+    const failed = [];
+    const ownerId = survivorChannel?.topic;
+    const survivorNumber = module.exports.parseTicketNumberFromChannelName(survivorChannel?.name);
+    const survivorType = await module.exports.resolveTicketTypeFromChannel(survivorChannel);
+
+    if (!survivorChannel || !ownerId || !/^\d{17,19}$/.test(ownerId) || !survivorNumber || !survivorType) {
+        return { succeeded, failed: [{ id: survivorChannel?.id, error: 'Could not resolve this ticket.' }] };
+    }
+    if (!perms.ticketTypeAllowsMerges(survivorType)) {
+        return { succeeded, failed: [{ id: survivorChannel.id, error: 'This ticket type cannot be merged.' }] };
+    }
+
+    const uniqueSourceIds = [...new Set((sourceChannelIds || []).map(String))].filter(id => id && id !== survivorChannel.id);
+    const addedUserIds = new Set();
+
+    try {
+        if (typeof db.addTicketParticipant === 'function') {
+            await db.addTicketParticipant(survivorNumber, ownerId, null);
+        }
+    } catch (e) {
+        func.handle_errors(e, client, 'functions.js', 'Failed to record original ticket owner as participant');
+    }
+
+    for (const sourceId of uniqueSourceIds) {
+        let sourceChannel = null;
+        try {
+            sourceChannel = survivorChannel.guild.channels.cache.get(sourceId)
+                || await survivorChannel.guild.channels.fetch(sourceId).catch(() => null);
+            if (!sourceChannel || sourceChannel.type !== ChannelType.GuildText) {
+                failed.push({ id: sourceId, error: 'Channel not found.' });
+                continue;
+            }
+            if (!sourceChannel.topic || !/^\d{17,19}$/.test(sourceChannel.topic)) {
+                failed.push({ id: sourceId, error: 'Not a valid ticket channel.' });
+                continue;
+            }
+            const sourceType = await module.exports.resolveTicketTypeFromChannel(sourceChannel);
+            if (!sourceType || sourceType.toLowerCase() !== survivorType.toLowerCase()) {
+                failed.push({ id: sourceId, error: 'Different ticket type.' });
+                continue;
+            }
+            const sourceOwnerId = String(sourceChannel.topic);
+            const sourceNumber = module.exports.parseTicketNumberFromChannelName(sourceChannel.name);
+            if (!sourceNumber) {
+                failed.push({ id: sourceId, error: 'Could not parse ticket number.' });
+                continue;
+            }
+
+            const formAnswers = await getFormAnswersForTicket(sourceOwnerId, sourceNumber, sourceChannel);
+            const sourceUser = await bots.fetchDmUser(client, sourceOwnerId);
+            const extraParts = typeof db.getTicketParticipants === 'function'
+                ? await db.getTicketParticipants(sourceNumber).catch(() => [])
+                : [];
+            const usersToAdd = new Set([sourceOwnerId, ...((extraParts || []).map(p => String(p.userId || '')).filter(Boolean))]);
+
+            for (const uid of usersToAdd) {
+                try {
+                    await survivorChannel.permissionOverwrites.edit(uid, {
+                        ViewChannel: true,
+                        SendMessages: true,
+                        ReadMessageHistory: true,
+                    });
+                } catch (permErr) {
+                    func.handle_errors(permErr, client, 'functions.js', `Failed to add <@${uid}> to merged ticket overwrites`);
+                }
+                try {
+                    if (typeof db.addTicketParticipant === 'function') {
+                        const srcId = uid === sourceOwnerId ? sourceNumber : ((extraParts || []).find(p => String(p.userId) === uid)?.sourceTicketId || sourceNumber);
+                        await db.addTicketParticipant(survivorNumber, uid, srcId);
+                    }
+                } catch (dbErr) {
+                    func.handle_errors(dbErr, client, 'functions.js', 'Failed to store merged ticket participant');
+                }
+                await addChannelToUserTicketIndex(uid, survivorChannel.id);
+                addedUserIds.add(uid);
+            }
+
+            const answers = (formAnswers || '').trim() || 'No form answers found.';
+            const embed = new EmbedBuilder()
+                .setColor(client.config?.bot_settings?.main_color || 0x208cdd)
+                .setTitle(`Merged from ${survivorType} #${sourceNumber}`)
+                .setDescription(answers.slice(0, 4000))
+                .setFooter({ text: `Original ticket ${sourceChannel.name}` });
+            if (sourceUser) {
+                embed.setAuthor({ name: sourceUser.username, iconURL: sourceUser.displayAvatarURL() });
+            }
+            const pingList = [...usersToAdd].map(id => `<@${id}>`).join(' ');
+            try {
+                await survivorChannel.send({
+                    content: `${pingList} your report was merged into this ticket. You can keep adding information here.`,
+                    embeds: [embed],
+                    allowedMentions: { users: [...usersToAdd] },
+                });
+            } catch (embedErr) {
+                func.handle_errors(embedErr, client, 'functions.js', `Failed to post merged form answers from ${sourceChannel.name}`);
+            }
+
+            await module.exports.closeTicket(client, sourceChannel, staffMember, `Merged into #${survivorNumber}`);
+            succeeded.push({ id: sourceId, name: sourceChannel.name, ticketNumber: sourceNumber });
+        } catch (err) {
+            func.handle_errors(err, client, 'functions.js', `Failed to merge ticket ${sourceId}`);
+            failed.push({ id: sourceId, error: err.message || 'Unexpected error.' });
+        }
+    }
+
+    return { succeeded, failed, survivorNumber, addedCount: addedUserIds.size };
 };

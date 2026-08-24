@@ -77,7 +77,8 @@
 			"unique_button_identifier": "bug_report",
 			"button_type": "PRIMARY",
 			"button_emoji": "🐞",
-			"allow_transfers": false
+			"allow_transfers": false,
+			"allow_merges": true
 		},
 		"HR": {
 			"abbreviation": "HR",

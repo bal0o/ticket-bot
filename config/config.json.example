@@ -16,26 +16,16 @@
 "role_ids": {
 "role_ids_ban_cmd": [],
 "role_ids_info_cmd": [],
-"role_ids_stats_cmd": [],
-"role_ids_wipestats_cmd": [],
-"role_ids_blacklist_cmd": [],
-        "role_ids_anonymous_cmd": [],
+"role_ids_anonymous_cmd": [],
+"role_ids_checkcc_cmd": [],
 "default_admin_role_id": "",
-"application_admin_role_id": "",
-"ticket_blacklisted_role_id": ""
-    ,"role_ids_checkcc_cmd": []
-},
-
-"presence_monitor": {
-"enabled": true,
-"guild_id": ""
+"application_admin_role_id": ""
 },
 
 "channel_ids": {
 "public_guild_id": "",
 "staff_guild_id": "",
 "error_channel": "",
-"feedback_channel": "",
 "post_embed_channel_id": "",
 "internal_post_embed_channel_id": ""
     ,"checkcc_channel_id": ""
@@ -76,6 +66,7 @@
 
 "tokens": {
 	"bot_token": "your_discord_bot_token_here",
+	"staff_bot_token": "your_staff_discord_bot_token_here",
 	"Linking_System_API_Key_Or_Secret": "",
 	"cheetosToken": "",
 	"steamToken": "",

@@ -1,4 +1,5 @@
-const config = require("../config/config.json");
+const { loadJson } = require("../utils/jsonConfig");
+const config = loadJson("config/config.json", {});
 const {
     EmbedBuilder,
     ActionRowBuilder,
@@ -11,7 +12,8 @@ const func = require("../utils/functions.js");
 const logger = require("../utils/logger");
 const { createDB } = require('../utils/mysql');
 const db = createDB();
-const lang = require("../content/handler/lang.json");
+const lang = loadJson("content/handler/lang.json", {});
+const bots = require("../utils/clients");
 
 // Track users who are in the ticket selection process
 const usersSelectingTicket = new Set();
@@ -176,6 +178,10 @@ async function logMessageToDB(message) {
 
 module.exports = async function (client, message) {
     try {
+        const isDM = message.channel.type === ChannelType.DM;
+        if (isDM && client.botRole === 'staff') return;
+        if (!isDM && client.botRole === 'public') return;
+
         // Always attempt to log the message first (including bot messages)
         await logMessageToDB(message);
 
@@ -184,7 +190,7 @@ module.exports = async function (client, message) {
 
         if (message.author.bot || client.blocked_users.has(message.author.id)) return;
         if (message.channel.type === ChannelType.DM) {
-            const guild = client.guilds.cache.get(config.channel_ids.staff_guild_id);
+            const guild = bots.staffGuild(client);
             if (!guild) return;
 
             // Fast-path: find user's ticket channels by topic
@@ -348,7 +354,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 usersSelectingTicket.delete(message.author.id);
             }
         } else {
-            const staffGuild = await client.guilds.cache.get(client.config.channel_ids.staff_guild_id);
+            const staffGuild = bots.staffGuild(client);
             if (!staffGuild || message.guild.id !== staffGuild.id) return;
 
             // Only relay messages sent in the main ticket channel.
@@ -384,6 +390,19 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
             }
 
             try {
+                if (typeof db.recordStaffTicketActivity === 'function' && message.author && !message.author.bot) {
+                    await db.recordStaffTicketActivity({
+                        channelId: message.channel.id,
+                        ticketId: func.parseTicketNumberFromChannelName(message.channel.name),
+                        openerId: userId,
+                        staffId: message.author.id,
+                        staffName: message.author.username || message.author.globalName || null,
+                        at: message.createdTimestamp || Date.now()
+                    });
+                }
+            } catch (_) {}
+
+            try {
                 logger.event('StaffTicketMessage.raw', {
                     guildId: message.guild.id,
                     channelId: message.channel.id,
@@ -408,7 +427,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 return;
             }
 
-            const user = await client.users.fetch(userId).catch(() => null);
+            const user = await bots.fetchDmUser(client, userId);
             if (!user) {
                 await notifyDeliveryIssue(
                     message.channel,
@@ -416,6 +435,8 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 );
                 return message.reply("Could not find the user to send the message to.");
             }
+
+            const staffMember = await func.resolveMessageMember(message, { force: true });
             
             const prefix = client.config.bot_settings.prefix;
             const handlerRaw = require("../content/handler/options.json");
@@ -459,7 +480,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                     const claim = (client.claims && client.claims.get(message.channel.id)) || await db.get(`Claims.${message.channel.id}`);
                     if (claim && claim.userId && claim.userId !== message.author.id) {
                         const bypassRoles = new Set(client.config?.claims?.role_bypass_ids || []);
-                        const hasBypass = message.member.roles.cache.some(r => bypassRoles.has(r.id));
+                        const hasBypass = func.memberHasAnyRole(staffMember, [...bypassRoles]);
                         if (!hasBypass) {
                             await message.reply(`This ticket is claimed by <@${claim.userId}>.`).catch(() => {});
                             return;
@@ -608,18 +629,11 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                         }
                         return await db.set(`StaffForwardMap.${message.id}`, staffForward).catch(e => func.handle_errors(e, client, `messageCreate.js`, null));
                     }
-                    const roles = message.member.roles.cache
-                        .filter(role => role.id !== message.guild.id)
-                        .sort((a, b) => b.position - a.position);
-                    
-                    const highestRole = roles.first();
-                    const roleName = highestRole ? highestRole.name : 'Staff';
-                    
-                    const staffAvatar = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
+                    const authorInfo = func.getStaffReplyAuthorInfo(staffMember, message.author);
                     const replyEmbed = new EmbedBuilder()
                         .setAuthor({ 
-                            name: `${message.member.displayName} (${roleName})`, 
-                            iconURL: staffAvatar
+                            name: `${authorInfo.displayName} (${authorInfo.roleName})`, 
+                            iconURL: authorInfo.avatarURL
                         })
                         .setDescription(replyContent)
                         .setColor(client.config.bot_settings.main_color)
@@ -652,7 +666,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
             } else if (shouldForwardToUser && message.content.startsWith(`${prefix}r`)) {
                 if (ticketType && ticketType["anonymous-only-replies"] === false) {
                     const allowedRoles = client.config.role_ids.role_ids_anonymous_cmd;
-                    if (!message.member.roles.cache.some(role => allowedRoles.includes(role.id))) {
+                    if (!func.memberHasAnyRole(staffMember, allowedRoles)) {
                         return message.reply("You do not have permission to use this command.");
                     }
                 }
@@ -696,7 +710,7 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
 
             } else if (message.content.startsWith(`${prefix}close`)) {
                 const reason = message.content.slice(`${prefix}close`.length).trim() || 'No Reason Provided.';
-                await func.closeTicket(client, message.channel, message.member, reason);
+                await func.closeTicket(client, message.channel, staffMember || message.author, reason);
             
             } else if (message.content.startsWith(prefix)) {
                 const args = message.content.slice(prefix.length).trim().split(/ +/);
@@ -776,18 +790,11 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                             }
 							return;
 						}
-                        const roles = message.member.roles.cache
-                            .filter(role => role.id !== message.guild.id)
-                            .sort((a, b) => b.position - a.position);
-                        
-                        const highestRole = roles.first();
-                        const roleName = highestRole ? highestRole.name : 'Staff';
-                        
-                        const staffAvatar2 = (message.member && typeof message.member.displayAvatarURL === 'function' && message.member.displayAvatarURL()) || message.author.displayAvatarURL();
+                        const authorInfo = func.getStaffReplyAuthorInfo(staffMember, message.author);
                         const replyEmbed = new EmbedBuilder()
                             .setAuthor({ 
-                                name: `${message.member.displayName} (${roleName})`, 
-                                iconURL: staffAvatar2
+                                name: `${authorInfo.displayName} (${authorInfo.roleName})`, 
+                                iconURL: authorInfo.avatarURL
                             })
                             .setDescription(replyContent)
                             .setColor(client.config.bot_settings.main_color)
@@ -881,7 +888,7 @@ async function processTicketMessage(message, channel, client) {
     if (!webhook) {
         try {
             // Check if bot can manage webhooks
-            if (!webhookChannel || !webhookChannel.permissionsFor(client.user).has('MANAGE_WEBHOOKS')) {
+            if (!webhookChannel || !webhookChannel.permissionsFor(bots.staffClient(client).user).has('MANAGE_WEBHOOKS')) {
                 throw new Error('Bot lacks MANAGE_WEBHOOKS permission');
             }
             
