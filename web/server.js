@@ -43,6 +43,10 @@ const withTimeout = (promise, ms = 5000, errorMessage = 'Operation timeout') => 
     ]);
 };
 
+function canWrite(res) {
+    return !res.headersSent && !res.writableEnded;
+}
+
 if (!WEB_ENABLED) {
     console.log('[web] Disabled by config.');
     process.exit(0);
@@ -378,14 +382,15 @@ async function lookupTicketByNumber(ticketNum) {
     for (const tid of ticketNumberLookupVariants(ticketNum)) {
         try {
             const [rows] = await db.query(
-                'SELECT user_id, ticket_type, ticket_id FROM tickets WHERE ticket_id = ? LIMIT 1',
+                'SELECT user_id, ticket_type, ticket_id, channel_id FROM tickets WHERE ticket_id = ? LIMIT 1',
                 [tid]
             );
             if (rows && rows.length > 0) {
                 return {
                     ownerId: String(rows[0].user_id || ''),
                     ticketId: String(rows[0].ticket_id || tid),
-                    ticketType: rows[0].ticket_type || null
+                    ticketType: rows[0].ticket_type || null,
+                    channelId: rows[0].channel_id ? String(rows[0].channel_id) : null
                 };
             }
         } catch (_) {}
@@ -393,33 +398,41 @@ async function lookupTicketByNumber(ticketNum) {
     return null;
 }
 
-/** Build WHERE fragments for ticket_messages by stable ticket number. */
-function buildTicketMessageWhereClauses(mode, ticketNum) {
-    const variants = ticketNumberLookupVariants(ticketNum);
-    const whereClauses = [];
-    const params = [];
-    if (!variants.length) return { whereClauses, params };
-
+async function fetchTranscriptMessages(mode, { channelId, channelName, ticketNum }) {
+    if (typeof db.query !== 'function') return [];
+    const cols = `message_id, channel_id, channel_name, guild_id,
+                  author_id, author_tag, author_username, author_is_bot,
+                  created_at, content, pinned, type, webhook_id, embeds, attachments`;
     if (mode === 'staff') {
-        const staffNames = variants.map((v) => `staff-chat-${v}`);
-        whereClauses.push(`channel_name IN (${staffNames.map(() => '?').join(',')})`);
-        params.push(...staffNames);
-        return { whereClauses, params };
+        const names = ticketNumberLookupVariants(ticketNum).map((v) => `staff-chat-${v}`);
+        if (!names.length) return [];
+        const [rows] = await db.query(
+            `SELECT ${cols} FROM ticket_messages
+             WHERE channel_name IN (${names.map(() => '?').join(',')})
+             ORDER BY created_at ASC, message_id ASC`,
+            names
+        );
+        return rows || [];
     }
-
-    // full / user: all main-ticket channel names that end with -<ticketNum> (excludes staff threads)
-    for (const suffix of variants) {
-        if (STAFF_GUILD_ID) {
-            whereClauses.push(
-                '(guild_id = ? AND channel_name LIKE ? AND channel_name NOT LIKE ?)'
-            );
-            params.push(String(STAFF_GUILD_ID), `%-${suffix}`, 'staff-chat%');
-        } else {
-            whereClauses.push('(channel_name LIKE ? AND channel_name NOT LIKE ?)');
-            params.push(`%-${suffix}`, 'staff-chat%');
-        }
+    if (channelId) {
+        const [rows] = await db.query(
+            `SELECT ${cols} FROM ticket_messages
+             WHERE channel_id = ?
+             ORDER BY created_at ASC, message_id ASC`,
+            [String(channelId)]
+        );
+        return rows || [];
     }
-    return { whereClauses, params };
+    if (channelName) {
+        const [rows] = await db.query(
+            `SELECT ${cols} FROM ticket_messages
+             WHERE channel_name = ?
+             ORDER BY created_at ASC, message_id ASC`,
+            [String(channelName)]
+        );
+        return rows || [];
+    }
+    return [];
 }
 
 async function findTicketContextByFilename(filename) {
@@ -445,14 +458,19 @@ async function findTicketContextByFilename(filename) {
                     const idx = await db.getTranscriptIndex(c);
                     if (idx && (idx.ownerId || idx.ticketId)) {
                         // Enrich with ticketType from tickets table if missing
-                        if (!idx.ticketType && idx.ownerId && idx.ticketId) {
+                        if ((!idx.ticketType || !idx.channelId) && idx.ownerId && idx.ticketId) {
                             try {
                                 const [tickets] = await db.query(
-                                    'SELECT ticket_type FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
+                                    'SELECT ticket_type, channel_id FROM tickets WHERE user_id = ? AND ticket_id = ? LIMIT 1',
                                     [idx.ownerId, idx.ticketId]
                                 );
-                                if (tickets && tickets.length > 0 && tickets[0].ticket_type) {
-                                    idx.ticketType = tickets[0].ticket_type;
+                                if (tickets && tickets.length > 0) {
+                                    if (!idx.ticketType && tickets[0].ticket_type) {
+                                        idx.ticketType = tickets[0].ticket_type;
+                                    }
+                                    if (!idx.channelId && tickets[0].channel_id) {
+                                        idx.channelId = String(tickets[0].channel_id);
+                                    }
                                 }
                             } catch (_) {}
                         }
@@ -552,13 +570,13 @@ authApi = createAuth({
 });
 app.use(authApi.attachUser);
 
-// Request timeout protection (10 seconds)
 app.use((req, res, next) => {
     res.setTimeout(10000, () => {
-        if (!res.headersSent) {
-            console.error(`[web] Request timeout: ${req.method} ${req.path}`);
+        if (!canWrite(res)) return;
+        console.error(`[web] Request timeout: ${req.method} ${req.path}`);
+        try {
             res.status(503).send('Request timeout');
-        }
+        } catch (_) {}
     });
     next();
 });
@@ -1736,16 +1754,17 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
         const base = transcriptBasename(filename);
         let ticketNum = extractTicketNumberFromBase(base);
 
-        // Load ticket / owner context (may be null for non-ticket transcripts)
         let ownerId = null;
         let ticketId = null;
         let ticketType = null;
+        let channelId = null;
         try {
             const ctx = await findTicketContextByFilename(filename);
             if (ctx) {
                 ownerId = ctx.ownerId || null;
                 ticketId = ctx.ticketId || null;
                 ticketType = ctx.ticketType || null;
+                channelId = ctx.channelId || null;
             }
         } catch (_) {}
 
@@ -1753,47 +1772,17 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
             ticketNum = extractTicketNumberFromBase(ticketId) || (/^\d+$/.test(String(ticketId).trim()) ? String(ticketId).trim() : null);
         }
 
-        // Fetch messages from ticket_messages by stable ticket number (survives rename/move).
-        // Staff view: staff-chat-<num> only. Full/user: all channels ending in -<num>, excluding staff threads.
-        let rows = [];
-        if (typeof db.query === 'function') {
-            const { whereClauses, params } = buildTicketMessageWhereClauses(mode, ticketNum);
+        if (!channelId && ticketId && typeof db.query === 'function') {
+            try {
+                const [trows] = await db.query(
+                    'SELECT channel_id FROM tickets WHERE ticket_id = ? AND channel_id IS NOT NULL LIMIT 1',
+                    [String(ticketId)]
+                );
+                if (trows && trows[0] && trows[0].channel_id) channelId = String(trows[0].channel_id);
+            } catch (_) {}
+        }
 
-            if (whereClauses.length > 0) {
-                console.log('[transcripts] raw DB query', {
-                    filename,
-                    mode,
-                    ticketNum,
-                    where: whereClauses.join(' OR ')
-                });
-                const [resRows] = await db.query(
-                    `SELECT message_id, channel_id, channel_name, guild_id,
-                            author_id, author_tag, author_username, author_is_bot,
-                            created_at, content, pinned, type, webhook_id, embeds, attachments
-                     FROM ticket_messages
-                     WHERE ${whereClauses.join(' OR ')}
-                     ORDER BY created_at ASC, message_id ASC`,
-                    params
-                );
-                rows = resRows || [];
-                console.log('[transcripts] raw DB result', {
-                    filename,
-                    rowCount: Array.isArray(rows) ? rows.length : 0
-                });
-            } else if (base) {
-                // Non-ticket transcripts (e.g. application comms) — match exact channel name only
-                const [resRows] = await db.query(
-                    `SELECT message_id, channel_id, channel_name, guild_id,
-                            author_id, author_tag, author_username, author_is_bot,
-                            created_at, content, pinned, type, webhook_id, embeds, attachments
-                     FROM ticket_messages
-                     WHERE channel_name = ?
-                     ORDER BY created_at ASC, message_id ASC`,
-                    [base]
-                );
-                rows = resRows || [];
-            }
-        } 
+        const rows = await fetchTranscriptMessages(mode, { channelId, channelName: base, ticketNum }); 
 
         if (rows && rows.length > 0) {
             // Derive close metadata from tickets table when available
@@ -1846,18 +1835,20 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                 responseTime
             });
 
+            if (!canWrite(res)) return;
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             return res.send(htmlBuf);
         }
 
-        // Fallback for legacy HTML transcripts when DB has no rows
         const abs = path.join(TRANSCRIPT_DIR, filename);
         if (!abs.startsWith(TRANSCRIPT_DIR)) return res.status(400).send('Invalid path');
         if (!fs.existsSync(abs)) return res.status(404).send('Not found');
+        if (!canWrite(res)) return;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         return fs.createReadStream(abs).pipe(res);
     } catch (e) {
         console.error('[web] /transcripts/raw error:', e);
+        if (!canWrite(res)) return;
         return res.status(500).send('Failed to render transcript');
     }
 });
