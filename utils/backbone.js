@@ -407,6 +407,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		user = dmUser;
 
 		let responses = ""
+		const formImages = []
 
 		// Check verification first if required
 		if (questionFilesystem.needVerified === true) {
@@ -603,8 +604,13 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 					break;
 				}
 
-				const extraData = reply?.first()?.attachments?.first()?.url ? reply.first().attachments?.first()?.url : "";
-				const userReplyText = reply.first().content || "";
+				const replyMessage = reply.first();
+				formImages.push(...func.collectImageFilesFromMessage(replyMessage));
+				const extraData = [...(replyMessage.attachments?.values?.() || [])]
+					.map(att => att.url || att.proxyURL)
+					.filter(Boolean)
+					.join(' ');
+				const userReplyText = replyMessage.content || "";
 
 				if (question === "When did this approximately happen?") {
 					const normalizedUserText = `${extraData} ${userReplyText}`.trim();
@@ -745,7 +751,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		if (questionFilesystem["open-as-ticket"] == true) {
             try { logger.event('TicketOpenChannel', { userId: user.id, ticketType, formattedTicketNumber }); } catch (_) {}
 			
-openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID);
+openResult = await func.openTicket(client, interaction, questionFilesystem, user, null, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, SteamID, formImages);
 // Kick off BM lookup without delaying ticket creation; posts one combined staff-thread embed
 ;(async () => {
     if (!func.willDeferStaffBmEmbed(client, SteamID, null)) return;
