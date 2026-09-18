@@ -7,16 +7,7 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <header class="navbar">
-    <div class="nav-left"><a href="/">BritRust Ticket System</a></div>
-    <div class="nav-right">
-      <a class="btn" href="/my">My Tickets</a>
-      <% if (canSeeApplications) { %>
-      <a class="btn" href="/applications">Applications</a>
-      <% } %>
-      <a class="btn" href="/logout">Logout</a>
-    </div>
-  </header>
+  <%- include('partials/navbar') %>
   <main class="container">
   <h1>Ticket Search</h1>
   <% if (hasSearchResults && pagination) { %>
@@ -60,7 +51,7 @@
     <% } %>
   </form>
   <div class="table-scroll">
-  <table class="with-filter staff-tickets-table">
+  <table class="with-filter staff-tickets-table card-table">
     <thead>
       <tr>
         <th>User</th>
@@ -76,14 +67,14 @@
     <tbody>
       <% tickets.forEach(t => { %>
         <tr>
-          <td title="<%= t.userId %>"><%= t.username || t.userId %></td>
-          <td><%= t.ticketId %></td>
-          <td><%= t.ticketType %></td>
-          <td><%= t.server || '' %></td>
-          <td><%= t.closeUser || '' %></td>
-          <td class="wrap pre"><%= t.closeReason || '' %></td>
-          <td><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
-          <td class="transcript-cell">
+          <td data-label="User" title="<%= t.userId %>"><%= t.username || t.userId %></td>
+          <td data-label="Ticket #"><%= t.ticketId %></td>
+          <td data-label="Type"><%= t.ticketType %></td>
+          <td data-label="Server"><%= t.server || '' %></td>
+          <td data-label="Closed By"><%= t.closeUser || '' %></td>
+          <td data-label="Close Reason" class="wrap pre"><%= t.closeReason || '' %></td>
+          <td data-label="Created"><%= t.createdAt ? t.createdAt.toLocaleString() : '' %></td>
+          <td data-label="Transcript" class="transcript-cell">
             <% if (t.transcriptFilename) { %>
               <% const base = String(t.transcriptFilename).split('/').pop().replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, ''); %>
               <a class="btn btn-compact primary" href="/transcripts/<%= base %>.full.html">Full</a>
@@ -178,6 +169,7 @@
       } catch {}
     });
   </script>
+  <script src="/static/nav.js"></script>
 </body>
 </html>
 

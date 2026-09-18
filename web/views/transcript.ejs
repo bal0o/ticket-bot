@@ -7,48 +7,26 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="transcript-page">
-  <header class="navbar">
-    <div class="nav-left"><a href="/">BritRust Ticket System</a></div>
-    <div class="nav-center">
-      <strong><%= filename %></strong>
-      <% if (ownerId || steamId || ticketId) { %>
-        <div class="muted" style="font-size:12px; margin-top:4px;">
-          <% if (ticketId) { %>Ticket #<%= ticketId %><% } %>
-          <% if (ownerId) { %> • Discord: <%= ownerId %><% } %>
-          <% if (steamId) { %> • SteamID: <%= steamId %><% } %>
-        </div>
-      <% } %>
-    </div>
-    <div class="nav-right">
-      <% if (roleFlags && roleFlags.isStaff) { %>
-        <a class="btn" href="/staff">Staff View</a>
-      <% } %>
-      <% if (canSeeApplications) { %>
-        <a class="btn" href="/applications">Applications</a>
-      <% } %>
-      <a class="btn" href="/logout">Logout</a>
-    </div>
-  </header>
+  <%- include('partials/navbar', { transcriptFile: filename }) %>
+  <% const isFull = filename.endsWith('.full.html'); %>
+  <% const isStaff = filename.endsWith('.staff.html'); %>
+  <% const base = filename.replace(/\.(?:full|staff)?\.html$/i, ''); %>
+  <div class="transcript-toolbar">
+    <span class="muted">View:</span>
+    <% if (!isFull) { %>
+      <a class="btn" href="/transcripts/<%= base %>.full.html">Full</a>
+    <% } %>
+    <% if (!isStaff) { %>
+      <a class="btn" href="/transcripts/<%= base %>.staff.html">Staff</a>
+    <% } %>
+    <% if (!filename.endsWith('.html') || isFull || isStaff) { %>
+      <a class="btn" href="/transcripts/<%= base %>.html">User</a>
+    <% } %>
+  </div>
   <div class="iframe-wrap">
     <iframe src="/transcripts/raw/<%= filename %>" title="Transcript"></iframe>
   </div>
-  <div class="container" style="margin-top:12px;">
-    <% const isFull = filename.endsWith('.full.html'); %>
-    <% const isStaff = filename.endsWith('.staff.html'); %>
-    <% const base = filename.replace(/\.(?:full|staff)?\.html$/i, ''); %>
-    <div class="muted">Other views:</div>
-    <div class="transcript-toolbar">
-      <% if (!isFull) { %>
-        <a class="btn" href="/transcripts/<%= base %>.full.html">Full</a>
-      <% } %>
-      <% if (!isStaff) { %>
-        <a class="btn" href="/transcripts/<%= base %>.staff.html">Staff</a>
-      <% } %>
-      <% if (!filename.endsWith('.html') || isFull || isStaff) { %>
-        <a class="btn" href="/transcripts/<%= base %>.html">User</a>
-      <% } %>
-    </div>
-  </div>
+  <script src="/static/nav.js"></script>
 </body>
 </html>
 
