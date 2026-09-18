@@ -23,7 +23,7 @@
   <main class="container">
   <h1>My Tickets</h1>
   <% if (pagination) { %>
-  <form method="get" action="/my" class="filters" style="margin:12px 0; display:flex; gap:12px; align-items:center;">
+  <form method="get" action="/my" class="filters">
     <label>Page size:
       <select name="limit" onchange="this.form.submit()">
         <option value="10" <%= String(pagination.limit) === '10' ? 'selected' : '' %>>10</option>

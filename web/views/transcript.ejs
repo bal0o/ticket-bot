@@ -6,7 +6,7 @@
   <title>Transcript</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
+<body class="transcript-page">
   <header class="navbar">
     <div class="nav-left"><a href="/">BritRust Ticket System</a></div>
     <div class="nav-center">
@@ -37,7 +37,7 @@
     <% const isStaff = filename.endsWith('.staff.html'); %>
     <% const base = filename.replace(/\.(?:full|staff)?\.html$/i, ''); %>
     <div class="muted">Other views:</div>
-    <div style="display:flex; gap:8px; margin-top:6px;">
+    <div class="transcript-toolbar">
       <% if (!isFull) { %>
         <a class="btn" href="/transcripts/<%= base %>.full.html">Full</a>
       <% } %>

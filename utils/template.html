@@ -1,3 +1,4 @@
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
     --bg: #0b0b0b;
@@ -9,6 +10,8 @@
     --border: rgba(255, 255, 255, 0.18);
   }
 
+  *, *::before, *::after { box-sizing: border-box; }
+
   body {
     background-color: var(--bg);
     color: var(--text);
@@ -16,6 +19,12 @@
     font-size: 15px;
     margin: 0;
     padding: 24px;
+    overflow-x: hidden;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
   }
 
   .message-container {
@@ -192,7 +201,9 @@
     border-radius: 3px;
     font-size: 14px;
     color: var(--text);
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 100%;
   }
 
   pre {
@@ -209,7 +220,9 @@
     border-radius: 3px;
     font-size: 14px;
     color: var(--text);
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 100%;
 
   }
 
@@ -396,5 +409,42 @@
   /* Handle on hover */
   ::-webkit-scrollbar-thumb:hover {
     background: #525252;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+  }
+
+  @media (max-width: 640px) {
+    body {
+      padding: 12px;
+    }
+    .avatar {
+      height: 36px;
+      width: 36px;
+    }
+    .message-container {
+      margin-left: 44px;
+    }
+    .titleDiv {
+      display: block;
+    }
+    .IDtimeElement {
+      display: block;
+      margin-left: 0;
+      margin-top: 2px;
+    }
+    .EmbedBody {
+      max-width: 100%;
+    }
+    .info {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .info__metadata {
+      margin-left: 0;
+    }
   }
 </style>
