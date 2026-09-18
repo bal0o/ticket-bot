@@ -22,13 +22,13 @@
   </header>
   <main class="container">
     <h1>Applications</h1>
-    <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <div class="view-tabs">
       <span class="muted">View:</span>
       <a class="btn <%= !kind || kind === 'all' ? 'active' : '' %>" href="/applications?<% if (request && request.query && request.query.all) { %>all=1&<% } %>">All (<%= (devCount || 0) + (staffCount || 0) %>)</a>
       <a class="btn <%= kind === 'staff' ? 'active' : '' %>" href="/applications?kind=staff<% if (request && request.query && request.query.all) { %>&all=1<% } %>">Staff (<%= staffCount || 0 %>)</a>
       <a class="btn <%= kind === 'dev' ? 'active' : '' %>" href="/applications?kind=dev<% if (request && request.query && request.query.all) { %>&all=1<% } %>">Dev (<%= devCount || 0 %>)</a>
     </div>
-    <form method="get" action="/applications" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+    <form method="get" action="/applications" class="filters">
       <label>Stage:
         <input type="text" name="stage" value="<%= stage || '' %>">
       </label>
@@ -85,7 +85,7 @@
         </tbody>
       </table>
       </div>
-      <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <div class="batch-bar">
         <label>Batch action:
           <select name="action" required>
             <option value="">Select…</option>
@@ -94,7 +94,7 @@
             <option value="archive">Archive</option>
           </select>
         </label>
-        <input type="text" name="note" placeholder="Optional note / reason" style="flex:1; min-width:220px;">
+        <input type="text" name="note" placeholder="Optional note / reason">
         <button type="submit" class="btn primary">Apply to selected</button>
       </div>
     </form>

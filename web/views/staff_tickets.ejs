@@ -22,7 +22,7 @@
   <% if (hasSearchResults && pagination) { %>
     <p style="margin-bottom: 16px; color: #666;">Showing page <strong><%= pagination.page %></strong> of <strong><%= pagination.totalPages %></strong> (<strong><%= resultCount %></strong> total ticket<%= resultCount !== 1 ? 's' : '' %>)</p>
   <% } %>
-  <form method="get" action="/staff" class="filters" style="margin-bottom:16px; display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+  <form method="get" action="/staff" class="filters">
     <label>Ticket ID:
       <input type="text" name="ticket" placeholder="e.g., 1234" value="<%= (query && query.ticket) || '' %>">
     </label>

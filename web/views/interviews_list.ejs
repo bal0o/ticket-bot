@@ -19,9 +19,9 @@
     <p class="muted">Application Type: <%= app.type %> • Current Stage: <%= app.stage %></p>
     
          <section>
-       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+       <div class="section-heading">
          <h3>Scheduled Interviews</h3>
-         <form method="post" action="/applications/<%= app.id %>/interviews/cleanup" style="display: inline;">
+         <form method="post" action="/applications/<%= app.id %>/interviews/cleanup">
            <button class="btn" type="submit" onclick="return confirm('Clean up all old interview records? This will remove completed, error, and skipped interviews.')">
              🧹 Cleanup Old Records
            </button>
@@ -80,11 +80,9 @@
          <section style="margin-top: 24px;">
        <h3>Schedule New Interview</h3>
        <p class="muted" style="margin-bottom: 12px;">All times are in your local timezone and will be automatically converted to UTC for scheduling.</p>
-       <form method="post" action="/applications/<%= app.id %>/schedule" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
-         <div style="display:flex; gap:8px; align-items:center;">
-           <label>Interview time: <input type="datetime-local" name="when" required></label>
-           <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
-         </div>
+       <form method="post" action="/applications/<%= app.id %>/schedule" class="filters">
+         <label>Interview time: <input type="datetime-local" name="when" required></label>
+         <label>Staff ID: <input type="text" name="staff_id" placeholder="Discord Staff ID" required></label>
          <input type="hidden" name="when_utc" value="">
          <button class="btn primary" type="submit">Schedule Interview</button>
        </form>
@@ -93,7 +91,7 @@
   
   <!-- Reschedule Modal -->
   <div id="rescheduleModal" class="modal">
-    <div class="modal-content">
+    <div class="modal-content compact">
       <div class="modal-header">
         <h2>Reschedule Interview</h2>
         <span class="close" onclick="closeRescheduleModal()">&times;</span>
