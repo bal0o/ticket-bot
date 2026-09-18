@@ -647,6 +647,116 @@ function getRegionCodeFromResponses(responses) {
     return null;
 }
 
+const DISCORD_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|heic)$/i;
+
+function isDiscordImageAttachment(att) {
+    if (!att) return false;
+    const type = String(att.contentType || '').toLowerCase();
+    if (type.startsWith('image/')) return true;
+    const name = String(att.name || att.url || att.proxyURL || '').split('?')[0];
+    return DISCORD_IMAGE_EXT_RE.test(name);
+}
+
+function attachmentUrlKey(url) {
+    return String(url || '').split('?')[0].toLowerCase();
+}
+
+module.exports.collectImageFilesFromMessage = function(message) {
+    const files = [];
+    const atts = message?.attachments;
+    if (!atts) return files;
+    const list = typeof atts.values === 'function' ? [...atts.values()] : (Array.isArray(atts) ? atts : []);
+    const seen = new Set();
+    for (const att of list) {
+        if (!isDiscordImageAttachment(att)) continue;
+        const url = att.url || att.proxyURL;
+        if (!url) continue;
+        const key = attachmentUrlKey(url);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        files.push({
+            attachment: url,
+            name: att.name || `image-${att.id || files.length + 1}.png`,
+            size: att.size || 0
+        });
+    }
+    return files;
+};
+
+function extractDiscordAttachmentUrls(text) {
+    if (!text || typeof text !== 'string') return [];
+    const matches = text.match(/https?:\/\/[^\s<>"'`]+/gi) || [];
+    const urls = [];
+    const seen = new Set();
+    for (const raw of matches) {
+        const url = raw.replace(/[),.;!?]+$/g, '');
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname.toLowerCase();
+            if (!host.includes('discord')) continue;
+            if (!/\/(attachments|ephemeral-attachments|media)\//i.test(parsed.pathname)) continue;
+        } catch (_) {
+            continue;
+        }
+        const key = attachmentUrlKey(url);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        urls.push(url);
+    }
+    return urls;
+}
+
+function mergeFormImageFiles(formImages, responses) {
+    const files = [];
+    const seen = new Set();
+    for (const file of formImages || []) {
+        const url = file && file.attachment;
+        const key = attachmentUrlKey(url);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        files.push(file);
+    }
+    for (const url of extractDiscordAttachmentUrls(responses)) {
+        const key = attachmentUrlKey(url);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const name = decodeURIComponent(key.split('/').pop() || 'image.png');
+        files.push({ attachment: url, name });
+    }
+    return files;
+}
+
+async function sendFormImagesToStaffThread(thread, files) {
+    if (!thread || typeof thread.send !== 'function' || !Array.isArray(files) || files.length === 0) return;
+    const MAX_FILES = 10;
+    const MAX_TOTAL = 25 * 1024 * 1024;
+    let headerSent = false;
+    let batch = [];
+    let batchSize = 0;
+
+    const flush = async () => {
+        if (!batch.length) return;
+        await thread.send({
+            content: headerSent ? undefined : 'Images pasted in the ticket form:',
+            files: batch.map(({ attachment, name }) => ({ attachment, name })),
+            allowedMentions: { parse: [] }
+        });
+        headerSent = true;
+        batch = [];
+        batchSize = 0;
+    };
+
+    for (const file of files) {
+        const size = file.size || 0;
+        if (batch.length >= MAX_FILES || (batch.length && batchSize + size > MAX_TOTAL)) {
+            await flush();
+        }
+        batch.push(file);
+        batchSize += size;
+    }
+    await flush();
+}
+
 /** Markdown value for staff-thread Quick Links embed field. */
 function buildStaffQuickLinksValue(client, userId, steamId, responses) {
     const baseWeb = (client.config?.transcript_settings?.base_url || '').replace(/\/?transcripts\/?$/i, '') || 'http://localhost:3050';
@@ -751,7 +861,7 @@ async function notifyTicketCreationFailed(interaction, recepientMember) {
     }
 }
 
-module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, steamId) => {
+module.exports.openTicket = async (client, interaction, questionFile, recepientMember, administratorMember, ticketType, embed, formattedTicketNumber, questionFilesystem, responses, bmInfo, steamId, formImages) => {
     // Null check for recepientMember
     if (!recepientMember) {
         func.handle_errors(null, client, 'functions.js', 'openTicket called with null recepientMember');
@@ -1140,6 +1250,12 @@ try {
         // One staff-thread info embed (links + optional BM). Deferred when async BM lookup will post the combined embed.
         if (!module.exports.willDeferStaffBmEmbed(client, steamId, bmInfo)) {
             await module.exports.sendStaffThreadInfo(client, thread, recepientMember, formattedTicketNumber, steamId, responses, bmInfo);
+        }
+
+        try {
+            await sendFormImagesToStaffThread(thread, mergeFormImageFiles(formImages, responses));
+        } catch (imageLinkErr) {
+            func.handle_errors(imageLinkErr, client, 'functions.js', `Failed to post form images to staff thread for ticket #${formattedTicketNumber}`);
         }
 
         // Add access roles to the staff thread
