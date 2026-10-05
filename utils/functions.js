@@ -25,8 +25,13 @@ try {
  * @returns {boolean} - True if the ticket type is internal, false otherwise
  */
 module.exports.isTicketTypeInternal = function(ticketType) {
+    const questionFile = module.exports.findQuestionFileForTicketType(ticketType);
+    return !!(questionFile && questionFile.internal);
+};
+
+module.exports.findQuestionFileForTicketType = function(ticketType) {
     try {
-        if (!ticketType) return false;
+        if (!ticketType) return null;
         const handlerRaw = loadJson("content/handler/options.json", { options: {} });
         
         // Normalize the input: convert to lowercase and replace hyphens/spaces with a common separator
@@ -38,11 +43,10 @@ module.exports.isTicketTypeInternal = function(ticketType) {
             return normalizedKey === normalizedInput || optionKey.toLowerCase() === ticketType.toLowerCase();
         });
         
-        if (!found) return false;
-        const questionFile = loadJson(`content/questions/${handlerRaw.options[found].question_file}`, null);
-        return !!(questionFile && questionFile.internal);
+        if (!found) return null;
+        return loadJson(`content/questions/${handlerRaw.options[found].question_file}`, null);
     } catch (_) {
-        return false;
+        return null;
     }
 };
 
@@ -1505,19 +1509,24 @@ module.exports.updateTicketStatus = async function(client) {
     }
 }
 
+const CLOSE_TYPES = Object.freeze({ staff: 'closed', self: 'self-closed' });
+module.exports.CLOSE_TYPES = CLOSE_TYPES;
+
 /**
  * Shared ticket closure logic for both button/modal and !close command
  * @param {Client} client
  * @param {TextChannel} channel
- * @param {GuildMember|User} staffMember
+ * @param {GuildMember|User} closer
  * @param {string} reason
  */
-module.exports.closeTicket = async (client, channel, staffMember, reason) => {
+module.exports.closeTicket = async (client, channel, closer, reason, closeType = CLOSE_TYPES.staff) => {
     try {
         const staffBot = bots.staffClient(client);
         if (!channel || !channel.guild || !staffBot.channels.cache.has(channel.id)) {
             return false;
         }
+        const closerUser = closer.user || closer;
+        const isSelfClose = closeType === CLOSE_TYPES.self;
 
         const identity = await module.exports.resolveTicketIdentity(channel);
         const DiscordID = identity.userId;
@@ -1561,9 +1570,9 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
             .setColor(client.config.bot_settings.main_color)
             .setAuthor({
                 name: client.config.bot_settings.close_ticket_author_prefix
-                    ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', staffMember.username || staffMember.user?.username)
-                    : `Ticket Closed by ${staffMember.username || staffMember.user?.username}`,
-                iconURL: staffMember.displayAvatarURL ? staffMember.displayAvatarURL() : client.user.displayAvatarURL()
+                    ? client.config.bot_settings.close_ticket_author_prefix.replace('{{ADMIN}}', closerUser.username)
+                    : `Ticket Closed by ${closerUser.username}`,
+                iconURL: closer.displayAvatarURL ? closer.displayAvatarURL() : client.user.displayAvatarURL()
             })
             .setFooter({
                 text: `${DiscordID}-${globalTicketNumber} | ${ticketType} | Ticket Closed:`,
@@ -1595,9 +1604,9 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
             await func.closeDataAddDB(
                 DiscordID,
                 globalTicketNumber,
-                'closed',
-                staffMember.user.username,
-                staffMember.id,
+                closeType,
+                closerUser.username,
+                closerUser.id,
                 Math.floor(Date.now() / 1000),
                 reason,
                 savedTranscriptURL
@@ -1625,8 +1634,9 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
                     server: server,
                     createdAt: createdAt,
                     closeTime: Math.floor(Date.now() / 1000),
-                    closeUserID: String(staffMember.id || staffMember.user?.id || ''),
-                    closeUser: String(staffMember.user?.username || staffMember.username || ''),
+                    closeType,
+                    closeUserID: String(closerUser.id || ''),
+                    closeUser: String(closerUser.username || ''),
                     closeReason: String(reason || ''),
                     transcriptFilename: `${channel.name}.html`,
                     transcriptURL: savedTranscriptURL || null,
@@ -1695,7 +1705,7 @@ module.exports.closeTicket = async (client, channel, staffMember, reason) => {
 
         try {
             const feedback = require('./feedback');
-            if (feedback.shouldOfferFeedback(typeFile, ticketType) && user) {
+            if (!isSelfClose && feedback.shouldOfferFeedback(typeFile, ticketType) && user) {
                 await feedback.offerFeedback(client, {
                     user,
                     ticketId: String(globalTicketNumber),
