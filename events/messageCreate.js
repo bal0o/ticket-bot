@@ -314,6 +314,11 @@ async function logStaffDMForTranscript(ticketChannel, staffUser, rawContent) {
                 return;
             }
 
+            if (isSelfCloseCommand(message.content)) {
+                await handleSelfCloseRequest(message, activeTickets, client);
+                return;
+            }
+
             if (activeTickets.length === 1) {
                 await processTicketMessage(message, activeTickets[0].channel, client);
                 return;
@@ -1106,4 +1111,99 @@ async function processTicketMessage(message, channel, client) {
     }
     
     // No notification needed for application channels - the webhook message is sufficient
+}
+
+const SELF_CLOSE_COMMANDS = new Set(['close', 'close ticket']);
+const SELF_CLOSE_CANCEL_WORD = 'cancel';
+const SELF_CLOSE_PICK_TIMEOUT_MS = 30000;
+const SELF_CLOSE_REASON_TIMEOUT_MS = 120000;
+
+function isSelfCloseCommand(content) {
+    const normalized = String(content || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    return SELF_CLOSE_COMMANDS.has(normalized);
+}
+
+async function findSelfClosableTickets(activeTickets) {
+    const closable = [];
+    for (const ticket of activeTickets) {
+        if (ticket.type !== 'regular') continue;
+        const identity = await func.resolveTicketIdentity(ticket.channel);
+        const questionFile = func.findQuestionFileForTicketType(identity.ticketType);
+        if (questionFile?.internal) continue;
+        closable.push({ ...ticket, questionFile });
+    }
+    return closable;
+}
+
+async function handleSelfCloseRequest(message, activeTickets, client) {
+    const closable = await findSelfClosableTickets(activeTickets);
+    if (closable.length === 0) {
+        await message.channel.send("You have no tickets you can close yourself.").catch(() => {});
+        return;
+    }
+
+    usersSelectingTicket.add(message.author.id);
+    try {
+        const ticket = closable.length === 1 ? closable[0] : await pickTicketToClose(message, closable, client);
+        if (!ticket) return;
+
+        const reason = await askSelfCloseReason(message, ticket);
+        if (!reason) return;
+
+        const closed = await func.closeTicket(bots.staffClient(client), ticket.channel, message.author, reason, func.CLOSE_TYPES.self);
+        if (!closed) {
+            await message.channel.send("Could not close your ticket. Please try again or message the team.").catch(() => {});
+            return;
+        }
+        if (ticket.questionFile?.send_close_dm === false) {
+            await message.channel.send(`Your ${ticket.ticketInfo.title} ticket has been closed.`).catch(() => {});
+        }
+    } finally {
+        usersSelectingTicket.delete(message.author.id);
+    }
+}
+
+async function pickTicketToClose(message, tickets, client) {
+    const ticketList = tickets.map((t, idx) => `${idx + 1}) ${t.ticketInfo.title}`).join('\n');
+    const pickEmbed = new EmbedBuilder()
+        .setTitle("Close a Ticket")
+        .setDescription("Reply with the number of the ticket you want to close:")
+        .addFields({ name: "Your Active Tickets", value: ticketList })
+        .setColor(client.config.bot_settings.main_color);
+    const pickMessage = await message.channel.send({ embeds: [pickEmbed] });
+
+    const isValidPick = m => {
+        if (m.author.id !== message.author.id) return false;
+        const content = m.content.trim();
+        return /^[1-9][0-9]*$/.test(content) && parseInt(content) <= tickets.length;
+    };
+    try {
+        const collected = await message.channel.awaitMessages({ filter: isValidPick, max: 1, time: SELF_CLOSE_PICK_TIMEOUT_MS, errors: ['time'] });
+        return tickets[parseInt(collected.first().content.trim()) - 1];
+    } catch (_) {
+        await message.channel.send("No ticket selected. Your tickets stay open.").catch(() => {});
+        return null;
+    } finally {
+        await pickMessage.delete().catch(() => {});
+    }
+}
+
+async function askSelfCloseReason(message, ticket) {
+    await message.channel.send(
+        `Why are you closing your ${ticket.ticketInfo.title} ticket? Reply with a reason, or \`${SELF_CLOSE_CANCEL_WORD}\` to keep it open.`
+    );
+
+    const hasText = m => m.author.id === message.author.id && m.content.trim() !== '';
+    try {
+        const collected = await message.channel.awaitMessages({ filter: hasText, max: 1, time: SELF_CLOSE_REASON_TIMEOUT_MS, errors: ['time'] });
+        const reason = collected.first().content.trim();
+        if (reason.toLowerCase() === SELF_CLOSE_CANCEL_WORD) {
+            await message.channel.send("Close cancelled. Your ticket stays open.").catch(() => {});
+            return null;
+        }
+        return reason;
+    } catch (_) {
+        await message.channel.send("No reason received. Your ticket stays open.").catch(() => {});
+        return null;
+    }
 }
