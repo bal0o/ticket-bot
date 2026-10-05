@@ -174,7 +174,7 @@ module.exports = async function (client, interaction) {
             return;
         }
         
-        if (interaction.isButton() || interaction.isModalSubmit()) {
+        if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) {
             if (feedback.parseCsatId(interaction.customId)) {
                 try {
                     const handled = await feedback.handleInteraction(client, interaction);
