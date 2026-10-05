@@ -8,6 +8,7 @@ const {
 	TextInputBuilder,
 	TextInputStyle,
 	MessageFlags,
+	escapeMarkdown,
 } = require('discord.js');
 const { createDB } = require('./mysql');
 const func = require('./functions');
@@ -288,19 +289,12 @@ function buildShoutoutModal(ticketId, staffId, cfg) {
 		);
 }
 
-function buildShoutoutPost(client, { player, staffId, text, ticketType, ticketId }) {
+function buildShoutoutPost(client, { player, staffId, text }) {
 	const embed = new EmbedBuilder()
 		.setColor(client.config?.bot_settings?.main_color || 0x208cdd)
-		.setTitle('Staff shout-out')
-		.setAuthor({
-			name: player.globalName || player.username,
-			iconURL: player.displayAvatarURL(),
-		})
-		.setDescription(text)
-		.setFooter({ text: `${ticketType || 'ticket'} #${ticketId}` })
-		.setTimestamp();
+		.setDescription(text);
 	return {
-		content: `<@${staffId}>`,
+		content: `<@${staffId}> ${escapeMarkdown(player.username)} has given you a shoutout`,
 		embeds: [embed],
 		allowedMentions: { users: [staffId] },
 	};
@@ -562,8 +556,6 @@ async function submitShoutout(client, interaction, ticketId, staffId, cfg) {
 			player: interaction.user,
 			staffId,
 			text,
-			ticketType: staff.ticket_type,
-			ticketId,
 		}));
 	} catch (e) {
 		await releaseShoutout(userId, ticketId);
