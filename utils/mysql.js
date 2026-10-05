@@ -672,6 +672,9 @@ class MySQLAdapter {
                     INDEX idx_feedback_first (first_responder_user_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             `);
+            await this._addColumnIfMissing(conn, 'ticket_feedback', 'shoutout_staff_id', 'VARCHAR(255) NULL');
+            await this._addColumnIfMissing(conn, 'ticket_feedback', 'shoutout_text', 'TEXT NULL');
+            await this._addColumnIfMissing(conn, 'ticket_feedback', 'shoutout_at', 'BIGINT NULL');
         } finally {
             if (!existingConn) conn.release();
         }

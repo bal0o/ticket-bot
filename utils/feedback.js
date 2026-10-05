@@ -3,6 +3,7 @@ const {
 	ActionRowBuilder,
 	ButtonBuilder,
 	ButtonStyle,
+	StringSelectMenuBuilder,
 	ModalBuilder,
 	TextInputBuilder,
 	TextInputStyle,
@@ -10,6 +11,7 @@ const {
 } = require('discord.js');
 const { createDB } = require('./mysql');
 const func = require('./functions');
+const bots = require('./clients');
 const { loadJson } = require('./jsonConfig');
 
 const db = createDB();
@@ -26,8 +28,19 @@ const DEFAULT_FEEDBACK = {
 	comment_modal_label: 'Anything else? (optional)',
 	comment_skip_label: 'Skip',
 	comment_add_label: 'Add comment',
+	shoutout_channel_id: '',
+	shoutout_prompt: 'Was your experience exceptional? Did our staff do a stand out job? Send a shout-out!',
+	shoutout_select_placeholder: 'Send a shout-out',
+	shoutout_modal_title: 'Send a shout-out',
+	shoutout_modal_label: 'What did they do well?',
+	shoutout_sent: 'Shout-out sent. Thank you!',
+	shoutout_failed: 'Your shout-out could not be sent. Please try again.',
+	shoutout_invalid_staff: 'That staff member did not work on this ticket.',
 	questions: [],
 };
+
+const SELECT_OPTION_LIMIT = 25;
+const SHOUTOUT_MAX_LENGTH = 500;
 
 const sessions = new Map();
 
@@ -209,6 +222,117 @@ async function loadTicketStaffContext(userId, ticketId) {
 	return rows?.[0] || {};
 }
 
+function ticketRowStaff(staff) {
+	const members = [
+		{ id: staff.close_user_id, name: staff.close_user },
+		{ id: staff.claimed_by_user_id, name: staff.claimed_by_user },
+		{ id: staff.first_staff_response_user_id, name: staff.first_staff_response_user },
+	].filter((member) => member.id);
+	const seen = new Set();
+	return members
+		.map((member) => ({ id: String(member.id), name: member.name || null }))
+		.filter((member) => !seen.has(member.id) && seen.add(member.id));
+}
+
+async function loadShoutoutCandidates(userId, ticketId, staff) {
+	const [rows] = await db.query(
+		`SELECT m.author_id AS id, MAX(m.author_username) AS name
+		 FROM tickets t
+		 INNER JOIN ticket_messages m ON m.channel_id = t.channel_id
+		 LEFT JOIN ticket_participants p ON p.ticket_id = t.ticket_id AND p.user_id = m.author_id
+		 WHERE t.user_id = ? AND t.ticket_id = ?
+		   AND m.author_is_bot = 0
+		   AND m.author_id <> t.user_id
+		   AND p.id IS NULL
+		   AND (m.channel_name IS NULL OR m.channel_name NOT LIKE 'staff-chat-%')
+		 GROUP BY m.author_id
+		 ORDER BY MAX(m.created_at) DESC
+		 LIMIT ${SELECT_OPTION_LIMIT}`,
+		[String(userId), String(ticketId)]
+	);
+	if (rows && rows.length) {
+		return rows.map((row) => ({ id: String(row.id), name: row.name || null }));
+	}
+	return ticketRowStaff(staff).slice(0, SELECT_OPTION_LIMIT);
+}
+
+function shoutoutText(cfg, key) {
+	return cfg[key] || DEFAULT_FEEDBACK[key];
+}
+
+function buildShoutoutSelect(ticketId, candidates, cfg) {
+	return new ActionRowBuilder().addComponents(
+		new StringSelectMenuBuilder()
+			.setCustomId(`csat:shout:${ticketId}`)
+			.setPlaceholder(shoutoutText(cfg, 'shoutout_select_placeholder').slice(0, 150))
+			.addOptions(candidates.map((member) => ({
+				label: (member.name || member.id).slice(0, 100),
+				value: member.id,
+			})))
+	);
+}
+
+function buildShoutoutModal(ticketId, staffId, cfg) {
+	return new ModalBuilder()
+		.setCustomId(`csat:shoutmodal:${ticketId}:${staffId}`)
+		.setTitle(shoutoutText(cfg, 'shoutout_modal_title').slice(0, 45))
+		.addComponents(
+			new ActionRowBuilder().addComponents(
+				new TextInputBuilder()
+					.setCustomId('csat_shoutout')
+					.setLabel(shoutoutText(cfg, 'shoutout_modal_label').slice(0, 45))
+					.setStyle(TextInputStyle.Paragraph)
+					.setRequired(true)
+					.setMaxLength(SHOUTOUT_MAX_LENGTH)
+			)
+		);
+}
+
+function buildShoutoutPost(client, { player, staffId, text, ticketType, ticketId }) {
+	const embed = new EmbedBuilder()
+		.setColor(client.config?.bot_settings?.main_color || 0x208cdd)
+		.setTitle('Staff shout-out')
+		.setAuthor({
+			name: player.globalName || player.username,
+			iconURL: player.displayAvatarURL(),
+		})
+		.setDescription(text)
+		.setFooter({ text: `${ticketType || 'ticket'} #${ticketId}` })
+		.setTimestamp();
+	return {
+		content: `<@${staffId}>`,
+		embeds: [embed],
+		allowedMentions: { users: [staffId] },
+	};
+}
+
+async function shoutoutAlreadySent(userId, ticketId) {
+	const [rows] = await db.query(
+		'SELECT id FROM ticket_feedback WHERE user_id = ? AND ticket_id = ? AND shoutout_text IS NOT NULL LIMIT 1',
+		[String(userId), String(ticketId)]
+	);
+	return !!(rows && rows[0]);
+}
+
+async function claimShoutout(userId, ticketId, staffId, text) {
+	const [result] = await db.query(
+		`UPDATE ticket_feedback
+		 SET shoutout_staff_id = ?, shoutout_text = ?, shoutout_at = ?
+		 WHERE user_id = ? AND ticket_id = ? AND shoutout_text IS NULL`,
+		[staffId, text, Math.floor(Date.now() / 1000), String(userId), String(ticketId)]
+	);
+	return result.affectedRows > 0;
+}
+
+async function releaseShoutout(userId, ticketId) {
+	await db.query(
+		`UPDATE ticket_feedback
+		 SET shoutout_staff_id = NULL, shoutout_text = NULL, shoutout_at = NULL
+		 WHERE user_id = ? AND ticket_id = ?`,
+		[String(userId), String(ticketId)]
+	);
+}
+
 async function saveFeedback({ userId, ticketId, ticketType, server, answers, staff }) {
 	const overall = answers.overall != null ? Number(answers.overall) : null;
 	await db.query(
@@ -353,12 +477,18 @@ async function advanceOrFinish(interaction, ticketId, session) {
 			staff,
 		});
 		clearSession(interaction.user.id, ticketId);
+		const candidates = cfg.shoutout_channel_id
+			? await loadShoutoutCandidates(interaction.user.id, ticketId, staff)
+			: [];
+		const thanks = cfg.thanks_complete || 'Thanks for your feedback.';
 		const doneEmbed = new EmbedBuilder()
 			.setColor(clientFrom(interaction).config?.bot_settings?.main_color || 0x208cdd)
-			.setDescription(cfg.thanks_complete || 'Thanks for your feedback.');
+			.setDescription(candidates.length ? `${thanks}\n\n${shoutoutText(cfg, 'shoutout_prompt')}` : thanks);
+		const components = disabledRowFromMessage(interaction.message, 'Submitted');
+		if (candidates.length) components.push(buildShoutoutSelect(ticketId, candidates, cfg));
 		await replySessionMessage(interaction, {
 			embeds: [doneEmbed],
-			components: disabledRowFromMessage(interaction.message, 'Submitted'),
+			components,
 			content: null,
 		});
 		return;
@@ -381,6 +511,70 @@ async function advanceOrFinish(interaction, ticketId, session) {
 	});
 }
 
+function shoutoutSentPayload(interaction, cfg) {
+	const embed = new EmbedBuilder()
+		.setColor(clientFrom(interaction).config?.bot_settings?.main_color || 0x208cdd)
+		.setDescription(shoutoutText(cfg, 'shoutout_sent'));
+	return {
+		embeds: [embed],
+		components: disabledRowFromMessage(interaction.message, 'Shout-out sent'),
+		content: null,
+	};
+}
+
+async function showShoutoutModal(interaction, ticketId, cfg) {
+	if (await shoutoutAlreadySent(interaction.user.id, ticketId)) {
+		await interaction.update(shoutoutSentPayload(interaction, cfg));
+		return;
+	}
+	await interaction.showModal(buildShoutoutModal(ticketId, interaction.values[0], cfg));
+}
+
+async function followUpPrivately(interaction, content) {
+	await interaction.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
+async function submitShoutout(client, interaction, ticketId, staffId, cfg) {
+	await interaction.deferUpdate();
+	const userId = interaction.user.id;
+	const text = interaction.fields.getTextInputValue('csat_shoutout').trim().slice(0, SHOUTOUT_MAX_LENGTH);
+	if (!text) {
+		await followUpPrivately(interaction, shoutoutText(cfg, 'shoutout_failed'));
+		return;
+	}
+
+	const staff = await loadTicketStaffContext(userId, ticketId);
+	const candidates = await loadShoutoutCandidates(userId, ticketId, staff);
+	if (!candidates.some((member) => member.id === staffId)) {
+		await followUpPrivately(interaction, shoutoutText(cfg, 'shoutout_invalid_staff'));
+		return;
+	}
+
+	if (!(await claimShoutout(userId, ticketId, staffId, text))) {
+		await interaction.editReply(shoutoutSentPayload(interaction, cfg));
+		return;
+	}
+
+	try {
+		const channel = await bots.fetchStaffChannel(client, cfg.shoutout_channel_id);
+		if (!channel) throw new Error(`Shout-out channel ${cfg.shoutout_channel_id} not found`);
+		await channel.send(buildShoutoutPost(client, {
+			player: interaction.user,
+			staffId,
+			text,
+			ticketType: staff.ticket_type,
+			ticketId,
+		}));
+	} catch (e) {
+		await releaseShoutout(userId, ticketId);
+		func.handle_errors(e, client, 'feedback.js', 'Failed to post staff shout-out');
+		await followUpPrivately(interaction, shoutoutText(cfg, 'shoutout_failed'));
+		return;
+	}
+
+	await interaction.editReply(shoutoutSentPayload(interaction, cfg));
+}
+
 async function handleInteraction(client, interaction) {
 	const parsed = parseCsatId(interaction.customId);
 	if (!parsed || !parsed.ticketId) return false;
@@ -397,6 +591,16 @@ async function handleInteraction(client, interaction) {
 		}
 		session.answers.comment = comment || null;
 		await advanceOrFinish(interaction, ticketId, session);
+		return true;
+	}
+
+	if (interaction.isStringSelectMenu() && parsed.action === 'shout') {
+		await showShoutoutModal(interaction, ticketId, cfg);
+		return true;
+	}
+
+	if (interaction.isModalSubmit() && parsed.action === 'shoutmodal') {
+		await submitShoutout(client, interaction, ticketId, parsed.parts[3], cfg);
 		return true;
 	}
 
