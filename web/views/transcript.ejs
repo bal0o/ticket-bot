@@ -9,20 +9,22 @@
 <body class="transcript-page">
   <%- include('partials/navbar', { transcriptFile: filename }) %>
   <% const isFull = filename.endsWith('.full.html'); %>
-  <% const isStaff = filename.endsWith('.staff.html'); %>
+  <% const isStaffView = filename.endsWith('.staff.html'); %>
   <% const base = filename.replace(/\.(?:full|staff)?\.html$/i, ''); %>
+  <% if (showStaffDetails) { %>
   <div class="transcript-toolbar">
     <span class="muted">View:</span>
     <% if (!isFull) { %>
       <a class="btn" href="/transcripts/<%= base %>.full.html">Full</a>
     <% } %>
-    <% if (!isStaff) { %>
+    <% if (!isStaffView) { %>
       <a class="btn" href="/transcripts/<%= base %>.staff.html">Staff</a>
     <% } %>
-    <% if (!filename.endsWith('.html') || isFull || isStaff) { %>
+    <% if (isFull || isStaffView) { %>
       <a class="btn" href="/transcripts/<%= base %>.html">User</a>
     <% } %>
   </div>
+  <% } %>
   <div class="iframe-wrap">
     <iframe src="/transcripts/raw/<%= filename %>" title="Transcript"></iframe>
   </div>
