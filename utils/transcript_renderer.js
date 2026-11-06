@@ -29,33 +29,55 @@ function getTemplate() {
 	return cachedTemplate;
 }
 
-function normalizeRows(rows, options) {
-	const pinnedIds = new Set(rows.filter(r => r.pinned).map(r => r.message_id));
-	let list;
-	if (options.mode === 'user') {
-		list = rows.filter(msg => {
-			if (pinnedIds.has(msg.message_id)) return true;
-			let embeds = [];
-			try {
-				embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
-			} catch (_) {
-				embeds = [];
-			}
-			const firstEmbedTitle = (embeds[0] && embeds[0].title) || '';
-			const helpEmbed = firstEmbedTitle === 'How to Reply';
-			const cheetosEmbed = firstEmbedTitle === 'Cheetos Check';
-			const isThreadNotice = typeof msg.type === 'string' && /thread/i.test(msg.type);
-			const mentionsStaffChat = typeof msg.content === 'string' && /staff-chat/i.test(msg.content);
-			const content = typeof msg.content === 'string' ? msg.content : '';
-			const isInternalError =
-				!!msg.author_is_bot &&
-				/There was an error sending your message\. Please try again\./i.test(content);
-			return !(helpEmbed || cheetosEmbed || isThreadNotice || mentionsStaffChat || isInternalError);
-		});
-	} else {
-		list = rows;
+const STAFF_ONLY_EMBED_TITLES = new Set([
+	'How to Reply',
+	'Cheetos Check',
+	'Application History',
+	'User Info',
+	'Staff Resources'
+]);
+
+function readEmbeds(msg) {
+	try {
+		const embeds = Array.isArray(msg.embeds) ? msg.embeds : JSON.parse(msg.embeds || '[]');
+		return Array.isArray(embeds) ? embeds : [];
+	} catch (_) {
+		return [];
 	}
-	return list.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+}
+
+function isThreadNotice(msg) {
+	const typeNum = Number(msg.type);
+	if (typeNum === 18 || typeNum === 21) return true;
+	return typeof msg.type === 'string' && /thread/i.test(msg.type);
+}
+
+function isStaffChannelNoise(content) {
+	const text = String(content || '');
+	if (/staff-chat/i.test(text)) return true;
+	if (/^!(?!me\b|r\b)\S/.test(text.trim())) return true;
+	if (/This ticket is claimed by/i.test(text)) return true;
+	if (/You do not have permission to use this command/i.test(text)) return true;
+	if (/Could not deliver this message/i.test(text)) return true;
+	if (/Could not DM /i.test(text)) return true;
+	if (/Could not find the user to send the message/i.test(text)) return true;
+	if (/There was an error sending your message/i.test(text)) return true;
+	return false;
+}
+
+function normalizeRows(rows, options) {
+	let list = rows.slice();
+	if (options.mode === 'user') {
+		list = [];
+		for (const msg of rows) {
+			const content = typeof msg.content === 'string' ? msg.content : '';
+			if (isThreadNotice(msg)) continue;
+			if (isStaffChannelNoise(content)) continue;
+			const embeds = readEmbeds(msg).filter((embed) => !STAFF_ONLY_EMBED_TITLES.has((embed && embed.title) || ''));
+			list.push({ ...msg, embeds });
+		}
+	}
+	return list.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 }
 
 function renderEmbed(emb) {
@@ -116,12 +138,14 @@ function renderTranscriptFromRows(rows, options) {
 		const contentStr =
 			typeof msg.content === 'string' ? msg.content : msg.content != null ? String(msg.content) : '';
 
+		const forcedNamed = /^!me\b/i.test(contentStr);
+		const forcedAnon = /^!r\b/i.test(contentStr);
 		const isStaffAnon =
 			opts.mode === 'user' &&
 			!msg.webhook_id &&
 			!isFromTicketOpener &&
-			opts.isAnonTicket &&
-			!/^!me\b/i.test(contentStr);
+			!forcedNamed &&
+			(!!opts.isAnonTicket || forcedAnon);
 
 		const displayName = isStaffAnon
 			? 'Brit Support'

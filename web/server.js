@@ -352,6 +352,14 @@ function transcriptBasename(filename) {
     return String(filename || '').replace(/\.(?:full|staff)?\.html$/i, '').replace(/\.html$/i, '');
 }
 
+function isRestrictedTranscript(filename) {
+    return /\.(?:full|staff)\.html$/i.test(String(filename || ''));
+}
+
+function userTranscriptFilename(filename) {
+    return `${transcriptBasename(filename)}.html`;
+}
+
 /** Ticket number from channel/transcript basename (stable across renames/moves). */
 function extractTicketNumberFromBase(base) {
     let name = transcriptBasename(base);
@@ -414,10 +422,11 @@ async function fetchTranscriptMessages(mode, { channelId, channelName, ticketNum
         );
         return rows || [];
     }
+    const hideStaffThread = ` AND (channel_name IS NULL OR channel_name NOT LIKE 'staff-chat-%')`;
     if (channelId) {
         const [rows] = await db.query(
             `SELECT ${cols} FROM ticket_messages
-             WHERE channel_id = ?
+             WHERE channel_id = ?${hideStaffThread}
              ORDER BY created_at ASC, message_id ASC`,
             [String(channelId)]
         );
@@ -426,7 +435,7 @@ async function fetchTranscriptMessages(mode, { channelId, channelName, ticketNum
     if (channelName) {
         const [rows] = await db.query(
             `SELECT ${cols} FROM ticket_messages
-             WHERE channel_name = ?
+             WHERE channel_name = ?${hideStaffThread}
              ORDER BY created_at ASC, message_id ASC`,
             [String(channelName)]
         );
@@ -497,31 +506,31 @@ async function canViewTranscript(userId, filename, roleFlags) {
     console.log('[auth] roleFlags', { isStaff, isAdmin, roleCount: roleIds.length });
     if (isAdmin) { console.log('[auth] allow: admin', { ms: Date.now() - t0 }); return true; }
     if (userHasOverride(userId, filename)) { console.log('[auth] allow: manual override', { ms: Date.now() - t0 }); return true; }
-    // Fast-path: check the current user's own tickets via MySQL
-    try {
-        const candList = [filename];
-        if (/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.full\.html$/i, '.html'));
-        if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.html$/i, '.full.html'));
-        
-        if (typeof db.getUserTickets === 'function') {
-            const userTickets = await db.getUserTickets(userId, { closedOnly: false, limit: 1000 });
-            for (const t of userTickets) {
-                // Check transcriptFilename directly, or reconstruct URL from transcriptFilename
-                const urlFilename = t.transcriptFilename || '';
-                if (candList.some(c => {
-                    if (!urlFilename) return false;
-                    return urlFilename === c || urlFilename.replace(/\.html$/i, '.full.html') === c || urlFilename.replace(/\.full\.html$/i, '.html') === c;
-                })) {
-                    console.log('[auth] allow: owner via MySQL tickets', { ticketId: t.ticketId, filename: urlFilename, ms: Date.now() - t0 });
-                    return true;
+    const restricted = isRestrictedTranscript(filename);
+    if (!restricted) {
+        try {
+            const candList = [filename];
+            if (/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.full\.html$/i, '.html'));
+            if (/\.html$/i.test(filename) && !/\.full\.html$/i.test(filename)) candList.push(filename.replace(/\.html$/i, '.full.html'));
+
+            if (typeof db.getUserTickets === 'function') {
+                const userTickets = await db.getUserTickets(userId, { closedOnly: false, limit: 1000 });
+                for (const t of userTickets) {
+                    const urlFilename = t.transcriptFilename || '';
+                    if (candList.some(c => {
+                        if (!urlFilename) return false;
+                        return urlFilename === c || urlFilename.replace(/\.html$/i, '.full.html') === c || urlFilename.replace(/\.full\.html$/i, '.html') === c;
+                    })) {
+                        console.log('[auth] allow: owner via MySQL tickets', { ticketId: t.ticketId, filename: urlFilename, ms: Date.now() - t0 });
+                        return true;
+                    }
                 }
             }
-        }
-    } catch (e) { console.log('[auth] own tickets check error', e?.message || e); }
-    const ownerId = await findOwnerByFilename(filename);
-    console.log('[auth] owner lookup', { ownerId });
-    if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup', { ms: Date.now() - t0 }); return true; }
-    // If not owner/admin, see if staff but only with per-type permission; infer type from DB
+        } catch (e) { console.log('[auth] own tickets check error', e?.message || e); }
+        const ownerId = await findOwnerByFilename(filename);
+        console.log('[auth] owner lookup', { ownerId });
+        if (ownerId && ownerId === userId) { console.log('[auth] allow: owner via reverse lookup', { ms: Date.now() - t0 }); return true; }
+    }
     if (isStaff) {
         try {
             const ctx = await findTicketContextByFilename(filename);
@@ -1685,22 +1694,21 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
     filename = filename.replace(/\.html\.(full|staff)\.html$/i, '.$1.html')
                        .replace(/\.html\.html$/i, '.html');
     if (!filename.endsWith('.html')) return res.status(400).send('Invalid transcript');
-    // Non-staff users should be routed to user-friendly transcript if available
-    const { isStaff } = res.locals.roleFlags || { isStaff: false };
+    const roleFlags = res.locals.roleFlags || { isStaff: false, isAdmin: false, roleIds: [] };
     let effectiveFilename = filename;
-    if (!isStaff && filename.endsWith('.full.html')) {
-        const alt = filename.replace(/\.full\.html$/, '.html');
-        const altPath = path.join(TRANSCRIPT_DIR, alt);
-        if (fs.existsSync(altPath)) {
-            effectiveFilename = alt;
+    let allowed = await canViewTranscript(req.user.id, filename, roleFlags);
+    if (!allowed && isRestrictedTranscript(filename)) {
+        const playerFile = userTranscriptFilename(filename);
+        if (playerFile !== filename && await canViewTranscript(req.user.id, playerFile, roleFlags)) {
+            return res.redirect(`/transcripts/${encodeURIComponent(playerFile)}`);
         }
     }
-    console.log('[web] /transcripts view', { userId: req.user.id, filename, effectiveFilename, isStaff });
-    const allowed = await canViewTranscript(req.user.id, effectiveFilename, res.locals.roleFlags);
     if (!allowed) {
-        console.log('[web] /transcripts deny', { userId: req.user.id, filename: effectiveFilename });
+        console.log('[web] /transcripts deny', { userId: req.user.id, filename });
         return res.status(403).render('forbidden', { message: 'You do not have access to this transcript.' });
     }
+    const showStaffDetails = isRestrictedTranscript(effectiveFilename) || await canViewTranscript(req.user.id, `${transcriptBasename(effectiveFilename)}.full.html`, roleFlags);
+    console.log('[web] /transcripts view', { userId: req.user.id, filename, effectiveFilename, showStaffDetails });
     // Try to resolve owner, ticket and IDs for header display
     let ownerId = null;
     let steamId = null;
@@ -1719,7 +1727,13 @@ app.get('/transcripts/:filename', ensureAuth, async (req, res) => {
             }
         }
     } catch (_) {}
-    res.render('transcript', { filename: effectiveFilename, ownerId, steamId, ticketId });
+    res.render('transcript', {
+        filename: effectiveFilename,
+        ownerId: showStaffDetails ? ownerId : null,
+        steamId: showStaffDetails ? steamId : null,
+        ticketId,
+        showStaffDetails
+    });
 });
 
 // Raw stream of transcript (iframe src) - DB-backed with legacy HTML fallback
@@ -1831,7 +1845,7 @@ app.get('/transcripts/raw/:filename', ensureAuth, async (req, res) => {
                 DiscordID: ownerId,
                 isAnonTicket,
                 closeReason,
-                closedBy,
+                closedBy: mode === 'user' ? null : closedBy,
                 responseTime
             });
 
