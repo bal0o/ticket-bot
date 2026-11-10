@@ -1325,8 +1325,9 @@ module.exports = async function (client, interaction) {
 				logger.event('TicketOpen', { step: 'channels-fetched', channels: allChannels.size });
 				
 				// Filter to only text channels with topic matching user ID
-				let candidateChannels = allChannels.filter(x => 
-					x.type === ChannelType.GuildText && 
+				let candidateChannels = allChannels.filter(x =>
+					x &&
+					x.type === ChannelType.GuildText &&
 					x.topic === interaction.member.user.id
 				);
 				
