@@ -53,7 +53,14 @@ async function findSteamIdByDiscord(client, discordId) {
 			}
 			return null;
 		}
-	} catch (_) {
+	} catch (err) {
+		try {
+			require('./logger').error('[linking] Steam lookup failed', {
+				discordId,
+				linkingSystem,
+				message: err?.message || String(err),
+			});
+		} catch (_) {}
 		return null;
 	}
 
