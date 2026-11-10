@@ -197,7 +197,7 @@ module.exports = async function (client, interaction) {
                 
                 const channel = interaction.channel;
                 if (!channel) {
-                    try { await interaction.editReply({ content: 'Could not find the ticket channel.', flags: MessageFlags.Ephemeral }); } catch(_) {}
+                    try { await interaction.editReply({ content: 'Could not find the ticket channel.' }); } catch(_) {}
                     return;
                 }
                 
@@ -220,12 +220,11 @@ module.exports = async function (client, interaction) {
                         content: closed
                             ? 'Your ticket has been closed.'
                             : 'Could not finish closing this ticket. Check bot logs or try /close.',
-                        flags: MessageFlags.Ephemeral
                     };
                     if (interaction.deferred || interaction.replied) {
                         await interaction.editReply(payload);
                     } else {
-                        await interaction.reply(payload);
+                        await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
                     }
                 } catch (e) {
                     // Ignore Unknown Message (10008) or Unknown Interaction (10062)
@@ -234,7 +233,7 @@ module.exports = async function (client, interaction) {
             } catch (error) {
                 func.handle_errors(error, client, 'interactionCreate.js', 'Error handling close ticket modal');
                 try {
-                    await interaction.editReply({ content: 'An error occurred while closing the ticket. Please try again.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'An error occurred while closing the ticket. Please try again.' });
                 } catch (e) {
                     // If we can't edit the reply, the interaction has probably timed out
                 }
@@ -248,20 +247,20 @@ module.exports = async function (client, interaction) {
                 
                 const context = client.replyContext?.get(interaction.user.id);
                 if (!context) {
-                    return interaction.editReply({ content: 'Session expired. Please use /reply again.', flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: 'Session expired. Please use /reply again.' });
                 }
                 
                 const { channelId, userId } = context;
                 const editedResponse = interaction.fields.getTextInputValue('replyText');
                 
                 if (!editedResponse || !editedResponse.trim()) {
-                    return interaction.editReply({ content: 'Response cannot be empty.', flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: 'Response cannot be empty.' });
                 }
                 
                 // Get the channel
                 const channel = await bots.fetchStaffChannel(client, channelId);
                 if (!channel) {
-                    return interaction.editReply({ content: 'Could not find the ticket channel.', flags: MessageFlags.Ephemeral });
+                    return interaction.editReply({ content: 'Could not find the ticket channel.' });
                 }
                 
                 // Get the user for DM
@@ -372,11 +371,11 @@ module.exports = async function (client, interaction) {
                 // Clean up context
                 client.replyContext?.delete(interaction.user.id);
                 
-                await interaction.editReply({ content: 'Response sent successfully!', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Response sent successfully!' });
             } catch (e) {
                 func.handle_errors(e, client, 'interactionCreate.js', 'Error handling replyStandardResponse modal');
                 try {
-                    await interaction.editReply({ content: 'An error occurred while sending the response.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'An error occurred while sending the response.' });
                 } catch (_) {}
                 client.replyContext?.delete(interaction.user.id);
             }
@@ -793,21 +792,21 @@ module.exports = async function (client, interaction) {
             const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
-                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.' });
                 return;
             }
 
             // Get the user ID from the channel topic
             const userId = interaction.message.channel.topic;
             if (!userId || !/^\d{17,19}$/.test(userId)) {
-                await interaction.editReply({ content: 'Could not find the user information. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the user information. Please try again.' });
                 return;
             }
 
             // Get the user
             const user = await bots.fetchDmUser(client, userId);
             if (!user) {
-                await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the user. Please try again.' });
                 return;
             }
 
@@ -826,7 +825,7 @@ module.exports = async function (client, interaction) {
                         )
                 );
 
-            await interaction.editReply({ content: 'Select the new ticket type:', components: [row], flags: MessageFlags.Ephemeral });
+            await interaction.editReply({ content: 'Select the new ticket type:', components: [row] });
         }
 
         if (interaction.customId === 'selectTicketType') {
@@ -838,28 +837,28 @@ module.exports = async function (client, interaction) {
             const LastPin = myPins.find(m => m.embeds && m.embeds[0] && m.embeds[0].footer && typeof m.embeds[0].footer.text === 'string' && /\d{17,19}-\d+\s*\|/.test(m.embeds[0].footer.text)) || myPins.last();
 
             if (!LastPin || !LastPin.embeds[0]) {
-                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the ticket information. Please try again.' });
                 return;
             }
 
             // Get the user ID from the channel topic
             const userId = interaction.message.channel.topic;
             if (!userId || !/^\d{17,19}$/.test(userId)) {
-                await interaction.editReply({ content: 'Could not find the user information. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the user information. Please try again.' });
                 return;
             }
 
             // Get the user
             const user = await bots.fetchDmUser(client, userId);
             if (!user) {
-                await interaction.editReply({ content: 'Could not find the user. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Could not find the user. Please try again.' });
                 return;
             }
 
             // Get the new ticket type configuration
             const found = Object.keys(handlerRaw.options).find(x => x.toLowerCase() == newTicketType.toLowerCase());
             if (!found) {
-                await interaction.editReply({ content: 'Invalid ticket type selected. Please try again.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Invalid ticket type selected. Please try again.' });
                 return;
             }
 
@@ -912,7 +911,7 @@ module.exports = async function (client, interaction) {
             }
 
             if (typeOptions.length === 0) {
-                await interaction.editReply({ content: 'No valid ticket types found with configured categories. Please check options and question files.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'No valid ticket types found with configured categories. Please check options and question files.' });
                 return;
             }
 
@@ -931,7 +930,7 @@ module.exports = async function (client, interaction) {
                         )
                 );
 
-            await interaction.editReply({ content: 'Select the ticket type to move this ticket to:', components: [row], flags: MessageFlags.Ephemeral });
+            await interaction.editReply({ content: 'Select the ticket type to move this ticket to:', components: [row] });
         }
 
         if (interaction.customId === 'selectMoveType') {
@@ -940,11 +939,11 @@ module.exports = async function (client, interaction) {
             const typeKey = interaction.values[0];
             const handlerRaw = require("../content/handler/options.json");
             const opt = handlerRaw.options[typeKey];
-            if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.', flags: MessageFlags.Ephemeral }); return; }
+            if (!opt) { await interaction.editReply({ content: 'Invalid ticket type selected.' }); return; }
             const qf = require(`../content/questions/${opt.question_file}`);
             const categoryId = qf["ticket-category"];
             if (!categoryId) {
-                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.' });
                 return;
             }
             // Try cache first, then fetch if not found
@@ -953,12 +952,12 @@ module.exports = async function (client, interaction) {
                 try {
                     category = await interaction.guild.channels.fetch(categoryId);
                 } catch (_) {
-                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.' });
                     return;
                 }
             }
             if (!category || category.type !== ChannelType.GuildCategory) {
-                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({ content: 'Configured category for that type was not found. Please check configuration.' });
                 return;
             }
 
@@ -1077,8 +1076,7 @@ module.exports = async function (client, interaction) {
                         }).catch(e => func.handle_errors(e, client, 'interactionCreate.js', 'Failed to send delivery warning to ticket channel'));
                         await interaction.editReply({
                             content: `Ticket moved to ${displayType}, but some notifications failed:\n- ${deliveryWarnings.join('\n- ')}`,
-                            components: [],
-                            flags: MessageFlags.Ephemeral
+                            components: []
                         }).catch(() => {});
                     } else {
                         await interaction.deleteReply().catch(() => {});
@@ -1086,7 +1084,7 @@ module.exports = async function (client, interaction) {
                 })
                 .catch(async error => {
                     func.handle_errors(error, client, 'interactionCreate.js', null);
-                    try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.', flags: MessageFlags.Ephemeral }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
+                    try { await interaction.editReply({ content: 'Failed to move the ticket. Please try again.' }); } catch (e) { if (e?.code !== 10008) func.handle_errors(e, client, 'interactionCreate.js', 'editReply failed'); }
                 });
         }
 
@@ -1229,6 +1227,7 @@ module.exports = async function (client, interaction) {
                 if (!interaction.deferred && !interaction.replied) {
                     try {
                         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                        logger.event('TicketOpen', { step: 'deferred', customId: interaction.customId, userId: interaction.user?.id });
                     } catch (err) {
                         // Only log unexpected errors
                         const msg = (err && (err.code || err.message || err.name || "")).toString();
@@ -1239,11 +1238,12 @@ module.exports = async function (client, interaction) {
                 }
 
                 if (client.blocked_users.has(interaction.member.user.id) || client.cooldown.has(interaction.member.user.id)) {
-                    const payload = { content: lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!", flags: MessageFlags.Ephemeral };
+                    const content = lang.user_errors["fast-ticket-creation"] != "" ? lang.user_errors["fast-ticket-creation"] : "You can not make another ticket that quickly!";
+                    logger.event('TicketOpen', { step: 'cooldown', userId: interaction.user?.id });
                     if (interaction.deferred) {
-                        await interaction.editReply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                        await interaction.editReply({ content }).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                     } else {
-                        await interaction.reply(payload).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
+                        await interaction.reply({ content, flags: MessageFlags.Ephemeral }).catch(err => func.handle_errors(err, client, `interactionCreate.js`, null));
                     }
                     return;
                 }
@@ -1260,7 +1260,10 @@ module.exports = async function (client, interaction) {
                 }
             }
 
-            if (validOption == "" || ticketType == "") return;
+            if (validOption == "" || ticketType == "") {
+                logger.event('TicketOpen', { step: 'unknown-button', customId: interaction.customId });
+                return;
+            }
 
             const questionFilesystem = require(`../content/questions/${validOption.question_file}`);
             if (!questionFilesystem) return func.handle_errors(null, client, `interactionCreate.js`, `Missing question file for ${ticketType}. Have you changed the name or directory recently?`)
@@ -1271,12 +1274,15 @@ module.exports = async function (client, interaction) {
 
                 if (!client.config.tokens.Linking_System_API_Key_Or_Secret || client.config.tokens.Linking_System_API_Key_Or_Secret == "") {
                         func.handle_errors(null, client, `interactionCreate.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`)
-                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+                        return interaction.editReply({content: lang.misc["api-access-denied"] != "" ? lang.misc["api-access-denied"] : `The API could not be accessed so we could not verify your accounts. Ticket Cancelled.`}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
                     }
 
+                logger.event('TicketOpen', { step: 'steam-lookup', ticketType, userId: interaction.user?.id });
                 const steamId = await linking.findSteamIdByDiscord(client, interaction.member.user.id);
-                if (!steamId || !String(steamId).startsWith('7656119')) {
-                    return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`, flags: MessageFlags.Ephemeral})
+                const linked = !!(steamId && String(steamId).startsWith('7656119'));
+                logger.event('TicketOpen', { step: 'steam-result', ticketType, linked });
+                if (!linked) {
+                    return interaction.editReply({content: lang.user_errors["verification-needed"] != "" ? lang.user_errors["verification-needed"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`).replace(`{{TICKETTYPE}}`, `\`${ticketType}\``).replace(`{{VERIFYLINK}}`, `${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}`) : `<@${interaction.member.user.id}>, you need to verify to make a '${ticketType}' ticket. ${client.config.linking_settings.verify_link === "" ? "" : `${client.config.linking_settings.verify_link}`}'`})
                 }
                 SteamID = steamId;
 		}
@@ -1285,7 +1291,7 @@ module.exports = async function (client, interaction) {
             if (!questionFilesystem["open-as-ticket"]) {
             let postchannel = await bots.staffClient(client).channels.fetch(questionFilesystem["post-channel"])
             if (!postchannel) {
-                await interaction.editReply({content: lang.misc["generic-error-message"] != "" ? lang.misc["generic-error-message"] : `Sorry we could not perform this action right now, the staff team have been made aware of the issue!`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));	
+                await interaction.editReply({content: lang.misc["generic-error-message"] != "" ? lang.misc["generic-error-message"] : `Sorry we could not perform this action right now, the staff team have been made aware of the issue!`}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));	
 			    return func.handle_errors(null, client, `interactionCreate.js`, `I could not find the designated ticket creation channel for the bot, please make sure the ID is set correctly in your ticket specific config(s).\nVariable: post_channel\nTicketType: ${ticketType}`)
             }
             let maxCount = 0
@@ -1299,7 +1305,7 @@ module.exports = async function (client, interaction) {
             }
 
             if (maxCount >= questionFilesystem["max-active-tickets"]) {
-				let errormsg = await interaction.editReply({content: lang.user_errors["too-many-pending-tickets"] != "" ? lang.user_errors["too-many-pending-tickets"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have too many tickets open, please wait for them to be resolved.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+				let errormsg = await interaction.editReply({content: lang.user_errors["too-many-pending-tickets"] != "" ? lang.user_errors["too-many-pending-tickets"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have too many tickets open, please wait for them to be resolved.`}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 				return;
                 }
             }
@@ -1313,9 +1319,10 @@ module.exports = async function (client, interaction) {
 			const isStaffUser = interaction.member.roles.cache.some(r => adminRoleIds.has(r.id) || staffRoleIds.has(r.id) || (defaultAdminRoleId && r.id === defaultAdminRoleId));
 
 			if (!isStaffUser) {
-				// Get fresh channels (not just cache) to ensure accurate count
+				logger.event('TicketOpen', { step: 'count-open-tickets', userId: interaction.user?.id });
 				const staffGuild = await bots.staffClient(client).guilds.fetch(client.config.channel_ids.staff_guild_id);
 				const allChannels = await staffGuild.channels.fetch();
+				logger.event('TicketOpen', { step: 'channels-fetched', channels: allChannels.size });
 				
 				// Filter to only text channels with topic matching user ID
 				let candidateChannels = allChannels.filter(x => 
@@ -1373,7 +1380,7 @@ module.exports = async function (client, interaction) {
 				}
 				
 				if (openTicketCount >= client.config.bot_settings.max_tickets_per_user) {
-					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`, flags: MessageFlags.Ephemeral}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
+					let errormsg = await interaction.editReply({content: lang.user_errors["ticket-already-open"] != "" ? lang.user_errors["ticket-already-open"].replace(`{{USER}}`, `<@${interaction.member.user.id}>`) : `<@${interaction.member.user.id}>, you have reached your maximum limit of ${client.config.bot_settings.max_tickets_per_user} tickets. Please close some of your existing tickets before creating new ones.`}).catch(e => func.handle_errors(e, client, `interactionCreate.js`, null));
 					return;
 				}
 			}
@@ -1381,6 +1388,7 @@ module.exports = async function (client, interaction) {
 
 			client.cooldown.add(interaction.member.user.id);
 			client.blocked_users.add(interaction.member.user.id);
+			logger.event('TicketOpen', { step: 'start-questions', ticketType, userId: interaction.user?.id });
 			return require("../utils/backbone")(client, interaction, interaction.member.user, ticketType, validOption, questionFilesystem);
 
         }
@@ -1630,5 +1638,10 @@ module.exports = async function (client, interaction) {
         }
     } catch (err) {
         func.handle_errors(err, client, `interactionCreate.js`, null);
+        try {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ content: 'Something went wrong. The error was logged.' });
+            }
+        } catch (_) {}
     }
 }

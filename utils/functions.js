@@ -547,6 +547,17 @@ async function deleteEmptyOverflowCategory(client, guild, parentCategoryId) {
 module.exports.deleteEmptyOverflowCategory = deleteEmptyOverflowCategory;
 
 module.exports.handle_errors = async (err, client, file, message) => {
+	try {
+		const logger = require('./logger');
+		logger.error('[Error]', {
+			file: file || null,
+			note: message || null,
+			name: err?.name || null,
+			code: err?.code ?? null,
+			message: err?.message || null,
+		});
+		if (err?.stack) console.error(err.stack);
+	} catch (_) {}
 
 	let ErrorChannel = client ? bots.findCachedChannel(client, client.config && client.config.channel_ids && client.config.channel_ids.error_channel) : null
 
@@ -557,7 +568,7 @@ module.exports.handle_errors = async (err, client, file, message) => {
     if (err) {
             errorEmbed.setDescription(`\`\`\`${err.stack ? err.stack.substring(0, 4000) : "Unknown"}\`\`\``)
             errorEmbed.addFields({ name: `Name`, value: err.name == null ? "No Name" : err.name.toString() })
-            errorEmbed.addFields({ name: `Message`, value: err.msg == null ? "No Message" : err.msg.toString() })
+            errorEmbed.addFields({ name: `Message`, value: err.message == null ? "No Message" : err.message.toString().slice(0, 1000) })
             errorEmbed.addFields({ name: `Path`, value: err.path == null ? "No Path" : err.path.toString() })
             errorEmbed.addFields({ name: `Code`, value: err.code == null ? "No Code" : err.code.toString() })
             errorEmbed.addFields({ name: `File Name`, value: file ? file : "Unknown" })
@@ -858,7 +869,7 @@ module.exports.sendStaffThreadInfo = async function (client, thread, recepientMe
 async function notifyTicketCreationFailed(interaction, recepientMember) {
     const message = 'Your ticket could not be created. Please try again or contact staff.';
     if (interaction?.editReply) {
-        await interaction.editReply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.editReply({ content: message }).catch(() => {});
     }
     if (recepientMember) {
         await module.exports.sendDMWithRetry(recepientMember, message, { maxAttempts: 2, baseDelayMs: 500 });
@@ -870,7 +881,7 @@ module.exports.openTicket = async (client, interaction, questionFile, recepientM
     if (!recepientMember) {
         func.handle_errors(null, client, 'functions.js', 'openTicket called with null recepientMember');
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.', flags: MessageFlags.Ephemeral });
+            await interaction.editReply({ content: 'Could not find the user who opened this ticket. Please contact staff.' });
         }
         return;
     }
@@ -951,7 +962,7 @@ if (questionFilesystem.server_selection?.enabled) {
     } else if (typesRequireServer.includes(ticketType.toLowerCase())) {
         // If required and missing, notify and do not create ticket
         if (interaction && interaction.editReply) {
-            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.`, flags: MessageFlags.Ephemeral });
+            await interaction.editReply({ content: `You must select a server for this ticket type (${ticketType}). Please try again.` });
         }
         return;
     }

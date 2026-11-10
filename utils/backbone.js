@@ -393,15 +393,17 @@ async function promptForTimezoneIfNeeded(sentMessage, user, defaultTimezone) {
 module.exports = async function (client, interaction, user, ticketType, validOption, questionFilesystem) {
 	try {
 		const staffBot = bots.staffClient(client);
+		logger.event('TicketOpen', { step: 'backbone', ticketType, userId: user?.id });
 		const guild = staffBot.guilds.cache.get(client.config.channel_ids.staff_guild_id);
 		if (!guild) {
+			await interaction.editReply({ content: 'Staff server is not available right now. Ticket cancelled.' }).catch(() => {});
 			return func.handle_errors(null, client, `backbone.js`, `Staff guild not found`);
 		}
 		const ticketChannel = guild.channels.cache.get(questionFilesystem["post-channel"]);
 
 		const dmUser = await bots.fetchDmUser(client, user.id);
 		if (!dmUser) {
-			await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+			await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
 			return;
 		}
 		user = dmUser;
@@ -412,6 +414,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 		// Check verification first if required
 		if (questionFilesystem.needVerified === true) {
 			if (!client.config.tokens.Linking_System_API_Key_Or_Secret || client.config.tokens.Linking_System_API_Key_Or_Secret == "") {
+				await interaction.editReply({ content: 'Account verification is unavailable right now. Ticket cancelled.' }).catch(() => {});
 				return func.handle_errors(null, client, `backbone.js`, `needVerified is enabled and Linking_System_API_Key_Or_Secret is not set in the config so could not access the API!`);
 			}
 
@@ -424,8 +427,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
 								.replace(`{{USER}}`, `<@${user.id}>`)
 								.replace(`{{TICKETTYPE}}`, `\`${ticketType}\``)
 								.replace(`{{VERIFYLINK}}`, client.config.linking_settings.verify_link)
-							: `<@${user.id}>, you need to verify to make a '${ticketType}' ticket. Verify at ${client.config.linking_settings.verify_link}`,
-						flags: func.EPHEMERAL
+							: `<@${user.id}>, you need to verify to make a '${ticketType}' ticket. Verify at ${client.config.linking_settings.verify_link}`
 					});
 				}
 			}
@@ -439,7 +441,7 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             const result = await func.sendDMWithRetry(user, '------------ BRIT SUPPORT -------------', { maxAttempts: 3, baseDelayMs: 500 });
             if (!result.delivered) {
                 errorFound++
-                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
                 try { logger.warn('[TicketDM] Failed initial divider DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
@@ -451,13 +453,13 @@ module.exports = async function (client, interaction, user, ticketType, validOpt
             const result = await func.sendDMWithRetry(user, welcomeText, { maxAttempts: 3, baseDelayMs: 600 });
             if (!result.delivered) {
                 errorFound++
-                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`, flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+                await interaction.editReply({content: `I couldn't send you a DM. Please make sure your DMs are open!`}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
                 try { logger.warn('[TicketDM] Failed welcome DM', { userId: user.id, ticketType }); } catch (_) {}
             }
         }
 
 			if (errorFound == 1) return;
-		await interaction.editReply({content: "I've sent you a DM to continue our conversation!", flags: func.EPHEMERAL}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
+		await interaction.editReply({content: "I've sent you a DM to continue our conversation!"}).catch(e => func.handle_errors(e, client, `backbone.js`, null));
 			
 			var stop = false;
 
